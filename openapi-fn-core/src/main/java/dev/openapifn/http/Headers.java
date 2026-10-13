@@ -47,6 +47,13 @@ public record Headers(Map<String, List<String>> values) {
         return values.containsKey(name.toLowerCase(Locale.ROOT));
     }
 
+    /** A copy without any value of {@code name}. */
+    public Headers without(String name) {
+        var copy = new LinkedHashMap<>(values);
+        copy.remove(name.toLowerCase(Locale.ROOT));
+        return new Headers(copy);
+    }
+
     /** A copy with {@code value} appended to {@code name}. */
     public Headers with(String name, String value) {
         var copy = new LinkedHashMap<>(values);

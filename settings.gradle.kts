@@ -6,4 +6,5 @@ rootProject.name = "openapi-fn"
 
 include(
     "openapi-fn-core",
+    "openapi-fn-spring",
 )

@@ -76,6 +76,11 @@ public final class SchemaRegistry {
         return new Build(builder.registry(), List.copyOf(builder.diagnostics));
     }
 
+    /** A registry without documents, for schema-less processing. */
+    public static SchemaRegistry empty() {
+        return new SchemaRegistry(Map.of(), uri -> Optional.empty(), Map.of(), Map.of(), Map.of(), Dialect.DRAFT_2020_12);
+    }
+
     /** Resolves an absolute reference (already resolved against the referencing schema's base URI). */
     public Optional<Schema> resolve(URI reference) {
         return cache.computeIfAbsent(reference, this::lookup);

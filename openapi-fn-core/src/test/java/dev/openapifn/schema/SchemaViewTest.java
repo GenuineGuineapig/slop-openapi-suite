@@ -174,6 +174,13 @@ class SchemaViewTest {
     }
 
     @Test
+    void emptyRegistry() {
+        var empty = SchemaRegistry.empty();
+        assertThat(empty.documents()).isEmpty();
+        assertThat(empty.resolve(URI.create("mem:/x#/a"))).isEmpty();
+    }
+
+    @Test
     void registryWithOpenApiDocuments() {
         var api = Schemas.api("""
             openapi: 3.1.0

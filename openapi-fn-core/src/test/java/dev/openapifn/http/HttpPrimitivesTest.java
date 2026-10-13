@@ -19,6 +19,8 @@ class HttpPrimitivesTest {
         assertThat(headers.first("missing")).isEmpty();
         assertThat(headers.has("X-ONE")).isTrue();
         assertThat(headers.has("dangling")).isFalse();
+        assertThat(headers.without("ACCEPT").has("accept")).isFalse();
+        assertThat(headers.without("ACCEPT").first("x-one")).contains("1");
         assertThat(new Headers(Map.of("A", List.of("1"))).all("a")).containsExactly("1");
     }
 
