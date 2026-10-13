@@ -1,0 +1,46 @@
+Kind:
+  type: string
+  enum: [cat, dog]
+NewPet:
+  type: object
+  required: [name, kind]
+  properties:
+    name: {type: string, minLength: 1, maxLength: 50}
+    kind: {$ref: '#/Kind'}
+    tags:
+      type: array
+      uniqueItems: true
+      items: {type: string}
+Pet:
+  oneOf:
+    - $ref: '#/Cat'
+    - $ref: '#/Dog'
+  discriminator:
+    propertyName: kind
+    mapping:
+      cat: '#/Cat'
+      dog: '#/Dog'
+Cat:
+  allOf:
+    - $ref: '#/NewPet'
+    - type: object
+      required: [id]
+      properties:
+        id: {type: integer, format: int64}
+        indoor: {type: boolean, default: true}
+Dog:
+  allOf:
+    - $ref: '#/NewPet'
+    - type: object
+      required: [id]
+      properties:
+        id: {type: integer, format: int64}
+        goodBoy: {type: boolean}
+Problem:
+  type: object
+  required: [title, status]
+  properties:
+    type: {type: string, format: uri-reference}
+    title: {type: string}
+    status: {type: integer}
+    detail: {type: string}

@@ -9,4 +9,5 @@ include(
     "openapi-fn-spring",
     "openapi-fn-spring-test",
     "openapi-fn-codegen",
+    "openapi-fn-gradle-plugin",
 )
