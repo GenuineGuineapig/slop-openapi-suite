@@ -548,6 +548,8 @@ public final class SchemaValidator {
                 var valid = evaluations.stream().filter(Evaluation::valid).toList();
                 if (valid.isEmpty()) {
                     out.errors.addAll(combinatorFailure(schema, instance, path, "oneOf", "must match exactly one schema in oneOf", evaluations));
+                } else if (valid.size() > 1 && discriminated(schema, instance, oneOf, evaluations).isPresent()) {
+                    out.annotate(discriminated(schema, instance, oneOf, evaluations).orElseThrow());
                 } else if (valid.size() > 1) {
                     var indices = new ArrayList<Integer>();
                     for (int i = 0; i < evaluations.size(); i++) {
@@ -574,6 +576,26 @@ public final class SchemaValidator {
                     schema.subschema("else").ifPresent(otherwise -> out.absorb(evaluate(otherwise, instance, path)));
                 }
             });
+        }
+
+        /**
+         * The evaluation of the {@code oneOf} member a discriminator selects, if that member is
+         * valid: a discriminator disambiguates structurally overlapping members.
+         */
+        private Optional<Evaluation> discriminated(Schema schema, JsonValue instance, List<Schema> members, List<Evaluation> evaluations) {
+            if (!(instance instanceof JsonObject object)) {
+                return Optional.empty();
+            }
+            return schema.discriminator().flatMap(d -> object.string(d.propertyName()).flatMap(value -> discriminatedSchema(schema, d, value)))
+                .map(target -> registry.deref(target).location())
+                .flatMap(target -> {
+                    for (int i = 0; i < members.size(); i++) {
+                        if (registry.deref(members.get(i)).location().equals(target) && evaluations.get(i).valid()) {
+                            return Optional.of(evaluations.get(i));
+                        }
+                    }
+                    return Optional.empty();
+                });
         }
 
         /**

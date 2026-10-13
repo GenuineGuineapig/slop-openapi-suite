@@ -229,6 +229,14 @@ class SchemaValidatorTest {
                   discriminator: {propertyName: kind}
                 Lion:
                   allOf: [{$ref: '#/components/schemas/Base'}, {required: [roars], properties: {roars: {type: boolean}}}]
+                Wide: {type: object}
+                Narrow: {type: object, properties: {kind: {type: string}}}
+                Strict: {type: object, required: [never]}
+                Overlap:
+                  oneOf: [{$ref: '#/components/schemas/Wide'}, {$ref: '#/components/schemas/Narrow'}, {$ref: '#/components/schemas/Strict'}]
+                  discriminator: {propertyName: kind}
+                OverlapNoDiscriminator:
+                  oneOf: [{$ref: '#/components/schemas/Wide'}, {$ref: '#/components/schemas/Narrow'}]
             """);
         assertThat(check(api, "Pet", "{\"kind\": \"kitty\", \"meows\": true}", Direction.NONE)).isEmpty();
         assertThat(check(api, "Pet", "{\"kind\": \"kitty\"}", Direction.NONE)).containsExactly("/: missing required property 'meows'");
@@ -244,6 +252,13 @@ class SchemaValidatorTest {
         assertThat(check(api, "Base", "{\"kind\": \"Unknown\"}", Direction.NONE)).isEmpty();
         assertThat(check(api, "Base", "[]", Direction.NONE)).containsExactly("/: must be of type object but was array");
         assertThat(check(api, "Lion", "{\"kind\": \"Lion\", \"roars\": true}", Direction.NONE)).isEmpty();
+        assertThat(check(api, "Overlap", "{\"kind\": \"Wide\"}", Direction.NONE)).isEmpty();
+        assertThat(check(api, "Overlap", "{\"kind\": \"Narrow\"}", Direction.NONE)).isEmpty();
+        assertThat(check(api, "Overlap", "{\"kind\": \"other\"}", Direction.NONE)).containsExactly("/: must match exactly one schema in oneOf but matched schemas at [0, 1]");
+        assertThat(check(api, "Overlap", "{\"kind\": \"Strict\"}", Direction.NONE)).containsExactly("/: must match exactly one schema in oneOf but matched schemas at [0, 1]");
+        assertThat(check(api, "Overlap", "{}", Direction.NONE)).containsExactly("/: must match exactly one schema in oneOf but matched schemas at [0, 1]");
+        assertThat(check(api, "OverlapNoDiscriminator", "{\"kind\": \"Wide\"}", Direction.NONE))
+            .containsExactly("/: must match exactly one schema in oneOf but matched schemas at [0, 1]");
     }
 
     @Test
