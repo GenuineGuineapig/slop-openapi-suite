@@ -67,6 +67,7 @@ public final class SchemaValidator {
 
     private final SchemaRegistry registry;
     private final Options options;
+    private final Map<String, Set<String>> restricted = new java.util.concurrent.ConcurrentHashMap<>();
 
     public SchemaValidator(SchemaRegistry registry, Options options) {
         this.registry = registry;
@@ -139,6 +140,7 @@ public final class SchemaValidator {
         private final Direction direction;
         private final Deque<URI> dynamicScope = new ArrayDeque<>();
         private final Set<String> active = new HashSet<>();
+        private final Map<JsonPointer, Set<String>> exemptions = new HashMap<>();
 
         Run(Direction direction) {
             this.direction = direction;
@@ -157,11 +159,18 @@ public final class SchemaValidator {
             if (enteredResource) {
                 dynamicScope.addLast(schema.baseUri());
             }
+            var ownsExemptions = direction != Direction.NONE && instance instanceof JsonObject && !exemptions.containsKey(path);
+            if (ownsExemptions) {
+                exemptions.put(path, restrictedProperties(schema, direction));
+            }
             try {
                 return evaluateKeywords(schema, instance, path);
             } finally {
                 if (enteredResource) {
                     dynamicScope.removeLast();
+                }
+                if (ownsExemptions) {
+                    exemptions.remove(path);
                 }
                 active.remove(key);
             }
@@ -232,26 +241,19 @@ public final class SchemaValidator {
                 return failure(path, schema, "$recursiveRef", "unresolvable reference '" + ref + "'");
             }
             var target = initial.get();
-            if (target.object().bool("$recursiveAnchor").orElse(false)) {
-                for (var resource : dynamicScope) {
-                    var root = registry.resolve(resource);
-                    if (root.isPresent() && root.get().object().bool("$recursiveAnchor").orElse(false)) {
-                        target = root.get();
-                        break;
-                    }
-                }
+            if (recursiveAnchor(target)) {
+                target = dynamicScope.stream().map(registry::resolve).flatMap(Optional::stream).filter(Run::recursiveAnchor)
+                    .findFirst().orElse(target);
             }
             return evaluate(target, instance, path);
         }
 
+        private static boolean recursiveAnchor(Schema schema) {
+            return schema.object().bool("$recursiveAnchor").orElse(false);
+        }
+
         private Optional<Schema> outermostDynamicAnchor(String anchor) {
-            for (var resource : dynamicScope) {
-                var found = registry.dynamicAnchor(resource, anchor);
-                if (found.isPresent()) {
-                    return found;
-                }
-            }
-            return Optional.empty();
+            return dynamicScope.stream().map(resource -> registry.dynamicAnchor(resource, anchor)).flatMap(Optional::stream).findFirst();
         }
 
         // -----------------------------------------------------------------------------------------
@@ -427,7 +429,7 @@ public final class SchemaValidator {
             schema.number("minProperties").filter(min -> size < min.intValue())
                 .ifPresent(min -> out.errors.add(error(path, schema, "minProperties", "must have at least " + min.intValue() + " properties")));
             for (var name : schema.required()) {
-                if (!value.has(name) && !exemptFromRequired(schema, name)) {
+                if (!value.has(name) && !exemptions.getOrDefault(path, Set.of()).contains(name)) {
                     out.errors.add(error(path, schema, "required", "missing required property '" + name + "'"));
                 }
             }
@@ -505,21 +507,6 @@ public final class SchemaValidator {
             } else if (direction == Direction.RESPONSE && resolved.writeOnly()) {
                 out.errors.add(error(path, propertySchema, "writeOnly", "is write-only and must not be returned in a response"));
             }
-        }
-
-        /** Read-only properties are not required in requests, write-only ones not in responses. */
-        private boolean exemptFromRequired(Schema schema, String name) {
-            if (direction == Direction.NONE) {
-                return false;
-            }
-            var candidates = new ArrayList<Schema>();
-            candidates.add(schema);
-            schema.subschemaList("allOf").forEach(member -> candidates.add(registry.deref(member)));
-            return candidates.stream()
-                .map(candidate -> candidate.subschemaMap("properties").get(name))
-                .filter(java.util.Objects::nonNull)
-                .map(registry::deref)
-                .anyMatch(property -> direction == Direction.REQUEST ? property.readOnly() : property.writeOnly());
         }
 
         private void unevaluatedProperties(Schema schema, JsonObject value, JsonPointer path, Collector out) {
@@ -651,6 +638,40 @@ public final class SchemaValidator {
         private URI keywordLocation(Schema schema, String keyword) {
             return URI.create(schema.document() + schema.pointer().child(keyword).toUriFragment());
         }
+    }
+
+    /**
+     * The properties that are read-only (for requests) or write-only (for responses) in
+     * {@code schema} or any schema applied in place with it ({@code $ref}, {@code allOf},
+     * {@code anyOf}, {@code oneOf}, {@code if}/{@code then}/{@code else}, {@code dependentSchemas}).
+     * Such properties are exempt from {@code required} in that direction.
+     */
+    private Set<String> restrictedProperties(Schema schema, Direction direction) {
+        return restricted.computeIfAbsent(direction + " " + schema.location(), key -> {
+            var names = new HashSet<String>();
+            collectRestricted(schema, direction, names, new HashSet<>());
+            return Set.copyOf(names);
+        });
+    }
+
+    private void collectRestricted(Schema schema, Direction direction, Set<String> names, Set<URI> seen) {
+        if (!seen.add(schema.location())) {
+            return;
+        }
+        schema.subschemaMap("properties").forEach((name, property) -> {
+            var resolved = registry.deref(property);
+            if (direction == Direction.REQUEST ? resolved.readOnly() : resolved.writeOnly()) {
+                names.add(name);
+            }
+        });
+        registry.dereference(schema).ifPresent(target -> collectRestricted(target, direction, names, seen));
+        for (var keyword : List.of("allOf", "anyOf", "oneOf")) {
+            schema.subschemaList(keyword).forEach(member -> collectRestricted(member, direction, names, seen));
+        }
+        for (var keyword : List.of("if", "then", "else")) {
+            schema.subschema(keyword).ifPresent(member -> collectRestricted(member, direction, names, seen));
+        }
+        schema.subschemaMap("dependentSchemas").values().forEach(member -> collectRestricted(member, direction, names, seen));
     }
 
     /** All distinct messages of {@code errors} (including nested causes), for diagnostics. */

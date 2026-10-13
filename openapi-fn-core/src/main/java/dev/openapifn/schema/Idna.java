@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 /**
  * Host name validation per RFC 1123 and IDNA2008 (RFC 5890-5893): LDH labels, Punycode A-labels
@@ -35,6 +36,20 @@ final class Idna {
         0x0648, 0x0671, 0x0672, 0x0673, 0x0675, 0x0676, 0x0677, 0x0688, 0x0689, 0x068A, 0x068B, 0x068C, 0x068D, 0x068E, 0x068F, 0x0690,
         0x0691, 0x0692, 0x0693, 0x0694, 0x0695, 0x0696, 0x0697, 0x0698, 0x0699, 0x06C0, 0x06C3, 0x06C4, 0x06C5, 0x06C6, 0x06C7, 0x06C8,
         0x06C9, 0x06CA, 0x06CB, 0x06CD, 0x06CF, 0x06D2, 0x06D3, 0x06D5, 0x06EE, 0x06EF);
+
+    /** Code points removed by the UTS #46 mapping. */
+    private static final int[] IGNORED = {0x00AD, 0x00AD, 0x034F, 0x034F, 0x180B, 0x180F, 0x200B, 0x200B, 0x2060, 0x2060, 0x2064, 0x2064,
+        0xFE00, 0xFE0F, 0xFEFF, 0xFEFF, 0x1BCA0, 0x1BCA3, 0xE0100, 0xE01EF};
+    /** Old Hangul Jamo, which IDNA2008 disallows. */
+    private static final int[] HANGUL_JAMO = {0x1100, 0x11FF, 0xA960, 0xA97F, 0xD7B0, 0xD7FF};
+    private static final Set<Integer> LETTER_DIGIT_TYPES = Set.of((int) Character.LOWERCASE_LETTER, (int) Character.OTHER_LETTER,
+        (int) Character.MODIFIER_LETTER, (int) Character.NON_SPACING_MARK, (int) Character.COMBINING_SPACING_MARK,
+        (int) Character.DECIMAL_DIGIT_NUMBER);
+    private static final Set<Integer> MARK_TYPES = Set.of((int) Character.NON_SPACING_MARK, (int) Character.COMBINING_SPACING_MARK,
+        (int) Character.ENCLOSING_MARK);
+    private static final Set<Character.UnicodeScript> JOINING_SCRIPTS = Set.of(Character.UnicodeScript.ARABIC, Character.UnicodeScript.SYRIAC,
+        Character.UnicodeScript.NKO, Character.UnicodeScript.MONGOLIAN);
+    private static final String DIGITS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
     private Idna() {
     }
@@ -74,8 +89,7 @@ final class Idna {
     }
 
     private static boolean ignored(int cp) {
-        return cp == 0x00AD || cp == 0x034F || (cp >= 0x180B && cp <= 0x180F) || cp == 0x200B || cp == 0x2060 || cp == 0x2064
-            || (cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0xFEFF || (cp >= 0x1BCA0 && cp <= 0x1BCA3) || (cp >= 0xE0100 && cp <= 0xE01EF);
+        return CodePoints.inRanges(cp, IGNORED);
     }
 
     private static Optional<Label> label(String label, boolean unicode) {
@@ -150,25 +164,16 @@ final class Idna {
 
     /** The ZERO WIDTH NON-JOINER regular expression rule of RFC 5892 appendix A.1. */
     private static boolean joinsAround(int[] cps, int index) {
-        int before = index - 1;
-        while (before >= 0 && joiningType(cps[before]) == 'T') {
-            before--;
-        }
-        int after = index + 1;
-        while (after < cps.length && joiningType(cps[after]) == 'T') {
-            after++;
-        }
-        return before >= 0 && after < cps.length && "LD".indexOf(joiningType(cps[before])) >= 0 && "RD".indexOf(joiningType(cps[after])) >= 0;
+        var before = IntStream.range(0, index).map(k -> joiningType(cps[index - 1 - k])).filter(type -> type != 'T').findFirst();
+        var after = IntStream.range(index + 1, cps.length).map(j -> joiningType(cps[j])).filter(type -> type != 'T').findFirst();
+        return "LD".indexOf(before.orElse('U')) >= 0 && "RD".indexOf(after.orElse('U')) >= 0;
     }
 
     private static char joiningType(int cp) {
         if (Character.getType(cp) == Character.NON_SPACING_MARK) {
             return 'T';
         }
-        var script = script(cp);
-        var joining = script == Character.UnicodeScript.ARABIC || script == Character.UnicodeScript.SYRIAC || script == Character.UnicodeScript.NKO
-            || script == Character.UnicodeScript.MONGOLIAN;
-        if (!joining || Character.getType(cp) != Character.OTHER_LETTER) {
+        if (!JOINING_SCRIPTS.contains(script(cp)) || Character.getType(cp) != Character.OTHER_LETTER) {
             return 'U';
         }
         return RIGHT_JOINING.contains(cp) ? 'R' : 'D';
@@ -178,13 +183,7 @@ final class Idna {
         if (PVALID_EXCEPTIONS.contains(cp) || cp == '-') {
             return true;
         }
-        if (DISALLOWED_EXCEPTIONS.contains(cp) || (cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0xA960 && cp <= 0xA97F) || (cp >= 0xD7B0 && cp <= 0xD7FF)) {
-            return false;
-        }
-        var type = Character.getType(cp);
-        var letterDigit = type == Character.LOWERCASE_LETTER || type == Character.OTHER_LETTER || type == Character.MODIFIER_LETTER
-            || type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK || type == Character.DECIMAL_DIGIT_NUMBER;
-        if (!letterDigit) {
+        if (DISALLOWED_EXCEPTIONS.contains(cp) || CodePoints.inRanges(cp, HANGUL_JAMO) || !LETTER_DIGIT_TYPES.contains(Character.getType(cp))) {
             return false;
         }
         var text = Character.toString(cp);
@@ -192,8 +191,7 @@ final class Idna {
     }
 
     private static boolean isMark(int cp) {
-        var type = Character.getType(cp);
-        return type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK;
+        return MARK_TYPES.contains(Character.getType(cp));
     }
 
     private static Character.UnicodeScript script(int cp) {
@@ -281,14 +279,15 @@ final class Idna {
                     return Optional.empty();
                 }
                 i += digit * w;
+                if (i > Integer.MAX_VALUE) {
+                    // w <= i always holds here, so checking i also bounds w
+                    return Optional.empty();
+                }
                 int t = k <= bias ? TMIN : Math.min(k - bias, TMAX);
                 if (digit < t) {
                     break;
                 }
                 w *= BASE - t;
-                if (i > Integer.MAX_VALUE || w > Integer.MAX_VALUE) {
-                    return Optional.empty();
-                }
             }
             bias = adapt((int) (i - oldi), output.size() + 1, oldi == 0);
             n += i / (output.size() + 1);
@@ -367,16 +366,10 @@ final class Idna {
     }
 
     private static int digit(char c) {
-        if (c >= '0' && c <= '9') {
-            return c - '0' + 26;
-        }
-        if (c >= 'a' && c <= 'z') {
-            return c - 'a';
-        }
-        return -1;
+        return DIGITS.indexOf(c);
     }
 
     private static char encodeDigit(int d) {
-        return (char) (d < 26 ? 'a' + d : '0' + d - 26);
+        return DIGITS.charAt(d);
     }
 }

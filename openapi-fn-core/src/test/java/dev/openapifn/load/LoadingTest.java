@@ -145,6 +145,10 @@ class LoadingTest {
         assertThat(Uris.parse("a#b#c").failure().orElseThrow()).startsWith("Invalid URI reference 'a#b#c'");
         assertThat(Uris.resolve(URI.create("file:/a/b.yaml"), "c.yaml#/x")).isEqualTo(Result.ok(URI.create("file:/a/c.yaml#/x")));
         assertThat(Uris.withoutFragment(URI.create("file:/a#x"))).isEqualTo(URI.create("file:/a"));
+        var urn = URI.create("urn:example:a#x");
+        assertThat(Uris.resolve(urn, "#y")).isEqualTo(Result.ok(URI.create("urn:example:a#y")));
+        assertThat(Uris.resolve(urn, "other#y")).isEqualTo(Result.ok(URI.create("other#y")));
+        assertThat(Uris.resolve(urn, "https://x/y")).isEqualTo(Result.ok(URI.create("https://x/y")));
         var plain = URI.create("file:/a");
         assertThat(Uris.withoutFragment(plain)).isSameAs(plain);
         assertThat(Uris.fragment(URI.create("a#%7Bx%7D"))).isEqualTo("{x}");

@@ -223,7 +223,8 @@ public final class SchemaRegistry {
             var object = schema.object();
             var resourceBase = schema.baseUri();
             var identifier = Schema.identifier(object, schema.dialect()).filter(id -> !(schema.dialect().refOverridesSiblings() && object.has("$ref")));
-            identifier.filter(id -> !id.startsWith("#")).ifPresent(id -> resources.putIfAbsent(resourceBase, new Resource(schema.document(), schema.pointer())));
+            identifier.filter(id -> !id.startsWith("#") && Uris.parse(id).isOk())
+                .ifPresent(id -> resources.putIfAbsent(resourceBase, new Resource(schema.document(), schema.pointer())));
             identifier.flatMap(id -> Uris.parse(id).toOptional()).map(Uris::fragment).filter(fragment -> !fragment.isEmpty() && !fragment.startsWith("/"))
                 .ifPresent(anchor -> anchors.putIfAbsent(anchor(resourceBase, anchor), schema));
             object.string("$anchor").ifPresent(anchor -> anchors.putIfAbsent(anchor(resourceBase, anchor), schema));

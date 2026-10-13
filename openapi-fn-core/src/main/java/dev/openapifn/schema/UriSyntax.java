@@ -12,6 +12,10 @@ final class UriSyntax {
     private static final String UNRESERVED = "-._~";
     private static final String SUB_DELIMS = "!$&'()*+,;=";
 
+    private static final int[] UCSCHAR_BMP = {0xA0, 0xD7FF, 0xF900, 0xFDCF, 0xFDF0, 0xFFEF};
+    private static final int[] UCSCHAR_PLANES = {0x10000, 0xDFFFF, 0xE1000, 0xEFFFF};
+    private static final int[] IPRIVATE = {0xE000, 0xF8FF, 0xF0000, 0xFFFFD, 0x100000, 0x10FFFD};
+
     private UriSyntax() {
     }
 
@@ -23,9 +27,7 @@ final class UriSyntax {
      */
     static boolean isValid(String value, boolean absolute, boolean international) {
         var m = COMPONENTS.matcher(value);
-        if (!m.matches()) {
-            return false;
-        }
+        m.matches(); // always matches: every component of the RFC 3986 appendix B expression is optional
         var scheme = m.group(2);
         var authority = m.group(4);
         var path = m.group(5);
@@ -103,17 +105,12 @@ final class UriSyntax {
         return true;
     }
 
+    /** RFC 3987 {@code ucschar}: the BMP ranges, then planes 1 to 13 and 14 (from U+E1000) without the plane-final noncharacters. */
     static boolean ucschar(int cp) {
-        if ((cp >= 0xA0 && cp <= 0xD7FF) || (cp >= 0xF900 && cp <= 0xFDCF) || (cp >= 0xFDF0 && cp <= 0xFFEF)) {
-            return true;
-        }
-        if (cp >= 0xE1000 && cp <= 0xEFFFD) {
-            return true;
-        }
-        return cp >= 0x10000 && cp <= 0xDFFFD && (cp & 0xFFFF) <= 0xFFFD;
+        return CodePoints.inRanges(cp, UCSCHAR_BMP) || (CodePoints.inRanges(cp, UCSCHAR_PLANES) && (cp & 0xFFFF) <= 0xFFFD);
     }
 
     private static boolean iprivate(int cp) {
-        return (cp >= 0xE000 && cp <= 0xF8FF) || (cp >= 0xF0000 && cp <= 0xFFFFD) || (cp >= 0x100000 && cp <= 0x10FFFD);
+        return CodePoints.inRanges(cp, IPRIVATE);
     }
 }
