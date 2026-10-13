@@ -1,0 +1,35 @@
+package dev.openapifn.model;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * An operation together with its context and with path-item level settings already merged in.
+ *
+ * @param path the path template, or the webhook name for webhooks
+ * @param method upper-case HTTP method
+ * @param pathItem the containing path item
+ * @param operation the operation
+ * @param parameters effective parameters (path item parameters overridden by operation parameters)
+ * @param security effective security requirements (operation level, else global)
+ * @param servers effective servers (operation, else path item, else global)
+ * @param webhook whether this operation describes a webhook
+ */
+public record ApiOperation(String path, String method, PathItem pathItem, Operation operation, List<Parameter> parameters,
+                           List<SecurityRequirement> security, List<Server> servers, boolean webhook) {
+
+    public ApiOperation {
+        parameters = List.copyOf(parameters);
+        security = List.copyOf(security);
+        servers = List.copyOf(servers);
+    }
+
+    public Optional<String> operationId() {
+        return operation.operationId();
+    }
+
+    /** A human readable identifier: the operation id, else {@code METHOD path}. */
+    public String displayName() {
+        return operationId().orElse(method + " " + path);
+    }
+}

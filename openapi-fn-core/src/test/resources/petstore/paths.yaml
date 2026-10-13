@@ -1,0 +1,33 @@
+pets:
+  get:
+    operationId: listPets
+    tags: [pets]
+    parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          maximum: 100
+    responses:
+      "200":
+        description: Pets
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: schemas/pet.yaml#/Pet
+      default:
+        $ref: common.yaml#/components/responses/NotFound
+  post:
+    operationId: createPet
+    tags: [pets]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: schemas/pet.yaml#/Pet
+    responses:
+      "201":
+        description: Created

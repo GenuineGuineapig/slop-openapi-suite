@@ -1,0 +1,38 @@
+Pet:
+  type: object
+  required: [id, name, petType]
+  discriminator:
+    propertyName: petType
+    mapping:
+      cat: '#/Cat'
+      dog: '#/Dog'
+  properties:
+    id:
+      type: integer
+      format: int64
+      readOnly: true
+    name:
+      type: string
+    petType:
+      type: string
+    tags:
+      type: array
+      items:
+        $ref: '#/Tag'
+Cat:
+  allOf:
+    - $ref: '#/Pet'
+    - type: object
+      properties:
+        indoor:
+          type: boolean
+Dog:
+  allOf:
+    - $ref: '#/Pet'
+    - type: object
+      properties:
+        barks:
+          type: boolean
+Tag:
+  type: string
+  minLength: 1

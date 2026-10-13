@@ -1,0 +1,67 @@
+openapi: 3.1.0
+info:
+  title: Petstore
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://{env}.example.com/api/v1
+    variables:
+      env:
+        default: prod
+        enum: [prod, staging]
+security:
+  - apiKey: []
+tags:
+  - name: pets
+    description: Everything about pets
+paths:
+  /pets:
+    $ref: paths.yaml#/pets
+  /pets/{petId}:
+    parameters:
+      - $ref: common.yaml#/components/parameters/PetId
+    get:
+      operationId: getPet
+      tags: [pets]
+      responses:
+        "200":
+          description: A pet
+          content:
+            application/json:
+              schema:
+                $ref: schemas/pet.yaml#/Pet
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+          description: No such pet
+    delete:
+      operationId: deletePet
+      tags: [pets]
+      security: []
+      responses:
+        "204":
+          description: Deleted
+webhooks:
+  newPet:
+    post:
+      operationId: newPetWebhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: schemas/pet.yaml#/Pet
+      responses:
+        "200":
+          description: Received
+components:
+  schemas:
+    Pet:
+      $ref: schemas/pet.yaml#/Pet
+    Error:
+      $ref: common.yaml#/components/schemas/Error
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      name: X-API-Key
+      in: header
