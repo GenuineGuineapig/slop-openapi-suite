@@ -86,6 +86,12 @@ public final class SchemaShapes {
         return closure(schema).stream().flatMap(s -> s.subschema("items").stream()).findFirst();
     }
 
+    /** The schema of the array item at {@code index}: its {@code prefixItems} entry, else {@code items}. */
+    public Optional<Schema> item(Schema schema, int index) {
+        return closure(schema).stream().map(s -> s.subschemaList("prefixItems")).filter(prefix -> index < prefix.size()).map(prefix -> prefix.get(index))
+            .findFirst().or(() -> items(schema));
+    }
+
     /** The schema of property {@code name}: declared properties first, then {@code additionalProperties}. */
     public Optional<Schema> property(Schema schema, String name) {
         var members = closure(schema);

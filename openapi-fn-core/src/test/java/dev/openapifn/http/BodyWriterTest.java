@@ -1,6 +1,7 @@
 package dev.openapifn.http;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonValue;
@@ -36,6 +37,8 @@ class BodyWriterTest {
                 customer: {type: object, properties: {name: {type: string}}}
                 script: {type: string, xml: {nodeType: cdata}}
             List: {type: array, items: {type: integer, xml: {name: n}}}
+            Form: {type: object, properties: {n: {type: integer}, tags: {type: array, items: {type: string}}, meta: {type: object}}}
+            Tuple: {type: array, prefixItems: [{type: integer}, {type: boolean}], items: {type: number}}
         """).orElseThrow(d -> new AssertionError(d.toString()));
     private static final SchemaShapes SHAPES = new SchemaShapes(API.schemas());
 
@@ -103,6 +106,44 @@ class BodyWriterTest {
         assertThat(new String(events, StandardCharsets.UTF_8)).isEqualTo("event: e\nid: 3\ndata: line1\ndata: line2\n\n\n");
         var parsed = new BodyParser(SHAPES).parse(events, ContentType.parse("text/event-stream").orElseThrow(), media(Optional.empty()));
         assertThat(parsed.toOptional()).contains(json("[{\"event\":\"e\",\"id\":\"3\",\"data\":\"line1\\nline2\"}]"));
+    }
+
+    @Test
+    void writesMultipartValues() {
+        var writer = new BodyWriter(SHAPES);
+        var parser = new BodyParser(SHAPES);
+        var form = ContentType.parse("multipart/form-data; boundary=b").orElseThrow();
+        var formBody = writer.write(json("{\"n\":1,\"tags\":[\"a\",\"b\"],\"meta\":{\"x\":[1]}}"), form, Optional.empty());
+        assertThat(new String(formBody, StandardCharsets.UTF_8)).startsWith("--b\r\nContent-Disposition: form-data; name=\"n\"\r\nContent-Type: text/plain\r\n\r\n1\r\n")
+            .endsWith("--b--\r\n");
+        assertThat(parser.parse(formBody, form, media(Optional.of(schema("Form")))).toOptional())
+            .contains(json("{\"n\":1,\"tags\":[\"a\",\"b\"],\"meta\":{\"x\":[1]}}"));
+        assertThat(parser.parse(writer.write(json("[1]"), form, Optional.empty()), form, media(Optional.empty())).toOptional()).contains(json("{}"));
+
+        var mixed = ContentType.parse("multipart/mixed; boundary=m").orElseThrow();
+        var tuple = writer.write(json("[1,true,2.5,{\"a\":1},[2]]"), mixed, Optional.empty());
+        assertThat(parser.parse(tuple, mixed, media(Optional.of(schema("Tuple")))).toOptional()).contains(json("[1,true,2.5,{\"a\":1},[2]]"));
+        var encoded = new MediaType(Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), Map.of(),
+            List.of(new dev.openapifn.model.Encoding(Optional.of("application/json"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
+                List.of(), Optional.empty(), Map.of())),
+            Optional.of(new dev.openapifn.model.Encoding(Optional.of("text/csv"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
+                List.of(), Optional.empty(), Map.of())), Map.of());
+        var unlabelled = "--m\r\n\r\n[1]\r\n--m\n\na,b\r\n--m--\r\n";
+        assertThat(parser.parse(unlabelled.getBytes(StandardCharsets.UTF_8), mixed, encoded).toOptional()).contains(json("[[1],\"a,b\"]"));
+        var items = new MediaType(Optional.empty(), Optional.of(schema("List").subschema("items").orElseThrow()), Optional.empty(), Map.of(), Map.of(),
+            List.of(), Optional.empty(), Map.of());
+        assertThat(parser.parse(writer.write(json("7"), mixed, Optional.empty()), mixed, items).toOptional()).contains(json("[7]"));
+
+        assertThatThrownBy(() -> writer.write(json("[]"), ContentType.parse("multipart/mixed").orElseThrow(), Optional.empty()))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("multipart content type has no boundary");
+        var positional = BodyWriter.multipart("related", List.of(BodyWriter.part("image/png", new byte[] {1}),
+            BodyWriter.part(Optional.empty(), json("\"x\""))));
+        assertThat(positional.contentType()).startsWith("multipart/related; boundary=openapi-fn-");
+        assertThat(new String(positional.body(), StandardCharsets.UTF_8)).contains("Content-Type: image/png", "Content-Type: text/plain\r\n\r\nx\r\n");
+        assertThat(SHAPES.item(schema("Tuple"), 1).flatMap(Schema::format)).isEmpty();
+        assertThat(SHAPES.item(schema("Tuple"), 1).map(s -> s.types())).contains(java.util.Set.of("boolean"));
+        assertThat(SHAPES.item(schema("Tuple"), 5).map(s -> s.types())).contains(java.util.Set.of("number"));
+        assertThat(SHAPES.item(schema("Form"), 0)).isEmpty();
     }
 
     @Test

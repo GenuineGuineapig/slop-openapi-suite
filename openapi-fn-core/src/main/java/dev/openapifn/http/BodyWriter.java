@@ -27,10 +27,16 @@ public final class BodyWriter {
 
     /**
      * Serializes {@code value} as {@code type}. Arrays become sequences for the sequential media
-     * types; objects become forms for {@code application/x-www-form-urlencoded}; XML is written
-     * guided by {@code schema}; primitives become text for other types.
+     * types; objects become forms for {@code application/x-www-form-urlencoded} and named parts for
+     * {@code multipart/form-data}; arrays become positional parts for other multipart types (which
+     * need a {@code boundary} parameter); XML is written guided by {@code schema}; primitives
+     * become text for other types.
      */
     public byte[] write(JsonValue value, ContentType type, Optional<Schema> schema) {
+        if (type.type().equals("multipart")) {
+            var boundary = type.parameter("boundary").orElseThrow(() -> new IllegalArgumentException("multipart content type has no boundary"));
+            return encode(boundary, type.subtype().equals("form-data") ? formParts(value) : positionalParts(value));
+        }
         var essence = type.essence();
         var items = value instanceof JsonArray array ? array.values() : List.of(value);
         var text = switch (essence) {
@@ -80,7 +86,21 @@ public final class BodyWriter {
 
     /** Encodes parts as {@code multipart/form-data} with a random boundary. */
     public static MultipartBody multipart(List<Multipart.Part> parts) {
-        var boundary = "openapi-fn-" + UUID.randomUUID();
+        return multipart("form-data", parts);
+    }
+
+    /** Encodes parts as {@code multipart/<subtype>} with a random boundary. */
+    public static MultipartBody multipart(String subtype, List<Multipart.Part> parts) {
+        var boundary = boundary();
+        return new MultipartBody(encode(boundary, parts), "multipart/" + subtype + "; boundary=" + boundary);
+    }
+
+    /** A random multipart boundary. */
+    public static String boundary() {
+        return "openapi-fn-" + UUID.randomUUID();
+    }
+
+    private static byte[] encode(String boundary, List<Multipart.Part> parts) {
         var out = new ByteArrayOutputStream();
         for (var part : parts) {
             var head = new StringBuilder("--").append(boundary).append("\r\n");
@@ -90,7 +110,36 @@ public final class BodyWriter {
             out.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
         }
         out.writeBytes(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-        return new MultipartBody(out.toByteArray(), "multipart/form-data; boundary=" + boundary);
+        return out.toByteArray();
+    }
+
+    /** Named parts of an object, one per array item. */
+    private static List<Multipart.Part> formParts(JsonValue value) {
+        var parts = new ArrayList<Multipart.Part>();
+        value.asObject().orElse(JsonObject.EMPTY).members().forEach((name, member) -> {
+            var values = member instanceof JsonArray array ? array.values() : List.of(member);
+            values.forEach(item -> parts.add(part(Optional.of(name), item)));
+        });
+        return parts;
+    }
+
+    /** Positional parts of an array (or of a single value). */
+    private static List<Multipart.Part> positionalParts(JsonValue value) {
+        var items = value instanceof JsonArray array ? array.values() : List.of(value);
+        return items.stream().map(item -> part(Optional.empty(), item)).toList();
+    }
+
+    /** A value as a part, named for {@code multipart/form-data}: objects and arrays as JSON, other values as text. */
+    public static Multipart.Part part(Optional<String> name, JsonValue value) {
+        var structured = value instanceof JsonObject || value instanceof JsonArray;
+        var contentType = structured ? "application/json" : "text/plain";
+        var content = (structured ? JsonWriter.compact(value) : ParameterSerializer.text(value)).getBytes(StandardCharsets.UTF_8);
+        return name.map(n -> part(n, Optional.empty(), Optional.of(contentType), content)).orElseGet(() -> part(contentType, content));
+    }
+
+    /** An unnamed part, e.g. of {@code multipart/mixed}. */
+    public static Multipart.Part part(String contentType, byte[] content) {
+        return new Multipart.Part(Headers.of("Content-Type", contentType), content);
     }
 
     /** A part with {@code Content-Disposition: form-data} and optional file name and content type. */

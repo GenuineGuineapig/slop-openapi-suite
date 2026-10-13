@@ -1,0 +1,179 @@
+openapi: 3.2.0
+info:
+  title: Variants
+  version: 1.0.0
+  description: Request and response shapes for code generation (no servers, so the base path is '/').
+paths:
+  /files/{name}:
+    put:
+      operationId: putFile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+          examples:
+            report: {value: report}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data: {schema: {}}
+      responses:
+        '404': {description: missing}
+        '200': {description: stored}
+  /points:
+    post:
+      operationId: postPoints
+      requestBody:
+        content:
+          multipart/form-data: {schema: {type: object, additionalProperties: {$ref: '#/components/schemas/Point'}}}
+      responses:
+        default: {description: anything}
+  /labels:
+    post:
+      operationId: postLabels
+      requestBody:
+        content:
+          multipart/form-data: {schema: {type: object, additionalProperties: {type: string}}}
+      responses:
+        2XX: {description: ok}
+  /form:
+    post:
+      operationId: postForm
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [color]
+              properties:
+                color: {$ref: '#/components/schemas/Color'}
+                colors: {type: array, items: {$ref: '#/components/schemas/Color'}}
+                attributes: {type: object, additionalProperties: {type: string}}
+                matrix: {type: array, items: {type: array, items: {type: integer}}}
+                raw: {type: string, format: byte}
+                points: {type: array, items: {$ref: '#/components/schemas/Point'}}
+      responses:
+        '204': {description: ok}
+  /mixed:
+    post:
+      operationId: postMixed
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            itemSchema: {$ref: '#/components/schemas/Point'}
+      responses:
+        '200':
+          description: echoed
+          content:
+            multipart/mixed:
+              schema: {type: array, prefixItems: [{type: string}], items: {$ref: '#/components/schemas/Point'}}
+  /form-query:
+    get:
+      operationId: formQuery
+      parameters:
+        - name: q
+          in: querystring
+          required: true
+          content:
+            application/x-www-form-urlencoded:
+              schema: {type: object, required: [a], properties: {a: {type: string}, b: {type: integer}}}
+      responses:
+        '204': {description: ok}
+  /json-query:
+    get:
+      operationId: jsonQuery
+      parameters:
+        - name: q
+          in: querystring
+          required: true
+          content:
+            application/json:
+              schema: {type: object, required: [a], properties: {a: {type: string}}}
+      responses:
+        '204': {description: ok}
+  /lines:
+    post:
+      operationId: postLines
+      requestBody:
+        required: true
+        content:
+          application/jsonl: {itemSchema: {$ref: '#/components/schemas/Point'}}
+      responses:
+        '204': {description: ok}
+  /coded:
+    post:
+      operationId: postCoded
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: string, pattern: '^[0-9]{3}$'}
+            example: '123'
+      responses:
+        '204': {description: ok}
+  /anything:
+    post:
+      operationId: postAnything
+      requestBody:
+        content:
+          '*/*': {schema: {type: string, format: binary}}
+      responses:
+        '200':
+          description: text
+          content:
+            text/plain: {schema: {type: string}}
+  /octets:
+    get:
+      operationId: getOctets
+      responses:
+        '200':
+          description: bytes
+          content:
+            application/octet-stream: {schema: {type: string}}
+  /nullable:
+    post:
+      operationId: postNullable
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: [object, 'null'], properties: {a: {type: string}}}}
+      responses:
+        '204': {description: ok}
+  /coded-header:
+    get:
+      operationId: codedHeader
+      responses:
+        '200':
+          description: a header no example satisfies
+          headers:
+            X-Code: {required: true, schema: {type: string, pattern: '^[0-9]+$'}}
+  /coded-query:
+    get:
+      operationId: codedQuery
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, pattern: '^[0-9]+$'}}
+      responses:
+        '204': {description: ok}
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - {name: term, in: query, required: true, schema: {type: string, minLength: 2}}
+        - {name: page, in: query, schema: {type: integer}}
+      responses:
+        '204': {description: ok}
+  /coded-path/{id}:
+    get:
+      operationId: codedPath
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: '^[0-9]+$'}}
+        - {name: q, in: query, required: true, schema: {type: string}}
+      responses:
+        '204': {description: ok}
+components:
+  schemas:
+    Point: {type: object, required: [x], properties: {x: {type: integer}, y: {type: integer}}}
+    Color: {type: string, enum: [red, green]}

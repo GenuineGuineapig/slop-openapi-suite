@@ -184,6 +184,13 @@ class RuntimeTest {
         var undescribed = RUNTIME.respond(request, "getItem", new Item(299, Map.of("a", 1), Map.of(), null));
         assertThat(undescribed.getHeaders().getContentType()).hasToString("application/json");
         assertThat(RUNTIME.respond(request, "getItem", new Item(204, null, Map.of(), null)).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        var mixed = RUNTIME.respond(request, "getItem", new Item(200, List.of(Map.of("a", 1), "x"), Map.of(), "multipart/mixed"));
+        var boundary = mixed.getHeaders().getContentType().getParameter("boundary");
+        assertThat(boundary).startsWith("openapi-fn-");
+        assertThat(new String((byte[]) mixed.getBody(), StandardCharsets.UTF_8)).isEqualTo("--" + boundary + "\r\nContent-Type: application/json\r\n\r\n"
+            + "{\"a\":1}\r\n--" + boundary + "\r\nContent-Type: text/plain\r\n\r\nx\r\n--" + boundary + "--\r\n");
+        var bounded = RUNTIME.respond(request, "getItem", new Item(200, List.of("y"), Map.of(), "multipart/mixed; boundary=fixed"));
+        assertThat(bounded.getHeaders().getContentType()).hasToString("multipart/mixed;boundary=fixed");
         assertThatThrownBy(() -> RUNTIME.respond(request, "getItem", new Item(200, "x", Map.of(), "nonsense")))
             .isInstanceOf(IllegalArgumentException.class).hasMessage("Invalid media type 'nonsense'");
         ApiResponse minimal = () -> 202;

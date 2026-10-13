@@ -1,0 +1,275 @@
+openapi: 3.2.0
+info: {title: Edge, version: 1.0.0}
+servers: [{url: v2/}]
+paths:
+  /things/{id}:
+    get:
+      operationId: getThing
+      security: [{basic: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: id, in: query, schema: {type: integer, maximum: 5000000000}}
+        - {name: X-Opt, in: header, required: true, schema: {type: [string, 'null']}}
+        - {name: meta, in: query, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200':
+          description: thing
+          headers:
+            Content-Type: {schema: {type: string}}
+            X-Rate: {required: true, schema: {type: [integer, 'null']}}
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/GetThingResponse'}}
+        5XX:
+          description: server error
+        default:
+          summary: Fallback with only a summary
+    additionalOperations:
+      LINK:
+        operationId: linkThing
+        security: [{bearer: []}]
+        parameters:
+          - {name: id, in: path, required: true, schema: {type: string}}
+        responses:
+          '204': {description: linked}
+      UNLINK:
+        operationId: unlinkThing
+        security: [{oauth: []}]
+        parameters:
+          - {name: id, in: path, required: true, schema: {type: string}}
+        responses:
+          '204': {description: unlinked}
+  /text:
+    post:
+      operationId: postText
+      security: [{oidc: []}]
+      requestBody:
+        required: true
+        content:
+          text/plain: {}
+      responses:
+        '200':
+          description: xml
+          content:
+            text/xml: {schema: {$ref: '#/components/schemas/Defaults'}}
+  /binary:
+    put:
+      operationId: putBinary
+      security: [{queryKey: []}]
+      requestBody:
+        content:
+          application/octet-stream: {}
+      responses:
+        2XX:
+          description: echo
+          content:
+            image/*: {schema: {type: string, format: binary}}
+  /forms:
+    post:
+      operationId: postForm
+      security: [{cookieKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties: {name: {type: string}, count: {type: integer}}
+      responses:
+        '200': {description: ok, content: {text/plain: {schema: {type: integer}}}}
+  /maps:
+    post:
+      operationId: postMap
+      security: [{mtls: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data: {schema: {type: object, required: [x], properties: {x: {type: string}}, additionalProperties: true}}
+      responses:
+        '204': {description: ok}
+  /upload:
+    post:
+      operationId: upload
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, notes]
+              properties:
+                file: {type: string, format: binary}
+                files: {type: array, items: {type: string, format: binary}}
+                tags: {type: array, items: {type: string}}
+                doc: {$ref: '#/components/schemas/Address'}
+                notes: {type: string}
+                size: {type: integer}
+            encoding:
+              notes: {contentType: text/csv}
+      responses:
+        '204': {description: ok}
+  /events:
+    get:
+      security: []
+      parameters:
+        - {name: q, in: querystring, content: {application/json: {schema: {type: object, properties: {from: {type: integer}}, required: [from]}}}}
+      responses:
+        '200':
+          description: events
+          content:
+            text/event-stream:
+              itemSchema: {type: object, required: [data], properties: {data: {type: string}, id: {type: string}}}
+  /search:
+    get:
+      operationId: search
+      security: []
+      parameters:
+        - {name: s, in: querystring, required: true, content: {application/x-www-form-urlencoded: {schema: {type: object, properties: {term: {type: string}}}}}}
+        - {name: token, in: cookie, required: true, schema: {type: string}}
+      responses:
+        '200': {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Everything'}}}}
+  /patterned:
+    get:
+      operationId: patterned
+      security: []
+      parameters:
+        - {name: code, in: query, required: true, schema: {type: string, pattern: '^[A-Z]{3}$'}}
+      responses:
+        '200': {description: ok, content: {application/json: {schema: {type: string, pattern: '^[0-9]{3}$'}}}}
+  /empty:
+    get:
+      operationId: empty
+      security: []
+      responses:
+        '204': {description: none}
+components:
+  schemas:
+    GetThingResponse:
+      type: object
+      properties:
+        inner: {type: object, properties: {a: {type: string}}}
+        tree: {$ref: '#/components/schemas/Tree'}
+        name: {$ref: '#/components/schemas/NullableName'}
+        aliased: {allOf: [{$ref: '#/components/schemas/Address'}], description: aliased}
+        maybe: {anyOf: [{$ref: '#/components/schemas/Address'}, {type: 'null'}]}
+        file: {$ref: 'address.yaml'}
+        numbered: {$ref: '#/components/schemas/Combo/allOf/0'}
+    Deprecated: {type: object, deprecated: true, properties: {a: {type: string}}}
+    Defaults:
+      type: object
+      xml: {name: defaults}
+      properties:
+        i: {type: integer, format: int32, default: 1}
+        l: {type: integer, format: int64, default: 2}
+        d: {type: number, format: double, default: 1.5}
+        f: {type: number, format: float, default: 2.5}
+        b: {type: number, default: 3.25}
+        flag: {type: boolean, default: true}
+        e: {$ref: '#/components/schemas/Color', default: red}
+        s: {type: string, default: text}
+        date: {type: string, format: date, default: '2024-01-01'}
+        wrong: {type: integer, default: nope}
+        frac: {type: integer, default: 1.5}
+        unknownEnum: {$ref: '#/components/schemas/Color', default: purple}
+        n32: {type: number, format: int32}
+        n64: {type: number, format: int64}
+        t: {type: string, format: time, default: '10:15:00Z'}
+        dur: {type: string, format: duration, default: PT1H}
+        ref: {type: string, format: uri-reference, default: /a/b}
+        id: {type: string, format: uuid, default: 0f8fad5b-d9cb-469f-a165-70867728950e}
+        at: {type: string, format: date-time, default: '2024-01-01T10:00:00Z'}
+        raw: {type: string, format: byte, default: aGk=}
+        badDate: {type: string, format: date, default: nope}
+        badRaw: {type: string, format: byte, default: '%%'}
+        anything: {type: [boolean, string], default: true}
+        longFrac: {type: integer, format: int64, default: 1.5}
+        w: {type: string, writeOnly: true}
+    Color: {type: string, enum: [red, green, '']}
+    Big: {enum: [1, 5000000000]}
+    Small: {enum: [1, 2, null]}
+    Mixed: {enum: [a, 1]}
+    WriteOnly: {type: object, required: [secret, id], properties: {secret: {type: string, writeOnly: true}, id: {type: integer}}}
+    EmptyParent: {type: object, discriminator: {propertyName: kind}}
+    EmptyChild: {allOf: [{$ref: '#/components/schemas/EmptyParent'}, {properties: {kind: {type: string}}}]}
+    Animal: {type: object, discriminator: {propertyName: kind}, properties: {kind: {type: string}, name: {type: string}}}
+    Bird: {allOf: [{$ref: '#/components/schemas/Animal'}, {required: [name]}]}
+    Fish: {allOf: [{$ref: '#/components/schemas/Animal'}, {properties: {fins: {type: integer}}}]}
+    Tree: {type: array, items: {$ref: '#/components/schemas/Tree'}}
+    NullableName: {oneOf: [{type: string}, {type: 'null'}]}
+    Dynamic: {$dynamicAnchor: meta, type: object, properties: {child: {$dynamicRef: '#meta'}}}
+    Item:
+      type: object
+      properties:
+        item: {type: object, properties: {x: {type: string}}}
+        a_b: {type: object, properties: {x: {type: string}}}
+        aB: {type: object, properties: {y: {type: string}}}
+    Shapes:
+      type: object
+      properties:
+        requiredOnly: {required: [a]}
+        patterned: {patternProperties: {'^x': {type: string}}}
+        tuple: {prefixItems: [{type: string}]}
+        multi: {type: [string, integer]}
+        anything: {}
+        closed: {type: object, additionalProperties: false, properties: {a: {type: string}}}
+        open: {type: object, additionalProperties: true, properties: {a: {type: string}}}
+        typedExtra: {type: object, additionalProperties: {type: integer}, properties: {a: {type: string}}}
+        anyMap: {type: object}
+        big: {type: integer, minimum: -5000000000}
+        uniqueSet: {type: array, uniqueItems: true, items: {type: string}}
+        untypedArray: {items: {type: string}}
+    Union:
+      oneOf:
+        - {type: string}
+        - {type: integer}
+        - {type: array, items: {type: string}}
+        - {type: string, format: byte}
+        - {const: fixed}
+        - {enum: [e1]}
+        - {items: {type: integer}}
+        - {allOf: [{type: object, properties: {p: {type: string}}}]}
+        - {oneOf: [{type: boolean}]}
+        - {required: [constraintOnly]}
+        - {$ref: '#/components/schemas/Address'}
+        - {$ref: '#/components/schemas/Address'}
+        - {type: 'null'}
+    Shape:
+      oneOf: [{$ref: '#/components/schemas/Circle'}, {$ref: '#/components/schemas/Square'}]
+      discriminator: {propertyName: type}
+    Circle: {type: object, required: [type], properties: {type: {type: string}, r: {type: number}}}
+    Square: {type: object, required: [type], properties: {type: {type: string}, side: {type: number}}}
+    Hybrid:
+      type: object
+      discriminator: {propertyName: kind}
+      oneOf: [{$ref: '#/components/schemas/Circle'}]
+      properties: {kind: {type: string}}
+    HybridChild: {allOf: [{$ref: '#/components/schemas/Hybrid'}]}
+    A: {type: object, properties: {a: {type: string}}}
+    B: {allOf: [{$ref: '#/components/schemas/A'}, {properties: {b: {type: string}}}]}
+    C: {allOf: [{$ref: '#/components/schemas/A'}, {properties: {c: {type: string}}}]}
+    Diamond: {allOf: [{$ref: '#/components/schemas/B'}, {$ref: '#/components/schemas/C'}]}
+    Combo: {allOf: [{type: object, properties: {z: {type: string}}}]}
+    Address: {type: object, required: [street], properties: {street: {type: string}, city: {type: string}}}
+    Everything:
+      type: object
+      properties:
+        shapes: {$ref: '#/components/schemas/Shapes'}
+        union: {$ref: '#/components/schemas/Union'}
+        shape: {$ref: '#/components/schemas/Shape'}
+        item: {$ref: '#/components/schemas/Item'}
+        dynamic: {$ref: '#/components/schemas/Dynamic'}
+        diamond: {$ref: '#/components/schemas/Diamond'}
+        big: {$ref: '#/components/schemas/Big'}
+        small: {$ref: '#/components/schemas/Small'}
+        mixed: {$ref: '#/components/schemas/Mixed'}
+        writeOnly: {$ref: '#/components/schemas/WriteOnly'}
+        hybrid: {$ref: '#/components/schemas/Hybrid'}
+  securitySchemes:
+    basic: {type: http, scheme: basic}
+    bearer: {type: http, scheme: bearer}
+    oauth: {type: oauth2, flows: {clientCredentials: {tokenUrl: https://t, scopes: {}}}}
+    oidc: {type: openIdConnect, openIdConnectUrl: https://o}
+    queryKey: {type: apiKey, name: key, in: query}
+    cookieKey: {type: apiKey, name: ck, in: cookie}
+    mtls: {type: mutualTLS}

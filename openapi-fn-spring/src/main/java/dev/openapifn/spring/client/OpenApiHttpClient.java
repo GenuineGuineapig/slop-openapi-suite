@@ -14,6 +14,7 @@ import dev.openapifn.spring.JacksonJson;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -113,21 +114,33 @@ public final class OpenApiHttpClient {
         return URI.create(baseUrl + path + (queryText.isEmpty() ? "" : "?" + queryText));
     }
 
-    /** The encoded body and its content type (multipart bodies get a boundary). */
+    /**
+     * The encoded body and its content type. Multipart bodies get a boundary: lists of parts become
+     * {@code multipart/form-data}, other lists positional parts, and other values are encoded from
+     * their JSON. Files are sent with their own content type when the declared one is a range or
+     * a multipart type (whose boundary the file content carries).
+     */
     BodyWriter.MultipartBody encode(ClientCall.Body body) {
         var type = ContentType.parse(body.contentType()).orElseThrow(() -> new IllegalArgumentException("Invalid content type " + body.contentType()));
+        var multipart = type.type().equals("multipart");
         return switch (body.value()) {
-            case FilePart file -> new BodyWriter.MultipartBody(file.content(), body.contentType());
+            case FilePart file -> new BodyWriter.MultipartBody(file.content(), multipart || body.contentType().contains("*") ? file.contentType()
+                : body.contentType());
             case byte[] bytes -> new BodyWriter.MultipartBody(bytes, body.contentType());
             case List<?> parts when type.essence().equals("multipart/form-data") -> BodyWriter.multipart(parts.stream()
                 .flatMap(part -> parts((ClientCall.Part) part).stream()).toList());
+            case List<?> items when multipart -> BodyWriter.multipart(type.subtype(), items.stream().map(this::item).toList());
+            case Object value when multipart -> {
+                var bounded = body.contentType() + "; boundary=" + BodyWriter.boundary();
+                yield new BodyWriter.MultipartBody(WRITER.write(toJson(value), ContentType.parse(bounded).orElseThrow(), Optional.empty()), bounded);
+            }
             default -> new BodyWriter.MultipartBody(type.isJson() ? mapper.writeValueAsBytes(body.value())
                 : WRITER.write(toJson(body.value()), type, Optional.empty()), body.contentType());
         };
     }
 
     private List<Multipart.Part> parts(ClientCall.Part part) {
-        var values = part.value() instanceof List<?> list ? list : List.of(part.value());
+        List<?> values = part.value() instanceof Collection<?> collection ? new ArrayList<>(collection) : List.of(part.value());
         var result = new ArrayList<Multipart.Part>();
         for (var value : values) {
             if (value instanceof FilePart file) {
@@ -139,6 +152,11 @@ public final class OpenApiHttpClient {
             }
         }
         return result;
+    }
+
+    /** A positional part (e.g. of {@code multipart/mixed}): files as they are, other values as JSON or text. */
+    private Multipart.Part item(Object value) {
+        return value instanceof FilePart file ? BodyWriter.part(file.contentType(), file.content()) : BodyWriter.part(Optional.empty(), toJson(value));
     }
 
     private JsonValue toJson(Object value) {

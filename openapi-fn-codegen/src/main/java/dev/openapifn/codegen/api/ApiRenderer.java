@@ -5,6 +5,7 @@ import dev.openapifn.codegen.java.Names;
 import dev.openapifn.codegen.java.Source;
 import dev.openapifn.codegen.java.TypeRef;
 import dev.openapifn.codegen.java.TypeRef.ClassName;
+import dev.openapifn.codegen.model.ModelDef;
 import dev.openapifn.codegen.model.ModelDef.Property;
 import dev.openapifn.codegen.model.ModelDef.RecordDef;
 import dev.openapifn.codegen.model.ModelRenderer;
@@ -18,7 +19,6 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -122,8 +122,7 @@ public final class ApiRenderer {
     static List<Property> components(OperationModel.VariantModel variant) {
         var components = new ArrayList<Property>();
         if (!variant.fixedStatus()) {
-            components.add(new Property("status", "status", new TypeRef.Primitive("int"), true, false, variant.body().map(Property::schema)
-                .orElseGet(() -> variant.headers().values().stream().map(Property::schema).findFirst().orElse(anySchema()))));
+            components.add(new Property("status", "status", new TypeRef.Primitive("int"), true, false, anySchema()));
         }
         variant.body().ifPresent(components::add);
         components.addAll(variant.headers().values());
@@ -276,8 +275,7 @@ public final class ApiRenderer {
             operation.parameters().forEach(p -> arguments.add("binding.parameter(" + Names.literal(p.parameter().in().value()) + ", "
                 + Names.literal(p.parameter().name()) + ", " + token(p.property().type(), imports) + ")"));
             operation.body().ifPresent(b -> arguments.add("binding.body(" + token(b.property().type(), imports) + ")"));
-            out.line("var input = new " + imports.ref(operation.request().get()) + "(" + (arguments.isEmpty() ? "" : "\n        "
-                + String.join(",\n        ", arguments)) + ");");
+            out.line("var input = new " + imports.ref(operation.request().get()) + "(\n        " + String.join(",\n        ", arguments) + ");");
             out.line("return runtime.respond(request, " + Names.literal(operation.id()) + ", api()." + operation.method() + "(input));");
         } else {
             out.line("runtime.bind(request, " + Names.literal(operation.id()) + ");");
@@ -346,16 +344,12 @@ public final class ApiRenderer {
         }
         chain.set(chain.size() - 1, chain.getLast() + ";");
         chain.forEach(out::line);
-        operation.body().ifPresent(body -> {
-            if (body.multipart()) {
-                out.line("var body = request.body();");
-                out.open("if (body != null)");
-                out.line("call = call.multipart(" + imports.ref(ARRAYS) + ".asList(" + parts(body, imports) + "));");
-                out.close();
-            } else {
-                out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());");
-            }
-        });
+        operation.body().ifPresent(body -> formRecord(body).ifPresentOrElse(record -> {
+            out.line("var body = request.body();");
+            out.open("if (body != null)");
+            out.line("call = call.multipart(" + imports.ref(ARRAYS) + ".asList(" + parts(body, record, imports) + "));");
+            out.close();
+        }, () -> out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());")));
         out.open("return http.exchange(call, response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
         Optional<OperationModel.VariantModel> fallback = Optional.empty();
@@ -393,22 +387,37 @@ public final class ApiRenderer {
         return "new " + imports.ref(operation.response()) + "." + variant.name() + "(" + String.join(", ", arguments) + ")";
     }
 
-    private String parts(OperationModel.BodyModel body, Imports imports) {
-        var record = body.property().type() instanceof ClassName className ? mapper.definition(className).filter(RecordDef.class::isInstance)
-            .map(RecordDef.class::cast) : Optional.<RecordDef>empty();
-        var part = imports.ref(CLIENT_CALL) + ".Part.of";
-        return record.map(r -> r.properties().stream().map(property -> {
-            var encoding = Optional.ofNullable(body.mediaType().encoding().get(property.jsonName())).flatMap(e -> e.contentType());
-            var json = encoding.or(() -> structured(property.type()) ? Optional.of("application/json") : Optional.empty());
-            return part + "(" + Names.literal(property.jsonName()) + ", body." + property.javaName() + "()" + json.map(t -> ", " + Names.literal(t)).orElse("") + ")";
-        }).collect(Collectors.joining(",\n        "))).orElse(part + "(\"file\", body)");
+    /** The record whose components are sent as {@code multipart/form-data} parts, if the body is one; other bodies are encoded from their JSON. */
+    private Optional<RecordDef> formRecord(OperationModel.BodyModel body) {
+        return Optional.of(body).filter(OperationModel.BodyModel::formData).map(b -> b.property().type()).filter(ClassName.class::isInstance)
+            .flatMap(type -> mapper.definition((ClassName) type)).filter(RecordDef.class::isInstance).map(RecordDef.class::cast);
     }
 
-    /** Whether values of {@code type} are sent as JSON parts (models, maps and lists of non-files). */
+    /** The parts of a record body: one per component, JSON for structured values unless the encoding says otherwise. */
+    private String parts(OperationModel.BodyModel body, RecordDef record, Imports imports) {
+        var part = imports.ref(CLIENT_CALL) + ".Part.of";
+        return record.properties().stream().map(property -> {
+            var encoding = Optional.ofNullable(body.mediaType().encoding().get(property.jsonName())).flatMap(e -> e.contentType());
+            var json = encoding.or(() -> structured(property.type()) ? Optional.of("application/json") : Optional.empty());
+            return part + "(" + Names.literal(property.jsonName()) + ", body." + property.javaName() + "()" + json.map(t -> ", " + Names.literal(t))
+                .orElse("") + ")";
+        }).collect(Collectors.joining(",\n        "));
+    }
+
+    /**
+     * Whether a part value of {@code type} is sent as JSON. Arrays are sent as one part per item,
+     * so they are JSON parts when their items are.
+     */
     private boolean structured(TypeRef type) {
+        return type instanceof TypeRef.Parameterized collection && !collection.raw().equals(TypeRef.MAP)
+            ? json(collection.arguments().getFirst()) : json(type);
+    }
+
+    /** Whether values of {@code type} are JSON (rather than text or file) parts: models, maps and nested arrays are. */
+    private boolean json(TypeRef type) {
         return switch (type) {
-            case ClassName className -> mapper.definition(className).isPresent() && !className.equals(FILE_PART);
-            case TypeRef.Parameterized parameterized -> !parameterized.arguments().contains(FILE_PART);
+            case ClassName className -> mapper.definition(className).filter(definition -> !(definition instanceof ModelDef.EnumDef)).isPresent();
+            case TypeRef.Parameterized ignored -> true;
             default -> false;
         };
     }
@@ -456,15 +465,5 @@ public final class ApiRenderer {
         }
         out.close();
         return unit(name, imports, out);
-    }
-
-    /** Whether the location is a cookie/header parameter (used by tests). */
-    static boolean inHeaderOrCookie(ParameterLocation location) {
-        return location == ParameterLocation.HEADER || location == ParameterLocation.COOKIE;
-    }
-
-    /** A lower-case method name. */
-    static String lower(String method) {
-        return method.toLowerCase(Locale.ROOT);
     }
 }

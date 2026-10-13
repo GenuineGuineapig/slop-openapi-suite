@@ -69,10 +69,10 @@ public final class OpenApiRuntime {
         return mapper;
     }
 
-    /** The operation with {@code operationId}. */
-    public ApiOperation operation(String operationId) {
-        return api.operation(operationId)
-            .orElseThrow(() -> new IllegalArgumentException("API '" + name + "' has no operation '" + operationId + "'"));
+    /** The operation identified by its {@code operationId}, or by {@code METHOD path} when it has none. */
+    public ApiOperation operation(String id) {
+        return api.operations().stream().filter(operation -> operation.displayName().equals(id)).findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("API '" + name + "' has no operation '" + id + "'"));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -124,9 +124,12 @@ public final class OpenApiRuntime {
             return builder.build();
         }
         var content = declared.map(Response::content).orElse(Map.of());
-        var mediaType = Optional.ofNullable(response.contentType())
+        var negotiated = Optional.ofNullable(response.contentType())
             .orElseGet(() -> negotiate(request.getHeader("Accept"), content, body));
-        var type = ContentType.parse(mediaType).orElseThrow(() -> new IllegalArgumentException("Invalid media type '" + mediaType + "'"));
+        var parsed = ContentType.parse(negotiated).orElseThrow(() -> new IllegalArgumentException("Invalid media type '" + negotiated + "'"));
+        var mediaType = parsed.type().equals("multipart") && parsed.parameter("boundary").isEmpty()
+            ? negotiated + "; boundary=" + BodyWriter.boundary() : negotiated;
+        var type = ContentType.parse(mediaType).orElseThrow();
         var schema = ContentType.bestMatch(content.keySet(), type).map(content::get).flatMap(MediaType::schema);
         return builder.contentType(org.springframework.http.MediaType.parseMediaType(mediaType)).body(serialize(body, type, schema));
     }

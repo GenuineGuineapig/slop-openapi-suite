@@ -162,7 +162,10 @@ public final class BodyParser {
         }
         var items = new ArrayList<JsonValue>();
         for (var part : parts) {
-            items.add(partValue(part, Optional.empty(), Optional.empty()));
+            var index = items.size();
+            var encoding = index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
+            var item = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(s -> shapes.item(s, index)));
+            items.add(partValue(part, item, encoding));
         }
         return Result.ok(new JsonArray(items));
     }

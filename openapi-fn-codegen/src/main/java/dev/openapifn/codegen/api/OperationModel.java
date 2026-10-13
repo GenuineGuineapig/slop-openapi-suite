@@ -58,8 +58,9 @@ public record OperationModel(ApiOperation operation, String id, String method, S
      */
     public record BodyModel(String contentType, MediaType mediaType, Property property, List<String> contentTypes) {
 
-        public boolean multipart() {
-            return ContentType.parse(contentType).filter(type -> type.type().equals("multipart")).isPresent();
+        /** Whether the body is sent as named {@code multipart/form-data} parts (other multipart types are positional lists). */
+        public boolean formData() {
+            return ContentType.parse(contentType).filter(type -> type.essence().equals("multipart/form-data")).isPresent();
         }
     }
 
@@ -84,9 +85,6 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             return name.equals("Default") ? "defaultResponse" : Names.identifier(Character.toLowerCase(name.charAt(0)) + name.substring(1));
         }
 
-        public ClassName className(ClassName response) {
-            return response.nested(name);
-        }
     }
 
     private static final Map<Integer, String> REASONS = Map.ofEntries(
@@ -107,8 +105,9 @@ public record OperationModel(ApiOperation operation, String id, String method, S
 
     /** Builds the model of {@code operation}; types are registered with {@code mapper}. */
     public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods) {
-        var id = operation.operationId().orElse(operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path());
-        var method = Names.unique(Names.camel(id), takenMethods);
+        var id = operation.displayName();
+        var method = Names.unique(Names.camel(operation.operationId().orElse(operation.method().toLowerCase(java.util.Locale.ROOT) + " "
+            + operation.path())), takenMethods);
         var pascal = Character.toUpperCase(method.charAt(0)) + method.substring(1);
         var group = operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default");
         var requestName = ClassName.of(apiPackage, pascal + "Request");

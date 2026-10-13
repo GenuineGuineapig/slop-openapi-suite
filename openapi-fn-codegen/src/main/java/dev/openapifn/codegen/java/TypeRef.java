@@ -21,12 +21,6 @@ public sealed interface TypeRef {
             return new ClassName(packageName, List.of(simpleNames));
         }
 
-        /** {@code java.util.List} style parsing of a canonical top-level name. */
-        public static ClassName parse(String canonical) {
-            var dot = canonical.lastIndexOf('.');
-            return of(canonical.substring(0, dot), canonical.substring(dot + 1));
-        }
-
         public ClassName nested(String name) {
             var names = new java.util.ArrayList<>(simpleNames);
             names.add(name);
@@ -52,11 +46,6 @@ public sealed interface TypeRef {
 
         public String canonicalName() {
             return packageName + "." + relativeName();
-        }
-
-        /** The name used in {@code Class.forName}, e.g. {@code pkg.Outer$Inner}. */
-        public String binaryName() {
-            return packageName + "." + String.join("$", simpleNames);
         }
 
         public TypeRef of(TypeRef... arguments) {

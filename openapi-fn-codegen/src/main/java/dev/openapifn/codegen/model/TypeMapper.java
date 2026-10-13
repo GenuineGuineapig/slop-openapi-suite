@@ -39,6 +39,15 @@ public final class TypeMapper {
     /** The JSpecify nullness annotation used in generated code. */
     public static final ClassName NULLABLE = ClassName.of("org.jspecify.annotations", "Nullable");
 
+    /**
+     * {@code java.lang} types generated code refers to by simple name. A model class with one of
+     * these names would shadow it (same-package types beat the implicit {@code java.lang} import),
+     * so such models get a {@code Model} suffix.
+     */
+    private static final Set<String> JAVA_LANG = Set.of("String", "Object", "Override", "Deprecated", "SuppressWarnings", "Integer", "Long",
+        "Boolean", "Double", "Float", "IllegalArgumentException", "Exception", "Class", "Enum", "Record", "Byte", "Short", "Character", "Number",
+        "Void", "Math", "System", "Thread", "Iterable", "Comparable", "Runnable", "FunctionalInterface", "SafeVarargs");
+
     private static final BigDecimal INT_MIN = BigDecimal.valueOf(Integer.MIN_VALUE);
     private static final BigDecimal INT_MAX = BigDecimal.valueOf(Integer.MAX_VALUE);
 
@@ -55,6 +64,7 @@ public final class TypeMapper {
     private final Map<ClassName, ModelDef> definitions = new LinkedHashMap<>();
     private final Map<ClassName, Set<ClassName>> interfaces = new HashMap<>();
     private final Map<URI, List<Schema>> children = new HashMap<>();
+    private final Set<URI> childLocations = new HashSet<>();
     private final Set<URI> inProgress = new HashSet<>();
     private final Map<URI, TypeRef> inline = new HashMap<>();
 
@@ -62,7 +72,7 @@ public final class TypeMapper {
         this.api = api;
         this.registry = api.schemas();
         this.modelPackage = modelPackage;
-        api.model().components().schemas().forEach((name, schema) -> names.put(registry.deref(schema).location(), Names.unique(Names.pascal(name), takenNames)));
+        api.model().components().schemas().forEach((name, schema) -> names.put(registry.deref(schema).location(), modelName(Names.pascal(name))));
         var visited = new HashSet<URI>();
         api.model().components().schemas().values().forEach(schema -> index(schema, visited));
         api.operations().forEach(operation -> operationSchemas(operation).forEach(schema -> index(schema, visited)));
@@ -178,7 +188,7 @@ public final class TypeMapper {
             return existing;
         }
         var kind = kind(target);
-        var name = ClassName.of(modelPackage, names.computeIfAbsent(location, uri -> Names.unique(baseName(target), takenNames)));
+        var name = ClassName.of(modelPackage, names.computeIfAbsent(location, uri -> modelName(baseName(target))));
         if (kind == Kind.ENUM || kind == Kind.UNION || kind == Kind.OBJECT || kind == Kind.PARENT) {
             named.put(location, name);
             return define(target, kind, name);
@@ -196,14 +206,18 @@ public final class TypeMapper {
         }
     }
 
+    /** A unique model class name for {@code base}, avoiding names that would shadow {@code java.lang} types. */
+    private String modelName(String base) {
+        return Names.unique(JAVA_LANG.contains(base) ? base + "Model" : base, takenNames);
+    }
+
     private String baseName(Schema schema) {
         var last = schema.pointer().last();
         if (last.isPresent() && !last.get().matches("[0-9]+")) {
             return Names.pascal(last.get());
         }
         var path = schema.document().getPath();
-        var file = path == null ? "Model" : path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.[^.]*$", "");
-        return Names.pascal(file);
+        return Names.pascal(path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.[^.]*$", ""));
     }
 
     private ClassName uniqueNested(ClassName owner, String name) {
@@ -241,7 +255,6 @@ public final class TypeMapper {
                 case "int64" -> TypeRef.LONG;
                 default -> TypeRef.BIG_DECIMAL;
             };
-            case "boolean" -> TypeRef.BOOLEAN;
             case "string" -> switch (format) {
                 case "date" -> TypeRef.LOCAL_DATE;
                 case "date-time" -> TypeRef.OFFSET_DATE_TIME;
@@ -253,7 +266,7 @@ public final class TypeMapper {
                 case "binary" -> ClassName.of("dev.openapifn.spring", "FilePart");
                 default -> TypeRef.STRING;
             };
-            default -> TypeRef.OBJECT;
+            default -> TypeRef.BOOLEAN;
         };
     }
 
@@ -270,11 +283,14 @@ public final class TypeMapper {
         if (enumerable(schema)) {
             return Kind.ENUM;
         }
-        if (schema.subschemaMap("properties").isEmpty() && choiceMembers(schema).stream().anyMatch(this::typed)) {
+        if (schema.subschemaMap("properties").isEmpty() && choiceMembers(schema).stream().anyMatch(this::typed) && nonNullMember(schema).isEmpty()) {
             return Kind.UNION;
         }
         if (isParent(schema)) {
             return Kind.PARENT;
+        }
+        if (childLocations.contains(schema.location())) {
+            return Kind.OBJECT;
         }
         var members = closure(schema);
         var types = closureTypes(schema);
@@ -365,6 +381,7 @@ public final class TypeMapper {
                 var parent = registry.deref(member);
                 if (parent.discriminator().isPresent() && parent.subschemaList("oneOf").isEmpty() && parent.subschemaList("anyOf").isEmpty()) {
                     children.computeIfAbsent(parent.location(), uri -> new ArrayList<>()).add(resolved);
+                    childLocations.add(resolved.location());
                 }
             }
         }
@@ -374,9 +391,6 @@ public final class TypeMapper {
     // Definitions
 
     private TypeRef define(Schema schema, Kind kind, ClassName name) {
-        if (definitions.containsKey(name)) {
-            return name;
-        }
         var placeholder = new RecordDef(name, schema, List.of(), Optional.empty());
         definitions.put(name, placeholder);
         var definition = switch (kind) {
@@ -391,7 +405,9 @@ public final class TypeMapper {
 
     private EnumDef enumDef(Schema schema, ClassName name) {
         var values = schema.enumValues().stream().filter(value -> !value.isNull()).toList();
-        var valueType = values.getFirst() instanceof JsonString ? TypeRef.STRING : primitive(schema);
+        var valueType = values.getFirst() instanceof JsonString ? TypeRef.STRING
+            : values.stream().allMatch(value -> ((JsonNumber) value).value().compareTo(INT_MIN) >= 0 && ((JsonNumber) value).value().compareTo(INT_MAX) <= 0)
+                ? TypeRef.INTEGER : TypeRef.LONG;
         var constants = new LinkedHashMap<String, JsonValue>();
         var taken = new HashSet<String>();
         for (var value : values) {
@@ -399,7 +415,7 @@ public final class TypeMapper {
             var constant = Names.constant(text);
             constants.put(Names.unique(constant.startsWith("_") ? "VALUE" + constant : constant, taken), value);
         }
-        return new EnumDef(name, schema, valueType.equals(TypeRef.OBJECT) ? TypeRef.LONG : valueType, constants);
+        return new EnumDef(name, schema, valueType, constants);
     }
 
     private RecordDef recordDef(Schema schema, ClassName name) {
@@ -415,7 +431,10 @@ public final class TypeMapper {
         members.forEach(member -> required.addAll(member.required()));
         var declared = new LinkedHashMap<String, Schema>();
         var declaringOwner = new HashMap<String, ClassName>();
-        for (var member : members.reversed()) {
+        // Later allOf members refine earlier ones (a subtype narrowing a property of its parent); the schema's own properties win.
+        var precedence = new ArrayList<>(members.subList(1, members.size()));
+        precedence.add(members.getFirst());
+        for (var member : precedence) {
             var memberOwner = member.location().equals(self) ? owner : ownerOf(member).orElse(owner);
             member.subschemaMap("properties").forEach((key, property) -> {
                 declared.put(key, property);
@@ -434,8 +453,8 @@ public final class TypeMapper {
             properties.add(new Property(jsonName, javaName, type, required.contains(jsonName), !nonNull, property));
         });
         for (var member : members) {
-            if (!member.location().equals(self) && isParent(member) && namedType(member) instanceof ClassName parent) {
-                interfaces.computeIfAbsent(owner, key -> new LinkedHashSet<>()).add(parent);
+            if (!member.location().equals(self) && isParent(member)) {
+                implement(owner, (ClassName) namedType(member));
             }
         }
         return properties;
@@ -450,16 +469,15 @@ public final class TypeMapper {
         var discriminator = schema.discriminator().orElseThrow();
         var subtypes = new LinkedHashMap<ClassName, List<String>>();
         for (var child : children.get(schema.location())) {
-            if (namedType(child) instanceof ClassName childName) {
-                subtypes.put(childName, discriminatorNames(schema, child));
-                interfaces.computeIfAbsent(childName, key -> new LinkedHashSet<>()).add(name);
-            }
+            var childName = (ClassName) namedType(child);
+            subtypes.put(childName, discriminatorNames(schema, child));
+            implement(childName, name);
         }
         var defaultName = name.nested("Default");
         subtypes.put(defaultName, List.of(baseName(schema)));
         var properties = properties(schema, name);
         definitions.put(defaultName, new RecordDef(defaultName, schema, properties, Optional.empty()));
-        interfaces.computeIfAbsent(defaultName, key -> new LinkedHashSet<>()).add(name);
+        implement(defaultName, name);
         return new ParentDef(name, schema, properties, discriminator.propertyName(), subtypes);
     }
 
@@ -484,11 +502,16 @@ public final class TypeMapper {
             var memberClass = type instanceof ClassName className && definitions.containsKey(className) ? className : wrapper(name, member, type);
             if (!members.contains(memberClass)) {
                 members.add(memberClass);
-                interfaces.computeIfAbsent(memberClass, key -> new LinkedHashSet<>()).add(name);
+                implement(memberClass, name);
                 schema.discriminator().ifPresent(d -> discriminatorNames.put(memberClass, discriminatorNames(schema, member)));
             }
         }
         return new UnionDef(name, schema, members, schema.discriminator().map(d -> d.propertyName()), discriminatorNames, exactlyOne);
+    }
+
+    /** Records that {@code type} implements the sealed interface {@code parent}. */
+    private void implement(ClassName type, ClassName parent) {
+        interfaces.computeIfAbsent(type, key -> new LinkedHashSet<>()).add(parent);
     }
 
     private ClassName wrapper(ClassName union, Schema member, TypeRef type) {

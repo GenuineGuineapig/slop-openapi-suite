@@ -22,18 +22,6 @@ class GeneratorTest {
             public class ShopApplication {
             }
             """));
-        if (System.getenv("KEEP") != null) {
-            try {
-                var keep = Path.of(System.getenv("KEEP"));
-                for (var file : compilation.files) {
-                    var target = keep.resolve(file.path());
-                    java.nio.file.Files.createDirectories(target.getParent());
-                    java.nio.file.Files.writeString(target, file.content());
-                }
-            } catch (java.io.IOException e) {
-                throw new java.io.UncheckedIOException(e);
-            }
-        }
         assertThat(compilation.success).as(compilation.diagnostics).isTrue();
         assertThat(compilation.diagnostics).as("warnings").isEmpty();
     }
@@ -98,5 +86,38 @@ class GeneratorTest {
         } finally {
             thread.setContextClassLoader(previous);
         }
+    }
+
+    @Test
+    void edgeCasesCompileAndTheirTestsPass() {
+        var api = Compilation.load("classpath:edge/openapi.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("edge", "org.example.edge"), dir, Map.of("org/example/edge/EdgeApplication.java", """
+            package org.example.edge;
+
+            @org.springframework.boot.autoconfigure.SpringBootApplication
+            public class EdgeApplication {
+            }
+            """));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        var summary = Launch.tests(compilation, "org.example.edge.api.DefaultControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+    }
+
+    @Test
+    void variantsCompileAndTheirTestsPass() {
+        var api = Compilation.load("classpath:variants/openapi.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("variants", "org.example.variants"), dir, Map.of(
+            "org/example/variants/VariantsApplication.java", """
+                package org.example.variants;
+
+                @org.springframework.boot.autoconfigure.SpringBootApplication
+                public class VariantsApplication {
+                }
+                """));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        var summary = Launch.tests(compilation, "org.example.variants.api.DefaultControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
     }
 }

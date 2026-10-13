@@ -122,7 +122,7 @@ class ClientTest {
             var body = new String(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes(), StandardCharsets.UTF_8);
             assertThat(type).startsWith("multipart/form-data;boundary=openapi-fn-");
             assertThat(body).contains("name=\"file\"; filename=\"a.png\"", "Content-Type: image/png", "name=\"meta\"", "{\"a\":1}",
-                "name=\"tags\"", "x", "y", "name=\"count\"", "\r\n3\r\n");
+                "name=\"tags\"", "x", "y", "name=\"count\"", "\r\n3\r\n", "name=\"unique\"", "\r\nu\r\n", "[1,2]");
             assertThat(body).doesNotContain("absent");
         }).andRespond(withSuccess());
         setup.server().expect(requestTo("https://api.example.com/v1/qs?a=1&b=2")).andRespond(withSuccess());
@@ -138,6 +138,8 @@ class ClientTest {
             ClientCall.Part.of("meta", Map.of("a", 1), "application/json"),
             ClientCall.Part.of("tags", List.of("x", "y")),
             ClientCall.Part.of("count", 3),
+            ClientCall.Part.of("unique", java.util.Set.of("u")),
+            ClientCall.Part.of("matrix", List.of(List.of(1, 2)), "application/json"),
             ClientCall.Part.of("absent", null),
             ClientCall.Part.of("absent2", null, "application/json"))), r -> null);
         client.exchange(ClientCall.of("GET", "/qs").param(QS, new java.util.TreeMap<>(Map.of("a", 1, "b", 2))), r -> null);
@@ -159,6 +161,17 @@ class ClientTest {
         var bare = new OpenApiHttpClient(RestClient.create(), "https://h", MAPPER);
         assertThat(bare.uri(ClientCall.of("GET", "/a"))).isEqualTo(URI.create("https://h/a"));
         assertThat(new String(client.encode(new ClientCall.Body("application/json", List.of(1, 2))).body(), StandardCharsets.UTF_8)).isEqualTo("[1,2]");
+        var mixed = client.encode(new ClientCall.Body("multipart/mixed", List.of(Map.of("a", 1), 2, FilePart.of("f.png", "image/png", new byte[] {65}))));
+        assertThat(mixed.contentType()).startsWith("multipart/mixed; boundary=openapi-fn-");
+        assertThat(new String(mixed.body(), StandardCharsets.UTF_8)).contains("Content-Type: application/json\r\n\r\n{\"a\":1}\r\n",
+            "Content-Type: text/plain\r\n\r\n2\r\n", "Content-Type: image/png\r\n\r\nA\r\n");
+        var form = client.encode(new ClientCall.Body("multipart/form-data", new java.util.TreeMap<>(Map.of("a", 1, "b", List.of("x", "y")))));
+        assertThat(form.contentType()).startsWith("multipart/form-data; boundary=openapi-fn-");
+        assertThat(new String(form.body(), StandardCharsets.UTF_8)).contains("name=\"a\"", "\r\n1\r\n", "name=\"b\"", "\r\nx\r\n", "\r\ny\r\n");
+        var file = FilePart.of("f.bin", "application/x-thing", new byte[] {1});
+        assertThat(client.encode(new ClientCall.Body("*/*", file)).contentType()).isEqualTo("application/x-thing");
+        assertThat(client.encode(new ClientCall.Body("multipart/related", file)).contentType()).isEqualTo("application/x-thing");
+        assertThat(client.encode(new ClientCall.Body("application/pdf", file)).contentType()).isEqualTo("application/pdf");
         var note = client.encode(new ClientCall.Body("multipart/form-data", List.of(new ClientCall.Part("note", "x", "text/plain"))));
         assertThat(new String(note.body(), StandardCharsets.UTF_8)).contains("Content-Type: text/plain", "\r\nx\r\n");
     }

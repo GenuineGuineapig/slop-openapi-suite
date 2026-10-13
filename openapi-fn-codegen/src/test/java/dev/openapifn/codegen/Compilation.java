@@ -38,6 +38,10 @@ final class Compilation {
     static Compilation of(OpenApiDocument api, GeneratorConfig config, Path root, java.util.Map<String, String> extraSources) {
         try {
             var files = Generator.generate(api, config);
+            if (System.getenv("KEEP") != null) {
+                GeneratedFile.write(files, Path.of(System.getenv("KEEP"), config.name()), Path.of(System.getenv("KEEP"), config.name()),
+                    Path.of(System.getenv("KEEP"), config.name()));
+            }
             var sources = root.resolve("src");
             var tests = root.resolve("test");
             var resources = root.resolve("resources");

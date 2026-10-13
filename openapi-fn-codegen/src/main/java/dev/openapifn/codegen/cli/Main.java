@@ -9,6 +9,7 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.IntConsumer;
 
 /**
  * Command line generator.
@@ -24,11 +25,14 @@ public final class Main {
     private static final String USAGE = "Usage: --spec <file> --name <name> --package <package> --output <dir> [--test-output <dir>] "
         + "[--resources-output <dir>] [--base-path <path>] [--no-server] [--no-client] [--no-tests]";
 
+    /** Ends the process with an exit code; replaced in tests, which must not end the test JVM. */
+    static IntConsumer exit = System::exit;
+
     private Main() {
     }
 
     public static void main(String[] args) {
-        System.exit(run(args, System.out, System.err));
+        exit.accept(run(args, System.out, System.err));
     }
 
     /** Runs the generator; returns the process exit code. */

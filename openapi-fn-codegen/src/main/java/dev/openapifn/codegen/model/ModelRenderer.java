@@ -15,11 +15,21 @@ import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
+import java.net.URI;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.OffsetTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Renders {@link ModelDef}s as Java source. */
 public final class ModelRenderer {
@@ -34,6 +44,7 @@ public final class ModelRenderer {
     private static final ClassName JSON_ANY_SETTER = ClassName.of("com.fasterxml.jackson.annotation", "JsonAnySetter");
     private static final ClassName JSON_ANY_GETTER = ClassName.of("com.fasterxml.jackson.annotation", "JsonAnyGetter");
     private static final ClassName JSON_DESERIALIZE = ClassName.of("tools.jackson.databind.annotation", "JsonDeserialize");
+    private static final ClassName VALUE_DESERIALIZER = ClassName.of("tools.jackson.databind", "ValueDeserializer");
     private static final ClassName UNION_DESERIALIZER = ClassName.of("dev.openapifn.spring.json", "UnionDeserializer");
     private static final ClassName OBJECTS = ClassName.of("java.util", "Objects");
     private static final ClassName COLLECTIONS = ClassName.of("java.util", "Collections");
@@ -41,6 +52,16 @@ public final class ModelRenderer {
     private static final ClassName LINKED_HASH_SET = ClassName.of("java.util", "LinkedHashSet");
     private static final ClassName LINKED_HASH_MAP = ClassName.of("java.util", "LinkedHashMap");
     private static final ClassName NULLABLE = TypeMapper.NULLABLE;
+    private static final ClassName BASE64 = ClassName.of("java.util", "Base64");
+
+    /** Types whose defaults are parsed from strings: the factory method and a parser that rejects invalid values at generation time. */
+    private static final Map<TypeRef, Map.Entry<String, Function<String, Object>>> PARSED = Map.of(
+        TypeRef.LOCAL_DATE, Map.entry("parse", LocalDate::parse),
+        TypeRef.OFFSET_DATE_TIME, Map.entry("parse", OffsetDateTime::parse),
+        TypeRef.OFFSET_TIME, Map.entry("parse", OffsetTime::parse),
+        TypeRef.DURATION, Map.entry("parse", Duration::parse),
+        TypeRef.UUID, Map.entry("fromString", UUID::fromString),
+        TypeRef.URI, Map.entry("create", URI::create));
 
     private final TypeMapper mapper;
 
@@ -87,6 +108,7 @@ public final class ModelRenderer {
         if (definition.schema().deprecated()) {
             out.line("@Deprecated");
         }
+        ownDeserialization(definition, out, imports);
         switch (definition) {
             case RecordDef record -> record(record, out, imports);
             case EnumDef enumDef -> enumeration(enumDef, out, imports);
@@ -96,9 +118,35 @@ public final class ModelRenderer {
         }
     }
 
+    /**
+     * Jackson inherits class annotations from interfaces, so a type that is also read on its own
+     * opts out of the union deserializer and the polymorphic type handling of its unions and parents.
+     */
+    private void ownDeserialization(ModelDef definition, Source out, Imports imports) {
+        var inherited = ancestors(definition.name()).map(mapper::definition).flatMap(Optional::stream).toList();
+        if (!hasCustomDeserializer(definition) && inherited.stream().anyMatch(ModelRenderer::hasCustomDeserializer)) {
+            out.line("@" + imports.ref(JSON_DESERIALIZE) + "(using = " + imports.ref(VALUE_DESERIALIZER) + ".None.class)");
+        }
+        if (!hasTypeInfo(definition) && inherited.stream().anyMatch(ModelRenderer::hasTypeInfo)) {
+            out.line("@" + imports.ref(JSON_TYPE_INFO) + "(use = " + imports.ref(JSON_TYPE_INFO) + ".Id.NONE)");
+        }
+    }
+
+    private Stream<ClassName> ancestors(ClassName name) {
+        return mapper.interfacesOf(name).stream().flatMap(parent -> Stream.concat(Stream.of(parent), ancestors(parent)));
+    }
+
+    private static boolean hasCustomDeserializer(ModelDef definition) {
+        return definition instanceof UnionDef union && union.discriminator().isEmpty();
+    }
+
+    private static boolean hasTypeInfo(ModelDef definition) {
+        return definition instanceof ParentDef || definition instanceof UnionDef union && union.discriminator().isPresent();
+    }
+
     private static String description(ModelDef definition) {
         var schema = definition.schema();
-        return java.util.stream.Stream.of(schema.title(), schema.description()).flatMap(Optional::stream).collect(Collectors.joining("\n\n"));
+        return Stream.of(schema.title(), schema.description()).flatMap(Optional::stream).collect(Collectors.joining("\n\n"));
     }
 
     private String implementsClause(ClassName name, Imports imports, String keyword) {
@@ -194,6 +242,10 @@ public final class ModelRenderer {
         }
         return switch (value) {
             case JsonString string when type.equals(TypeRef.STRING) -> Optional.of(Names.literal(string.value()));
+            case JsonString string when PARSED.containsKey(type) && parses(PARSED.get(type).getValue(), string.value()) ->
+                Optional.of(imports.ref(type) + "." + PARSED.get(type).getKey() + "(" + Names.literal(string.value()) + ")");
+            case JsonString string when type.equals(TypeRef.BYTES) && parses(Base64.getDecoder()::decode, string.value()) ->
+                Optional.of(imports.ref(BASE64) + ".getDecoder().decode(" + Names.literal(string.value()) + ")");
             case JsonBoolean bool when type.equals(TypeRef.BOOLEAN) -> Optional.of(Boolean.toString(bool.value()));
             case JsonNumber number when type.equals(TypeRef.INTEGER) && number.isIntegral() -> Optional.of(number.value().toBigInteger().toString());
             case JsonNumber number when type.equals(TypeRef.LONG) && number.isIntegral() -> Optional.of(number.value().toBigInteger() + "L");
@@ -203,6 +255,15 @@ public final class ModelRenderer {
                 + Names.literal(number.value().toString()) + ")");
             default -> Optional.empty();
         };
+    }
+
+    private static boolean parses(Function<String, ?> parser, String text) {
+        try {
+            parser.apply(text);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private void builder(RecordDef record, Source out, Imports imports, String arguments) {

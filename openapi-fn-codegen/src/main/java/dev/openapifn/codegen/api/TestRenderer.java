@@ -50,6 +50,8 @@ public final class TestRenderer {
     private static final ClassName MEDIA_TYPE = ClassName.of("org.springframework.http", "MediaType");
     private static final ClassName MATCHERS = ClassName.of("dev.openapifn.spring.test", "OpenApiMatchers");
     private static final ClassName STANDARD_CHARSETS = ClassName.of("java.nio.charset", "StandardCharsets");
+    /** The boundary of positional multipart example bodies (fixed, so that generated tests are stable). */
+    private static final String BOUNDARY = "openapi-fn-example";
 
     private final OpenApiDocument api;
     private final GeneratorNames names;
@@ -157,8 +159,7 @@ public final class TestRenderer {
         }
         var example = itemSchema.isPresent() ? examples.example(itemSchema.get(), direction).map(JsonArray::of).map(JsonValue.class::cast)
             : examples.example(property.schema(), direction);
-        return example.map(json -> type.equals(TypeRef.STRING) && json.asString().isPresent()
-            ? Names.literal(json.asString().get())
+        return example.map(json -> type.equals(TypeRef.STRING) ? Names.literal(json.asString().orElse(json.toJson()))
             : "mapper.readValue(" + Names.literal(json.toJson()) + ", " + ApiRenderer.token(type, imports) + ")");
     }
 
@@ -197,7 +198,7 @@ public final class TestRenderer {
                     .filter(t -> t.essence().equals("application/x-www-form-urlencoded")).isPresent()
                     ? BodyWriter.form(entry.getValue()) : dev.openapifn.http.UrlCodec.encode(entry.getValue().toJson(), "");
                 case HEADER -> headers.put(parameter.name(), ParameterSerializer.header(spec, value));
-                case COOKIE -> cookies.addAll(ParameterSerializer.cookie(spec, value));
+                default -> cookies.addAll(ParameterSerializer.cookie(spec, value)); // COOKIE
             }
         }
         security(op.security(), headers, query, cookies);
@@ -205,7 +206,7 @@ public final class TestRenderer {
         var queryString = rawQuery != null ? rawQuery : ParameterSerializer.queryString(query);
         var uri = path + (queryString.isEmpty() ? "" : "?" + queryString);
         var body = complete ? operation.body() : Optional.<OperationModel.BodyModel>empty();
-        var multipartBody = body.filter(OperationModel.BodyModel::multipart);
+        var multipartBody = body.filter(OperationModel.BodyModel::formData);
         var expression = new StringBuilder(multipartBody.isPresent()
             ? "multipart(" + imports.ref(HTTP_METHOD) + ".valueOf(" + Names.literal(op.method()) + "), " + imports.ref(URI_TYPE) + ".create("
                 + Names.literal(uri) + "))"
@@ -237,29 +238,33 @@ public final class TestRenderer {
         if (example.isEmpty()) {
             return Optional.empty();
         }
-        if (body.multipart()) {
+        if (body.formData()) {
             return Optional.of(parts(body, example.get(), imports));
         }
-        var type = ContentType.parse(mediaType).orElseThrow();
-        var text = new String(new BodyWriter(shapes).write(example.get(), type, schema), StandardCharsets.UTF_8);
-        return Optional.of("\n            .contentType(" + Names.literal(mediaType) + ")\n            .content(" + Names.literal(text) + ")");
+        var sent = ContentType.parse(mediaType).filter(type -> type.type().equals("multipart")).isPresent() ? mediaType + "; boundary=" + BOUNDARY
+            : mediaType;
+        var text = new String(new BodyWriter(shapes).write(example.get(), ContentType.parse(sent).orElseThrow(), schema), StandardCharsets.UTF_8);
+        return Optional.of("\n            .contentType(" + Names.literal(sent) + ")\n            .content(" + Names.literal(text) + ")");
     }
 
+    /** MockMvc parts for a multipart example: one per property, one per item for arrays (binary items become files). */
     private String parts(OperationModel.BodyModel body, JsonValue example, Imports imports) {
         var out = new StringBuilder();
         var object = example.asObject().orElse(JsonObject.EMPTY);
         for (var member : object.members().entrySet()) {
             var property = body.mediaType().schema().flatMap(s -> shapes.property(s, member.getKey()));
-            var binary = property.map(p -> shapes.closure(p).stream().anyMatch(s -> s.format().filter("binary"::equals).isPresent())
-                || shapes.items(p).map(items -> shapes.closure(items).stream().anyMatch(s -> s.format().filter("binary"::equals).isPresent())).orElse(false))
-                .orElse(false);
-            var value = member.getValue();
-            var structured = value instanceof JsonObject || (value instanceof JsonArray && !binary);
-            var bytes = binary ? "example" : structured ? value.toJson() : ParameterSerializer.text(value);
-            out.append("\n            .part(new ").append(imports.ref(MOCK_PART)).append("(").append(Names.literal(member.getKey())).append(", ")
-                .append(binary ? Names.literal("example.bin") + ", " : structured ? "null, " : "").append(Names.literal(bytes)).append(".getBytes(")
-                .append(imports.ref(STANDARD_CHARSETS)).append(".UTF_8)").append(structured ? ", " + imports.ref(MEDIA_TYPE) + ".APPLICATION_JSON" : "")
-                .append("))");
+            var array = member.getValue() instanceof JsonArray;
+            var itemSchema = array ? property.flatMap(shapes::items) : property;
+            var binary = itemSchema.map(s -> shapes.closure(s).stream().anyMatch(c -> c.format().filter("binary"::equals).isPresent())).orElse(false);
+            var values = member.getValue() instanceof JsonArray items ? items.values() : List.of(member.getValue());
+            for (var value : values) {
+                var structured = value instanceof JsonObject || value instanceof JsonArray;
+                var bytes = binary ? "example" : structured ? value.toJson() : ParameterSerializer.text(value);
+                out.append("\n            .part(new ").append(imports.ref(MOCK_PART)).append("(").append(Names.literal(member.getKey())).append(", ")
+                    .append(binary ? Names.literal("example.bin") + ", " : structured ? "null, " : "").append(Names.literal(bytes)).append(".getBytes(")
+                    .append(imports.ref(STANDARD_CHARSETS)).append(".UTF_8)").append(structured ? ", " + imports.ref(MEDIA_TYPE) + ".APPLICATION_JSON" : "")
+                    .append("))");
+            }
         }
         return out.toString();
     }
