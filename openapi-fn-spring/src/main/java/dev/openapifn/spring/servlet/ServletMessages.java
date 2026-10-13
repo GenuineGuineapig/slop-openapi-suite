@@ -1,17 +1,12 @@
 package dev.openapifn.spring.servlet;
 
-import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
-import dev.openapifn.http.Multipart;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 import org.springframework.web.util.WebUtils;
@@ -28,27 +23,16 @@ public final class ServletMessages {
     }
 
     /**
-     * {@code request} including its body: the cached bytes of a {@link CachedBodyRequest}, the
-     * parts of an already parsed multipart request re-encoded (with a new boundary), or the bytes
-     * read from the input stream.
+     * {@code request} including its body: the cached bytes of a {@link CachedBodyRequest} in the
+     * wrapper chain, or else the body read now (see {@link CachedBodyRequest#of}).
      */
     public static HttpRequest toHttpRequest(HttpServletRequest request) {
         var cached = WebUtils.getNativeRequest(request, CachedBodyRequest.class);
-        if (cached != null) {
-            return withBody(request, cached.body());
-        }
         try {
-            if (Optional.ofNullable(request.getContentType()).orElse("").startsWith("multipart/form-data")) {
-                var encoded = BodyWriter.multipart(parts(request));
-                var message = withBody(request, encoded.body());
-                return new HttpRequest(message.method(), message.path(), message.query(),
-                    message.headers().without("Content-Type").with("Content-Type", encoded.contentType()), message.body());
-            }
-            return withBody(request, request.getInputStream().readAllBytes());
+            var source = cached != null ? cached : CachedBodyRequest.of(request);
+            return withBody(source, source.body());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        } catch (ServletException e) {
-            throw new UncheckedIOException(new IOException(e));
         }
     }
 
@@ -61,15 +45,6 @@ public final class ServletMessages {
         }
         return new HttpRequest(request.getMethod(), path(request), Optional.ofNullable(request.getQueryString()).orElse(""), headers,
             body.length == 0 ? Optional.empty() : Optional.of(body));
-    }
-
-    private static List<Multipart.Part> parts(HttpServletRequest request) throws IOException, ServletException {
-        var result = new ArrayList<Multipart.Part>();
-        for (var part : request.getParts()) {
-            result.add(BodyWriter.part(part.getName(), Optional.ofNullable(part.getSubmittedFileName()), Optional.ofNullable(part.getContentType()),
-                part.getInputStream().readAllBytes()));
-        }
-        return result;
     }
 
     /** The response captured by {@code wrapper}. */

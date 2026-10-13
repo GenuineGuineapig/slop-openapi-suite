@@ -7,6 +7,7 @@ import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
+import java.math.BigInteger;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import tools.jackson.databind.JsonNode;
@@ -51,10 +52,18 @@ public final class JacksonJson {
                 yield node;
             }
             case JsonString string -> factory.stringNode(string.value());
-            case JsonNumber number -> number.isIntegral() ? factory.numberNode(number.value().toBigIntegerExact()) : factory.numberNode(number.value());
+            case JsonNumber number -> number.isIntegral() ? integral(factory, number.value().toBigIntegerExact()) : factory.numberNode(number.value());
             case JsonBoolean bool -> factory.booleanNode(bool.value());
             case JsonNull ignored -> factory.nullNode();
         };
+    }
+
+    /** The smallest fitting integer node, so that untyped targets get {@code Integer} or {@code Long}. */
+    private static JsonNode integral(JsonNodeFactory factory, BigInteger value) {
+        if (value.bitLength() < Integer.SIZE) {
+            return factory.numberNode(value.intValue());
+        }
+        return value.bitLength() < Long.SIZE ? factory.numberNode(value.longValue()) : factory.numberNode(value);
     }
 
     /** A tree node holding a Java object as-is (deserialized to that object when the target type matches). */

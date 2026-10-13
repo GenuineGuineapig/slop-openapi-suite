@@ -1,5 +1,6 @@
 package dev.openapifn.spring.servlet;
 
+import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Multipart;
 import dev.openapifn.http.UrlCodec;
@@ -32,19 +33,54 @@ import org.jspecify.annotations.Nullable;
 public final class CachedBodyRequest extends HttpServletRequestWrapper {
 
     private final byte[] body;
+    private final @Nullable String contentTypeOverride;
     private final Optional<ContentType> contentType;
     private @Nullable Map<String, String[]> parameters;
     private @Nullable List<Part> parts;
 
     public CachedBodyRequest(HttpServletRequest request, byte[] body) {
-        super(request);
-        this.body = body.clone();
-        this.contentType = Optional.ofNullable(request.getContentType()).flatMap(ContentType::parse);
+        this(request, body, null);
     }
 
-    /** Reads the whole body of {@code request} (or reuses an existing cache) and wraps it. */
+    /** A cached request whose body has the given content type (for re-encoded multipart bodies). */
+    public CachedBodyRequest(HttpServletRequest request, byte[] body, @Nullable String contentTypeOverride) {
+        super(request);
+        this.body = body.clone();
+        this.contentTypeOverride = contentTypeOverride;
+        this.contentType = Optional.ofNullable(contentTypeOverride != null ? contentTypeOverride : request.getContentType()).flatMap(ContentType::parse);
+    }
+
+    /**
+     * Reads the whole body of {@code request} (or reuses an existing cache) and wraps it. A
+     * multipart request whose stream has already been consumed (or never had raw content, as with
+     * mock requests) is re-encoded from its parts and files.
+     */
     public static CachedBodyRequest of(HttpServletRequest request) throws IOException {
-        return request instanceof CachedBodyRequest cached ? cached : new CachedBodyRequest(request, request.getInputStream().readAllBytes());
+        if (request instanceof CachedBodyRequest cached) {
+            return cached;
+        }
+        var body = request.getInputStream().readAllBytes();
+        if (body.length == 0 && Optional.ofNullable(request.getContentType()).orElse("").startsWith("multipart/form-data")) {
+            var encoded = BodyWriter.multipart(MultipartParts.of(request));
+            return new CachedBodyRequest(request, encoded.body(), encoded.contentType());
+        }
+        return new CachedBodyRequest(request, body);
+    }
+
+    @Override
+    public @Nullable String getContentType() {
+        return contentTypeOverride != null ? contentTypeOverride : super.getContentType();
+    }
+
+    @Override
+    public @Nullable String getHeader(String name) {
+        return contentTypeOverride != null && name.equalsIgnoreCase("Content-Type") ? contentTypeOverride : super.getHeader(name);
+    }
+
+    @Override
+    public Enumeration<String> getHeaders(String name) {
+        return contentTypeOverride != null && name.equalsIgnoreCase("Content-Type")
+            ? Collections.enumeration(List.of(contentTypeOverride)) : super.getHeaders(name);
     }
 
     public byte[] body() {

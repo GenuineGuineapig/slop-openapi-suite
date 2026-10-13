@@ -9,6 +9,7 @@ import dev.openapifn.validation.OpenApiValidator.RequestValidation;
 import dev.openapifn.validation.ValidationIssue;
 import dev.openapifn.validation.ValidationReport;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -78,7 +79,7 @@ public final class RequestBinding {
         if (!json && raw == FilePart.class) {
             return (T) new FilePart(null, request.contentType().orElse(FilePart.OCTET_STREAM), bytes.get());
         }
-        if (!json && raw == String.class && contentType.filter(t -> !t.isXml() && !t.type().equals("multipart")).isPresent()) {
+        if (!json && raw == String.class) {
             return (T) new String(bytes.get(), StandardCharsets.UTF_8);
         }
         var value = validation.body();
@@ -87,35 +88,31 @@ public final class RequestBinding {
         }
         var node = JacksonJson.toJsonNode(value.get());
         var boundary = contentType.filter(t -> t.essence().equals("multipart/form-data")).flatMap(t -> t.parameter("boundary"));
-        if (boundary.isPresent() && node instanceof ObjectNode object) {
-            embedFiles(object, Multipart.parse(bytes.get(), boundary.get()).toOptional().orElse(List.of()));
+        if (boundary.isPresent()) {
+            embedFiles((ObjectNode) node, Multipart.parse(bytes.get(), boundary.get()).toOptional().orElse(List.of()));
         }
         return convert(node, type, "body");
     }
 
-    /** Replaces binary parts (those with a file name or a non-text content type) by {@link FilePart}s. */
+    /**
+     * Replaces binary parts (those with a file name or a non-text content type) by
+     * {@link FilePart}s. The n-th part of a name corresponds to the n-th array element; a single
+     * value keeps the first part.
+     */
     private static void embedFiles(ObjectNode object, List<Multipart.Part> parts) {
+        var counters = new HashMap<String, Integer>();
         for (var part : parts) {
-            var type = part.contentType().flatMap(ContentType::parse);
-            var binary = part.filename().isPresent() || type.filter(t -> !t.type().equals("text") && !t.isJson()).isPresent();
             var name = part.name().orElse("");
-            if (!binary || !object.has(name)) {
+            var index = counters.merge(name, 1, Integer::sum) - 1;
+            var type = part.contentType().flatMap(ContentType::parse);
+            if (part.filename().isEmpty() && type.filter(t -> !t.type().equals("text") && !t.isJson()).isEmpty()) {
                 continue;
             }
             var file = JacksonJson.embed(new FilePart(part.filename().orElse(null), part.contentType().orElse(FilePart.OCTET_STREAM), part.body()));
             if (object.get(name) instanceof ArrayNode array) {
-                replaceFirstString(array, file);
-            } else {
+                array.set(index, file);
+            } else if (index == 0) {
                 object.set(name, file);
-            }
-        }
-    }
-
-    private static void replaceFirstString(ArrayNode array, JsonNode file) {
-        for (int i = 0; i < array.size(); i++) {
-            if (array.get(i).isString()) {
-                array.set(i, file);
-                return;
             }
         }
     }
