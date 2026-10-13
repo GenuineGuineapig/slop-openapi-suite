@@ -30,7 +30,10 @@ public record OpenApiDocument(URI uri, OpenApi model, SchemaRegistry schemas, Li
         return flatten(model.paths().items(), false);
     }
 
-    /** All webhook operations (3.1+); the path of each is the webhook name. */
+    /**
+     * All webhook operations (3.1+); the path of each is the webhook name. Webhooks are sent by
+     * the API provider, so the top-level security requirements do not apply to them.
+     */
     public List<ApiOperation> webhooks() {
         return flatten(model.webhooks(), true);
     }
@@ -45,7 +48,7 @@ public record OpenApiDocument(URI uri, OpenApi model, SchemaRegistry schemas, Li
     private List<ApiOperation> flatten(Map<String, PathItem> items, boolean webhook) {
         var result = new ArrayList<ApiOperation>();
         items.forEach((path, item) -> item.operations().forEach((method, operation) -> result.add(new ApiOperation(path, method, item,
-            operation, operation.effectiveParameters(item), operation.security().orElse(model.security()),
+            operation, operation.effectiveParameters(item), operation.security().orElse(webhook ? List.of() : model.security()),
             !operation.servers().isEmpty() ? operation.servers() : !item.servers().isEmpty() ? item.servers() : model.servers(),
             webhook))));
         return result;

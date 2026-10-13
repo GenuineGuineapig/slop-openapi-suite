@@ -1,0 +1,188 @@
+openapi: 3.2.0
+info: {title: Validation fixture, version: 1.0.0}
+servers:
+  - url: https://api.example.com/{version}
+    variables:
+      version: {default: v1, enum: [v1, v2]}
+security:
+  - apiKey: []
+  - bearer: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {name: tags, in: query, style: form, explode: false, schema: {type: array, items: {type: string}}}
+        - {name: filter, in: query, style: deepObject, schema: {type: object, properties: {kind: {type: string}, age: {type: integer}}}}
+        - {name: q, in: query, allowEmptyValue: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: session, in: cookie, schema: {type: string, minLength: 3}}
+      responses:
+        '200':
+          description: Pets
+          headers:
+            X-Total: {required: true, schema: {type: integer}}
+            X-Next: {schema: {type: string, format: uri}}
+            Content-Type: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Pet'}}
+            application/xml:
+              schema:
+                type: array
+                xml: {name: pets, wrapped: true}
+                items: {$ref: '#/components/schemas/Pet'}
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createPet
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Pet'}
+          application/x-www-form-urlencoded:
+            schema: {$ref: '#/components/schemas/Pet'}
+            encoding:
+              tags: {contentType: application/json}
+          application/xml:
+            schema: {$ref: '#/components/schemas/Pet'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+        4XX:
+          $ref: '#/components/responses/Error'
+  /pets/mine:
+    get:
+      operationId: myPets
+      security: [{}]
+      responses: {'204': {description: none}}
+  /pets/{petId}:
+    parameters:
+      - {name: petId, in: path, required: true, schema: {type: integer, format: int64}}
+    get:
+      operationId: getPet
+      security: [{basic: []}, {oauth: [read]}, {oidc: []}, {mtls: []}]
+      responses:
+        '200':
+          description: A pet
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+    delete:
+      operationId: deletePet
+      security: [{cookieKey: [], queryKey: []}]
+      responses: {'204': {description: Deleted}}
+  /pets/{petId}/photo:
+    put:
+      operationId: uploadPhoto
+      security: []
+      parameters:
+        - {name: petId, in: path, required: true, style: label, schema: {type: integer}}
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, meta]
+              properties:
+                file: {type: string, format: binary}
+                meta: {$ref: '#/components/schemas/Pet'}
+                caption: {type: string, maxLength: 10}
+                sizes: {type: array, items: {type: integer}}
+          image/png:
+            schema: {type: string, format: binary, maxLength: 8}
+          text/plain:
+            schema: {type: string, pattern: '^[a-z]+$'}
+      responses: {'204': {description: Stored}}
+  /events:
+    get:
+      operationId: events
+      security: []
+      parameters:
+        - {name: filter, in: querystring, content: {application/json: {schema: {type: object, required: [from], properties: {from: {type: integer}}}}}}
+      responses:
+        '200':
+          description: Events
+          content:
+            application/jsonl:
+              itemSchema: {$ref: '#/components/schemas/Event'}
+            application/x-ndjson:
+              itemSchema: {$ref: '#/components/schemas/Event'}
+            application/json-seq:
+              itemSchema: {$ref: '#/components/schemas/Event'}
+            text/event-stream:
+              itemSchema:
+                type: object
+                required: [data]
+                properties:
+                  event: {type: string}
+                  data: {type: string, contentMediaType: application/json}
+                  id: {type: string}
+                  retry: {type: integer}
+            multipart/mixed:
+              itemSchema: {$ref: '#/components/schemas/Event'}
+  /matrix/{coords}:
+    get:
+      operationId: matrix
+      security: []
+      parameters:
+        - {name: coords, in: path, required: true, style: matrix, explode: true, schema: {type: object, properties: {x: {type: integer}, y: {type: integer}}}}
+        - {name: X-Flags, in: header, schema: {type: array, items: {type: boolean}}}
+        - {name: meta, in: query, content: {application/json: {schema: {type: object, properties: {a: {type: integer}}}}}}
+      responses:
+        '200':
+          description: ok
+          content:
+            text/plain: {schema: {type: integer}}
+            '*/*': {schema: {type: string}}
+webhooks:
+  petAdopted:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Pet'}
+      responses: {'200': {description: ok}}
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id, name]
+      xml: {name: pet}
+      properties:
+        id: {type: integer, readOnly: true, xml: {attribute: true}}
+        name: {type: string, minLength: 1}
+        tags: {type: array, items: {type: string}, xml: {wrapped: true}}
+        secret: {type: string, writeOnly: true}
+        kind: {type: string, enum: [cat, dog]}
+    Event:
+      type: object
+      required: [type]
+      properties:
+        type: {type: string}
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: {type: string}
+  responses:
+    Error:
+      description: Error
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Error'}
+  securitySchemes:
+    apiKey: {type: apiKey, name: X-API-Key, in: header}
+    queryKey: {type: apiKey, name: key, in: query}
+    cookieKey: {type: apiKey, name: token, in: cookie}
+    bearer: {type: http, scheme: bearer}
+    basic: {type: http, scheme: basic}
+    oauth: {type: oauth2, flows: {clientCredentials: {tokenUrl: https://auth.example.com/token, scopes: {read: Read}}}}
+    oidc: {type: openIdConnect, openIdConnectUrl: https://auth.example.com/.well-known/openid-configuration}
+    mtls: {type: mutualTLS}
