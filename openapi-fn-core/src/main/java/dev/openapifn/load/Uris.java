@@ -32,9 +32,14 @@ public final class Uris {
         }
     }
 
-    /** Resolves {@code reference} against {@code base}. */
+    /**
+     * Resolves {@code reference} against {@code base}. Unlike {@link URI#resolve}, fragment-only
+     * references are also resolved against opaque bases such as {@code urn:} URIs.
+     */
     public static Result<URI, String> resolve(URI base, String reference) {
-        return parse(reference).map(base::resolve);
+        return parse(reference).map(ref -> base.isOpaque() && ref.getScheme() == null && ref.getRawSchemeSpecificPart().isEmpty()
+            ? URI.create(withoutFragment(base) + "#" + ref.getRawFragment())
+            : base.resolve(ref));
     }
 
     /** {@code uri} without its fragment. */

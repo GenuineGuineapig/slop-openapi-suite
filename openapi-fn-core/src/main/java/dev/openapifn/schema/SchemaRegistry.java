@@ -70,6 +70,7 @@ public final class SchemaRegistry {
      */
     public static Build build(List<Schema> roots, DocumentLoader loader, Dialect defaultDialect) {
         var builder = new Builder(loader, defaultDialect);
+        roots.forEach(root -> loader.loaded(root.document()).ifPresent(builder::visitDocument));
         roots.forEach(builder::visit);
         builder.resolvePending();
         return new Build(builder.registry(), List.copyOf(builder.diagnostics));
@@ -182,6 +183,7 @@ public final class SchemaRegistry {
         private final DocumentLoader loader;
         private final Dialect defaultDialect;
         private final Set<URI> visited = new HashSet<>();
+        private final Set<URI> visitedDocuments = new HashSet<>();
         private final Map<URI, Resource> resources = new HashMap<>();
         private final Map<URI, Schema> anchors = new HashMap<>();
         private final Map<URI, Map<String, Schema>> dynamicAnchors = new HashMap<>();
@@ -195,15 +197,35 @@ public final class SchemaRegistry {
             this.live = new SchemaRegistry(Map.of(), loader::loaded, resources, anchors, dynamicAnchors, defaultDialect);
         }
 
+        /**
+         * Indexes the schemas of a whole document, so that identifiers and anchors in parts that
+         * are not referenced directly are found: the root (for pure JSON Schema documents) and the
+         * component schemas (for OpenAPI documents).
+         */
+        void visitDocument(Document document) {
+            if (!visitedDocuments.add(document.uri())) {
+                return;
+            }
+            var dialect = SchemaRegistry.dialectAt(document, JsonPointer.ROOT, defaultDialect);
+            var root = document.root();
+            if (root instanceof JsonObject object && object.has("openapi")) {
+                object.object("components").flatMap(c -> c.object("schemas")).ifPresent(schemas -> schemas.keys().forEach(name ->
+                    schemaAt(document, JsonPointer.of("components", "schemas", name), dialect).ifPresent(this::visit)));
+            } else {
+                schemaAt(document, JsonPointer.ROOT, dialect).ifPresent(this::visit);
+            }
+        }
+
         void visit(Schema schema) {
             if (!visited.add(schema.location())) {
                 return;
             }
             var object = schema.object();
             var resourceBase = schema.baseUri();
-            if (schema.dialect().idKeyword().flatMap(object::string).isPresent()) {
-                resources.putIfAbsent(resourceBase, new Resource(schema.document(), schema.pointer()));
-            }
+            var identifier = Schema.identifier(object, schema.dialect()).filter(id -> !(schema.dialect().refOverridesSiblings() && object.has("$ref")));
+            identifier.filter(id -> !id.startsWith("#")).ifPresent(id -> resources.putIfAbsent(resourceBase, new Resource(schema.document(), schema.pointer())));
+            identifier.flatMap(id -> Uris.parse(id).toOptional()).map(Uris::fragment).filter(fragment -> !fragment.isEmpty() && !fragment.startsWith("/"))
+                .ifPresent(anchor -> anchors.putIfAbsent(anchor(resourceBase, anchor), schema));
             object.string("$anchor").ifPresent(anchor -> anchors.putIfAbsent(anchor(resourceBase, anchor), schema));
             object.string("$dynamicAnchor").ifPresent(anchor -> {
                 anchors.putIfAbsent(anchor(resourceBase, anchor), schema);
@@ -238,6 +260,7 @@ public final class SchemaRegistry {
                     continue;
                 }
                 var uri = target.toOptional().orElseThrow();
+                loader.loaded(uri).ifPresent(this::visitDocument);
                 var resolved = live.lookup(uri);
                 if (resolved.isEmpty() && !resources.containsKey(Uris.withoutFragment(uri))) {
                     var document = loader.load(uri);
@@ -245,6 +268,7 @@ public final class SchemaRegistry {
                         report(from, "Cannot resolve '" + ref + "': " + document.failure().orElseThrow().message());
                         continue;
                     }
+                    visitDocument(document.toOptional().orElseThrow());
                     resolved = live.lookup(uri);
                 }
                 resolved.ifPresentOrElse(this::visit, () -> report(from, "Cannot resolve '" + ref + "': target not found"));

@@ -50,14 +50,18 @@ public record Schema(JsonValue json, URI document, JsonPointer pointer, URI base
     }
 
     private static URI rebase(JsonValue json, URI parentBase, Dialect dialect) {
-        if (!(json instanceof JsonObject object)) {
+        if (!(json instanceof JsonObject object) || (dialect.refOverridesSiblings() && object.has("$ref"))) {
             return parentBase;
         }
-        return dialect.idKeyword()
-            .flatMap(object::string)
+        return identifier(object, dialect)
             .flatMap(id -> Uris.resolve(parentBase, id).toOptional())
             .map(Uris::withoutFragment)
             .orElse(parentBase);
+    }
+
+    /** The value of the dialect's identifier keyword ({@code $id} or {@code id}), if present. */
+    static Optional<String> identifier(JsonObject object, Dialect dialect) {
+        return dialect.idKeyword().flatMap(object::string);
     }
 
     /** The absolute location of this schema: document URI plus pointer fragment. */
