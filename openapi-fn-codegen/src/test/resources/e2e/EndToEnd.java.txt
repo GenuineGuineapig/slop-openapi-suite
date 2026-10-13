@@ -1,0 +1,64 @@
+package com.example.shop;
+
+import com.example.shop.api.*;
+import com.example.shop.model.*;
+import dev.openapifn.spring.FilePart;
+import dev.openapifn.spring.client.OpenApiHttpClient;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
+
+/** Calls every operation through the generated clients and describes the results. */
+public final class EndToEnd {
+
+    public static List<String> run(String baseUrl) {
+        var http = new OpenApiHttpClient(RestClient.builder().defaultHeader("X-Api-Key", "secret").build(), baseUrl, JsonMapper.builder().build());
+        var pets = new PetsClient(http);
+        var orders = new OrdersClient(http);
+        var defaults = new DefaultClient(http);
+        var results = new ArrayList<String>();
+
+        var listed = pets.listPets(ListPetsRequest.builder().limit(2).tags(List.of("a", "b")).xRequestId(UUID.randomUUID()).session("s").build());
+        if (listed instanceof ListPetsResponse.Ok ok) {
+            results.add("list:" + ok.xTotal() + ":" + ok.body().stream().map(p -> p.getClass().getSimpleName() + "/" + p.name()).toList());
+        }
+        var created = pets.createPet(new CreatePetRequest(Dog.builder().name("Bello").kind(Kind.DOG).barks(false).build()));
+        results.add(switch (created) {
+            case CreatePetResponse.Created c -> "created:" + c.location() + ":" + c.body().getClass().getSimpleName() + "/" + c.body().id();
+            case CreatePetResponse.Status4XX problem -> "problem:" + problem.status();
+        });
+        var rejected = pets.createPet(new CreatePetRequest(new Pet.Default(null, "error", Kind.BIRD, null, null)));
+        results.add(switch (rejected) {
+            case CreatePetResponse.Created c -> "unexpected";
+            case CreatePetResponse.Status4XX problem -> "problem:" + problem.status() + ":" + problem.body().detail();
+        });
+        var searched = pets.searchPets(new SearchPetsRequest(new SearchPetsRequest.Body("e")));
+        results.add("search:" + ((SearchPetsResponse.Ok) searched).body().size());
+        results.add("get:" + switch (pets.getPet(new GetPetRequest(2L))) {
+            case GetPetResponse.Ok ok -> ok.body().name();
+            case GetPetResponse.NotFound ignored -> "missing";
+        });
+        results.add("get404:" + (pets.getPet(new GetPetRequest(99L)) instanceof GetPetResponse.NotFound));
+        @SuppressWarnings("deprecation")
+        var deleted = pets.deletePet(new DeletePetRequest(1L));
+        results.add("delete:" + deleted.status());
+        var photo = pets.uploadPhoto(new UploadPhotoRequest(1L, new UploadPhotoRequest.Body(FilePart.of("p.png", "image/png",
+            "PNG".getBytes(StandardCharsets.UTF_8)), "caption", new UploadPhotoRequest.Body.Meta(10))));
+        var file = ((UploadPhotoResponse.Ok) photo).body();
+        results.add("photo:" + file.contentType() + ":" + file.text());
+        var order = ((GetOrderResponse.Status2XX) orders.getOrder(new GetOrderRequest(EndToEndIds.ORDER, List.of(GetOrderRequest.ExpandItem.ITEMS)))).body();
+        results.add("order:" + order.status() + ":" + order.priority() + ":" + order.payment() + ":" + order.shipping().getClass().getSimpleName()
+            + ":" + order.lines());
+        var pickup = ((GetOrderResponse.Status2XX) orders.getOrder(new GetOrderRequest(EndToEndIds.ORDER, List.of(GetOrderRequest.ExpandItem.CUSTOMER)))).body();
+        results.add("pickup:" + pickup.shipping());
+        results.add("events:" + ((OrderEventsResponse.Ok) orders.orderEvents()).body().stream().map(OrderEvent::type).toList());
+        results.add("health:" + ((HealthResponse.Ok) defaults.health()).body());
+        return results;
+    }
+
+    private EndToEnd() {
+    }
+}

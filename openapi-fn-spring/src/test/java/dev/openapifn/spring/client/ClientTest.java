@@ -85,6 +85,10 @@ class ClientTest {
         setup.server().expect(requestTo("https://api.example.com/v1/empty")).andRespond(withStatus(HttpStatus.NO_CONTENT));
         setup.server().expect(requestTo("https://api.example.com/v1/json-bytes")).andRespond(withSuccess("\"AQI=\"", MediaType.APPLICATION_JSON));
         setup.server().expect(requestTo("https://api.example.com/v1/untyped")).andRespond(withSuccess(new byte[] {3}, null));
+        setup.server().expect(requestTo("https://api.example.com/v1/lines")).andRespond(withSuccess("{\"a\":1}\n{\"a\":2}\n", MediaType.parseMediaType("application/jsonl")));
+        setup.server().expect(requestTo("https://api.example.com/v1/xml")).andRespond(withSuccess("<r><a>1</a></r>", MediaType.APPLICATION_XML));
+        setup.server().expect(requestTo("https://api.example.com/v1/broken")).andRespond(withSuccess("{\n", MediaType.parseMediaType("application/x-ndjson")));
+        setup.server().expect(requestTo("https://api.example.com/v1/raw")).andRespond(withSuccess("x", null));
         var client = setup.client();
         assertThat(client.<String>exchange(ClientCall.of("GET", "/text"), r -> r.status() + ":" + r.body(String.class))).isEqualTo("404:missing");
         assertThat(client.<byte[]>exchange(ClientCall.of("GET", "/bytes"), r -> r.body(byte[].class))).containsExactly(1, 2);
@@ -93,6 +97,13 @@ class ClientTest {
         assertThat(client.<byte[]>exchange(ClientCall.of("GET", "/json-bytes"), r -> r.body(byte[].class))).containsExactly(1, 2);
         assertThat(client.<FilePart>exchange(ClientCall.of("GET", "/untyped"), r -> r.body(FilePart.class)))
             .isEqualTo(new FilePart(null, FilePart.OCTET_STREAM, new byte[] {3}));
+        assertThat(client.<List<Map<String, Integer>>>exchange(ClientCall.of("GET", "/lines"), r -> r.body(new TypeReference<List<Map<String, Integer>>>() { })))
+            .containsExactly(Map.of("a", 1), Map.of("a", 2));
+        assertThat(client.<Map<String, String>>exchange(ClientCall.of("GET", "/xml"), r -> r.body(new TypeReference<Map<String, String>>() { })))
+            .containsEntry("a", "1");
+        assertThatThrownBy(() -> client.exchange(ClientCall.of("GET", "/broken"), r -> r.body(Object.class)))
+            .isInstanceOf(IllegalStateException.class).hasMessageStartingWith("Cannot decode application/x-ndjson content");
+        assertThat(client.<Object>exchange(ClientCall.of("GET", "/raw"), r -> r.body(Object.class))).isEqualTo("x");
         setup.server().verify();
     }
 

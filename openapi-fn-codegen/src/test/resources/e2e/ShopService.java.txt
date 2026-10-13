@@ -1,0 +1,95 @@
+package com.example.shop;
+
+import com.example.shop.api.*;
+import com.example.shop.model.*;
+import dev.openapifn.spring.FilePart;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ShopService implements PetsApi, OrdersApi, DefaultApi {
+
+    static final UUID ORDER = UUID.fromString("3fa85f64-5717-4562-b3fc-2c963f66afa6");
+
+    private static List<Pet> pets() {
+        return List.of(
+            Cat.builder().id(1L).name("Tom").kind(Kind.CAT).birthday(LocalDate.of(2020, 1, 2)).indoor(true).build(),
+            Dog.builder().id(2L).name("Rex").kind(Kind.DOG).barks(true).owner(new Pet.Owner("Ann", "ann@example.com")).build(),
+            new Pet.Default(3L, "Tweety", Kind.BIRD, null, null));
+    }
+
+    @Override
+    public ListPetsResponse listPets(ListPetsRequest request) {
+        var all = pets();
+        var limit = request.limit() == null ? 20 : request.limit();
+        return ListPetsResponse.ok(all.subList(0, Math.min(limit, all.size())), (long) all.size(), null);
+    }
+
+    @Override
+    public CreatePetResponse createPet(CreatePetRequest request) {
+        var pet = request.body();
+        if (pet.name().equals("error")) {
+            return CreatePetResponse.status4XX(422, new Problem("Invalid pet", 422, "name must not be 'error'"));
+        }
+        var created = switch (pet) {
+            case Cat cat -> cat.withId(10L);
+            case Dog dog -> dog.withId(11L);
+            case Pet.Default other -> other.withId(12L);
+        };
+        return CreatePetResponse.created(created, "/pets/" + created.id());
+    }
+
+    @Override
+    public SearchPetsResponse searchPets(SearchPetsRequest request) {
+        return SearchPetsResponse.ok(pets().stream().filter(p -> p.name().contains(request.body().text())).toList());
+    }
+
+    @Override
+    public GetPetResponse getPet(GetPetRequest request) {
+        return pets().stream().filter(p -> p.id() == request.petId()).findFirst()
+            .<GetPetResponse>map(GetPetResponse::ok)
+            .orElseGet(GetPetResponse::notFound);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public DeletePetResponse deletePet(DeletePetRequest request) {
+        return DeletePetResponse.noContent();
+    }
+
+    @Override
+    public UploadPhotoResponse uploadPhoto(UploadPhotoRequest request) {
+        var file = request.body().file();
+        return UploadPhotoResponse.ok(FilePart.of("photo.png", "image/png", file.content()));
+    }
+
+    @Override
+    public GetOrderResponse getOrder(GetOrderRequest request) {
+        var order = Order.builder()
+            .id(request.orderId())
+            .status(OrderStatus.VALUE_3_DAY)
+            .priority(Priority.VALUE_3)
+            .lines(List.of(new Order.LinesItem("sku-1", 2)))
+            .total(new BigDecimal("12.50"))
+            .attributes(Map.of("gift", "yes"))
+            .payment(new Card("card", "4242"))
+            .shipping(request.expand() != null && request.expand().contains(GetOrderRequest.ExpandItem.CUSTOMER) ? new Shipping.StringValue("pickup")
+                : new Address("Main St 1", "Springfield", Map.of("zip", "12345")))
+            .build();
+        return GetOrderResponse.status2XX(200, order);
+    }
+
+    @Override
+    public OrderEventsResponse orderEvents() {
+        return OrderEventsResponse.ok(List.of(new OrderEvent("placed", ORDER), new OrderEvent("paid", ORDER)));
+    }
+
+    @Override
+    public HealthResponse health() {
+        return HealthResponse.ok("UP");
+    }
+}

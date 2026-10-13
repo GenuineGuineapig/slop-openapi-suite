@@ -1,9 +1,13 @@
 package dev.openapifn.spring.client;
 
+import dev.openapifn.http.BodyParser;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Headers;
+import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonString;
+import dev.openapifn.model.MediaType;
+import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.spring.FilePart;
 import dev.openapifn.spring.JacksonJson;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +20,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** A received response, decoded on demand into the types of generated response records. */
 public final class ClientResponse {
+
+    private static final BodyParser PARSER = new BodyParser(new SchemaShapes(SchemaRegistry.empty()));
+    private static final ContentType OCTET_STREAM = ContentType.parse(FilePart.OCTET_STREAM).orElseThrow();
 
     private final int status;
     private final Headers headers;
@@ -70,8 +77,12 @@ public final class ClientResponse {
         if (contentType.filter(ContentType::isJson).isPresent()) {
             return mapper.readValue(body, type);
         }
-        var text = new String(body, StandardCharsets.UTF_8);
-        return raw == String.class ? (T) text : mapper.convertValue(text, type);
+        if (raw == String.class) {
+            return (T) new String(body, StandardCharsets.UTF_8);
+        }
+        var parsed = PARSER.parse(body, contentType.orElse(OCTET_STREAM), MediaType.EMPTY);
+        return mapper.treeToValue(JacksonJson.toJsonNode(parsed.toOptional().orElseThrow(() ->
+            new IllegalStateException("Cannot decode " + contentType().orElse("") + " content: " + parsed.failure().orElse("")))), type);
     }
 
     /** The header {@code name} converted to {@code type} ({@code simple} style), or {@code null} when absent. */
