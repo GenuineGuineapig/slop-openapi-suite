@@ -7,6 +7,7 @@ import dev.openapifn.schema.SchemaValidator;
 import dev.openapifn.spring.OpenApiExceptionHandler;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
+import dev.openapifn.spring.client.OpenApiClients;
 import dev.openapifn.spring.servlet.OpenApiValidationFilter;
 import dev.openapifn.validation.LevelPolicy;
 import dev.openapifn.validation.OpenApiValidator;
@@ -16,11 +17,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -80,5 +83,15 @@ public class OpenApiFnAutoConfiguration {
     @ConditionalOnMissingBean
     public OpenApiExceptionHandler openApiExceptionHandler() {
         return new OpenApiExceptionHandler();
+    }
+
+    /** Clients use the application's {@code RestClient.Builder} (a fresh clone each time) when there is one. */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(RestClient.class)
+    public OpenApiClients openApiClients(OpenApiFnProperties properties, ObjectProvider<RestClient.Builder> builder,
+                                         ObjectProvider<OpenApiRuntimes> runtimes, ObjectProvider<JsonMapper> mapper) {
+        return new OpenApiClients(properties, () -> builder.getIfAvailable(RestClient::builder).clone(), runtimes::getObject,
+            mapper.getIfAvailable(JsonMapper::new));
     }
 }
