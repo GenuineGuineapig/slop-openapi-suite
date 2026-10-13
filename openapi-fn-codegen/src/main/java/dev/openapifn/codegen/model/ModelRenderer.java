@@ -113,8 +113,9 @@ public final class ModelRenderer {
         var name = record.name();
         var components = new ArrayList<String>();
         for (var property : record.properties()) {
-            var include = property.required() && property.nullable() ? "@" + imports.ref(JSON_INCLUDE) + "(" + imports.ref(JSON_INCLUDE)
-                + ".Include.ALWAYS) " : "";
+            var resolved = mapper.registry().deref(property.schema());
+            var include = property.required() && property.nullable() && !resolved.readOnly() && !resolved.writeOnly()
+                ? "@" + imports.ref(JSON_INCLUDE) + "(" + imports.ref(JSON_INCLUDE) + ".Include.ALWAYS) " : "";
             components.add(include + "@" + imports.ref(JSON_PROPERTY) + "(" + Names.literal(property.jsonName()) + ") " + type(property, imports)
                 + " " + property.javaName());
         }
@@ -152,7 +153,7 @@ public final class ModelRenderer {
             if (property.required() && !property.nullable()) {
                 statements.add(imports.ref(OBJECTS) + ".requireNonNull(" + name + ", " + Names.literal(name) + ");");
             }
-            copy(property.type(), name, imports).ifPresent(statements::add);
+            copy(property.type(), name, property.nullable(), imports).ifPresent(statements::add);
         }
         record.additionalProperties().ifPresent(v -> statements.add("additionalProperties = additionalProperties == null ? new " + imports.ref(LINKED_HASH_MAP)
             + "<>() : new " + imports.ref(LINKED_HASH_MAP) + "<>(additionalProperties);"));
@@ -165,19 +166,16 @@ public final class ModelRenderer {
     }
 
     /** An immutable copy of a collection-valued property (tolerating {@code null} elements). */
-    private static Optional<String> copy(TypeRef type, String name, Imports imports) {
+    private static Optional<String> copy(TypeRef type, String name, boolean nullable, Imports imports) {
         if (!(type instanceof TypeRef.Parameterized parameterized)) {
             return Optional.empty();
         }
         var raw = parameterized.raw();
         var collections = imports.ref(COLLECTIONS);
-        if (raw.equals(TypeRef.LIST)) {
-            return Optional.of(name + " = " + name + " == null ? null : " + collections + ".unmodifiableList(new " + imports.ref(ARRAY_LIST) + "<>(" + name + "));");
-        }
-        if (raw.equals(TypeRef.SET)) {
-            return Optional.of(name + " = " + name + " == null ? null : " + collections + ".unmodifiableSet(new " + imports.ref(LINKED_HASH_SET) + "<>(" + name + "));");
-        }
-        return Optional.of(name + " = " + name + " == null ? null : " + collections + ".unmodifiableMap(new " + imports.ref(LINKED_HASH_MAP) + "<>(" + name + "));");
+        var copy = raw.equals(TypeRef.LIST) ? collections + ".unmodifiableList(new " + imports.ref(ARRAY_LIST) + "<>(" + name + "))"
+            : raw.equals(TypeRef.SET) ? collections + ".unmodifiableSet(new " + imports.ref(LINKED_HASH_SET) + "<>(" + name + "))"
+            : collections + ".unmodifiableMap(new " + imports.ref(LINKED_HASH_MAP) + "<>(" + name + "))";
+        return Optional.of(name + " = " + (nullable ? name + " == null ? null : " : "") + copy + ";");
     }
 
     /** A Java literal for a property's {@code default}, when it has a simple type. */

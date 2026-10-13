@@ -56,13 +56,55 @@ public final class TypeMapper {
     private final Map<ClassName, Set<ClassName>> interfaces = new HashMap<>();
     private final Map<URI, List<Schema>> children = new HashMap<>();
     private final Set<URI> inProgress = new HashSet<>();
+    private final Map<URI, TypeRef> inline = new HashMap<>();
 
     public TypeMapper(OpenApiDocument api, String modelPackage) {
         this.api = api;
         this.registry = api.schemas();
         this.modelPackage = modelPackage;
         api.model().components().schemas().forEach((name, schema) -> names.put(registry.deref(schema).location(), Names.unique(Names.pascal(name), takenNames)));
-        api.model().components().schemas().values().forEach(this::indexChildren);
+        var visited = new HashSet<URI>();
+        api.model().components().schemas().values().forEach(schema -> index(schema, visited));
+        api.operations().forEach(operation -> operationSchemas(operation).forEach(schema -> index(schema, visited)));
+    }
+
+    /** The schemas an operation uses directly: parameters, bodies, sequential items and headers. */
+    private static List<Schema> operationSchemas(dev.openapifn.model.ApiOperation operation) {
+        var schemas = new ArrayList<Schema>();
+        operation.parameters().forEach(parameter -> parameter.effectiveSchema().ifPresent(schemas::add));
+        var mediaTypes = new ArrayList<dev.openapifn.model.MediaType>();
+        operation.operation().requestBody().ifPresent(body -> mediaTypes.addAll(body.content().values()));
+        var responses = new ArrayList<>(operation.operation().responses().byStatus().values());
+        operation.operation().responses().defaultResponse().ifPresent(responses::add);
+        responses.forEach(response -> {
+            mediaTypes.addAll(response.content().values());
+            response.headers().values().forEach(header -> header.schema().ifPresent(schemas::add));
+        });
+        mediaTypes.forEach(mediaType -> {
+            mediaType.schema().ifPresent(schemas::add);
+            mediaType.itemSchema().ifPresent(schemas::add);
+        });
+        return schemas;
+    }
+
+    /** Walks everything reachable from {@code schema} to find polymorphic parents and their children. */
+    private void index(Schema schema, Set<URI> visited) {
+        var resolved = registry.deref(schema);
+        if (!visited.add(resolved.location())) {
+            return;
+        }
+        indexChildren(resolved);
+        resolved.discriminator().ifPresent(d -> d.mapping().values().forEach(value -> registry.resolveMapping(resolved, value)
+            .ifPresent(target -> index(target, visited))));
+        for (var keyword : List.of("allOf", "oneOf", "anyOf", "prefixItems")) {
+            resolved.subschemaList(keyword).forEach(member -> index(member, visited));
+        }
+        for (var keyword : List.of("items", "additionalProperties", "not", "if", "then", "else", "contains", "unevaluatedProperties", "unevaluatedItems")) {
+            resolved.subschema(keyword).ifPresent(member -> index(member, visited));
+        }
+        for (var keyword : List.of("properties", "patternProperties", "$defs", "definitions", "dependentSchemas")) {
+            resolved.subschemaMap(keyword).values().forEach(member -> index(member, visited));
+        }
     }
 
     /** Defines the classes of all component schemas. */
@@ -105,9 +147,17 @@ public final class TypeMapper {
         if (nullFree.isPresent()) {
             return type(nullFree.get(), owner, hint);
         }
+        var known = inline.get(schema.location());
+        if (known != null) {
+            return known;
+        }
         var kind = kind(schema);
         return switch (kind) {
-            case ENUM, UNION, OBJECT, PARENT -> define(schema, kind, uniqueNested(owner, Names.pascal(hint)));
+            case ENUM, UNION, OBJECT, PARENT -> {
+                var name = uniqueNested(owner, Names.pascal(hint));
+                inline.put(schema.location(), name);
+                yield define(schema, kind, name);
+            }
             default -> structural(schema, kind, owner, hint);
         };
     }
@@ -309,22 +359,15 @@ public final class TypeMapper {
         return closure(schema).stream().flatMap(s -> s.subschema("additionalProperties").stream()).filter(s -> !s.isBooleanSchema()).findFirst();
     }
 
-    private void indexChildren(Schema schema) {
-        var resolved = registry.deref(schema);
+    private void indexChildren(Schema resolved) {
         for (var member : resolved.subschemaList("allOf")) {
             if (member.ref().isPresent()) {
                 var parent = registry.deref(member);
-                if (parent.discriminator().isPresent()) {
+                if (parent.discriminator().isPresent() && parent.subschemaList("oneOf").isEmpty() && parent.subschemaList("anyOf").isEmpty()) {
                     children.computeIfAbsent(parent.location(), uri -> new ArrayList<>()).add(resolved);
                 }
             }
         }
-        resolved.discriminator().ifPresent(d -> d.mapping().values().forEach(value -> registry.resolveMapping(resolved, value)
-            .filter(target -> !names.containsKey(target.location()))
-            .ifPresent(target -> {
-                names.put(target.location(), Names.unique(baseName(target), takenNames));
-                indexChildren(target);
-            })));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -367,11 +410,17 @@ public final class TypeMapper {
 
     private List<Property> properties(Schema schema, ClassName owner) {
         var members = closure(schema);
+        var self = registry.deref(schema).location();
         var required = new HashSet<String>();
         members.forEach(member -> required.addAll(member.required()));
         var declared = new LinkedHashMap<String, Schema>();
+        var declaringOwner = new HashMap<String, ClassName>();
         for (var member : members.reversed()) {
-            declared.putAll(member.subschemaMap("properties"));
+            var memberOwner = member.location().equals(self) ? owner : ownerOf(member).orElse(owner);
+            member.subschemaMap("properties").forEach((key, property) -> {
+                declared.put(key, property);
+                declaringOwner.put(key, memberOwner);
+            });
         }
         var ordered = new LinkedHashMap<String, Schema>();
         members.forEach(member -> member.subschemaMap("properties").keySet().forEach(key -> ordered.putIfAbsent(key, declared.get(key))));
@@ -379,17 +428,22 @@ public final class TypeMapper {
         var properties = new ArrayList<Property>();
         ordered.forEach((jsonName, property) -> {
             var javaName = Names.unique(Names.camel(jsonName), javaNames);
-            var type = type(property, owner, Names.pascal(jsonName));
-            var isRequired = required.contains(jsonName);
-            properties.add(new Property(jsonName, javaName, type, isRequired, !isRequired || nullable(property), property));
+            var type = type(property, declaringOwner.get(jsonName), Names.pascal(jsonName));
+            var resolved = registry.deref(property);
+            var nonNull = required.contains(jsonName) && !resolved.readOnly() && !resolved.writeOnly() && !nullable(property);
+            properties.add(new Property(jsonName, javaName, type, required.contains(jsonName), !nonNull, property));
         });
-        var self = registry.deref(schema).location();
         for (var member : members) {
             if (!member.location().equals(self) && isParent(member) && namedType(member) instanceof ClassName parent) {
                 interfaces.computeIfAbsent(owner, key -> new LinkedHashSet<>()).add(parent);
             }
         }
         return properties;
+    }
+
+    /** The generated class of a named schema composed into another one, which owns its inline property types. */
+    private Optional<ClassName> ownerOf(Schema member) {
+        return names.containsKey(member.location()) && namedType(member) instanceof ClassName className ? Optional.of(className) : Optional.empty();
     }
 
     private ParentDef parentDef(Schema schema, ClassName name) {

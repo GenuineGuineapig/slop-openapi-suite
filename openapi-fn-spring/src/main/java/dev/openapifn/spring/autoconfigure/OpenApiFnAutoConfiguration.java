@@ -14,6 +14,7 @@ import dev.openapifn.validation.OpenApiValidator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -23,6 +24,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -36,8 +38,8 @@ public class OpenApiFnAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public OpenApiRuntimes openApiRuntimes(OpenApiFnProperties properties, ObjectProvider<JsonMapper> mapper) {
-        var classLoader = OpenApiFnAutoConfiguration.class.getClassLoader();
+    public OpenApiRuntimes openApiRuntimes(OpenApiFnProperties properties, ObjectProvider<JsonMapper> mapper, ResourceLoader resourceLoader) {
+        var classLoader = Objects.requireNonNullElse(resourceLoader.getClassLoader(), OpenApiFnAutoConfiguration.class.getClassLoader());
         var loader = new OpenApiLoader(ResourceLoaders.bySchemes(Map.of("file", ResourceLoaders.fileSystem(),
             Uris.CLASSPATH_SCHEME, ResourceLoaders.classpath(classLoader))));
         var jsonMapper = mapper.getIfAvailable(JsonMapper::new);

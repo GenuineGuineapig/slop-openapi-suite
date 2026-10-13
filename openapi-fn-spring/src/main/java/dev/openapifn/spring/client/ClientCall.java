@@ -14,9 +14,9 @@ import org.jspecify.annotations.Nullable;
  * @param pathTemplate path template such as {@code /pets/{petId}}
  * @param parameters parameter values in declaration order
  * @param body the body, if any
- * @param accept acceptable media types
+ * @param acceptTypes acceptable media types
  */
-public record ClientCall(String method, String pathTemplate, List<Param> parameters, @Nullable Body body, List<String> accept) {
+public record ClientCall(String method, String pathTemplate, List<Param> parameters, @Nullable Body body, List<String> acceptTypes) {
 
     /**
      * A parameter value.
@@ -58,7 +58,7 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
 
     public ClientCall {
         parameters = List.copyOf(parameters);
-        accept = List.copyOf(accept);
+        acceptTypes = List.copyOf(acceptTypes);
     }
 
     public static ClientCall of(String method, String pathTemplate) {
@@ -72,18 +72,18 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
         }
         var copy = new ArrayList<>(parameters);
         copy.add(new Param(spec, value));
-        return new ClientCall(method, pathTemplate, copy, body, accept);
+        return new ClientCall(method, pathTemplate, copy, body, acceptTypes);
     }
 
     /** A copy with a body; a {@code null} value means no body. */
     public ClientCall body(String contentType, @Nullable Object value) {
-        return new ClientCall(method, pathTemplate, parameters, value == null ? null : new Body(contentType, value), accept);
+        return new ClientCall(method, pathTemplate, parameters, value == null ? null : new Body(contentType, value), acceptTypes);
     }
 
     /** A copy with a {@code multipart/form-data} body of the non-null parts. */
     public ClientCall multipart(List<@Nullable Part> parts) {
         return new ClientCall(method, pathTemplate, parameters, new Body("multipart/form-data", parts.stream().filter(Objects::nonNull).toList()),
-            accept);
+            acceptTypes);
     }
 
     public ClientCall accept(String... mediaTypes) {

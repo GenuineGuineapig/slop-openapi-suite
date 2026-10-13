@@ -107,8 +107,8 @@ public final class Names {
         return out.append('"').toString();
     }
 
-    /** Javadoc text: {@code *}{@code /} and {@code @} sequences are neutralized. */
+    /** Javadoc text: comment terminators and line-leading {@code @} (which would start a block tag) are neutralized. */
     public static String javadoc(String text) {
-        return text.replace("*/", "*&#47;").replace("@", "{@literal @}").strip();
+        return text.replace("*/", "*&#47;").replaceAll("(?m)^(\\s*)@", "$1&#64;").strip();
     }
 }

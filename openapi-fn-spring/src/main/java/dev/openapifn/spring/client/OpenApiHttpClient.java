@@ -65,8 +65,8 @@ public final class OpenApiHttpClient {
         if (!cookies.isEmpty()) {
             request.header("Cookie", ParameterSerializer.cookieHeader(cookies));
         }
-        if (!call.accept().isEmpty()) {
-            request.header("Accept", String.join(", ", call.accept()));
+        if (!call.acceptTypes().isEmpty()) {
+            request.header("Accept", String.join(", ", call.acceptTypes()));
         }
         var body = call.body();
         if (body != null) {

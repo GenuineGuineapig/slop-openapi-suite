@@ -81,7 +81,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
 
         /** The {@code static} factory method name, e.g. {@code ok}. */
         public String factory() {
-            return Character.toLowerCase(name.charAt(0)) + name.substring(1);
+            return name.equals("Default") ? "defaultResponse" : Names.identifier(Character.toLowerCase(name.charAt(0)) + name.substring(1));
         }
 
         public ClassName className(ClassName response) {

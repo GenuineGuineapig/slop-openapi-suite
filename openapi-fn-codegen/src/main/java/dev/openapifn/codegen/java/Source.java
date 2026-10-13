@@ -8,9 +8,11 @@ public final class Source {
     private final StringBuilder out = new StringBuilder();
     private int depth;
 
-    /** Appends an indented line. */
+    /** Appends {@code text} indented; embedded line breaks continue at the same indentation. */
     public Source line(String text) {
-        out.append(INDENT.repeat(depth)).append(text).append('\n');
+        for (var piece : text.split("\n", -1)) {
+            out.append(INDENT.repeat(depth)).append(piece).append('\n');
+        }
         return this;
     }
 
