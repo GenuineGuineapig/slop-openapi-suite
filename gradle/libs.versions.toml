@@ -1,0 +1,16 @@
+[versions]
+spring-boot = "4.1.1"
+snakeyaml-engine = "3.2"
+junit = "6.0.3"
+assertj = "3.27.7"
+mockito = "5.23.0"
+jacoco = "0.8.15"
+
+[libraries]
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+snakeyaml-engine = { module = "org.snakeyaml:snakeyaml-engine", version.ref = "snakeyaml-engine" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+mockito = { module = "org.mockito:mockito-core", version.ref = "mockito" }
