@@ -59,25 +59,36 @@ public final class OpenApiValidator {
      *     (otherwise paths are also matched without it)
      * @param headFallsBackToGet whether {@code HEAD} requests use the {@code GET} operation when
      *     no {@code HEAD} operation is described
+     * @param basePaths additional path prefixes (such as the path an application mounts the API
+     *     on) accepted in front of every operation path
      */
-    public record Options(LevelPolicy levels, SchemaValidator.Options schema, boolean requireServerPrefix, boolean headFallsBackToGet) {
+    public record Options(LevelPolicy levels, SchemaValidator.Options schema, boolean requireServerPrefix, boolean headFallsBackToGet,
+                          List<String> basePaths) {
 
-        public static final Options DEFAULT = new Options(LevelPolicy.DEFAULT, SchemaValidator.Options.DEFAULT, false, true);
+        public static final Options DEFAULT = new Options(LevelPolicy.DEFAULT, SchemaValidator.Options.DEFAULT, false, true, List.of());
+
+        public Options {
+            basePaths = List.copyOf(basePaths);
+        }
 
         public Options withLevels(LevelPolicy value) {
-            return new Options(value, schema, requireServerPrefix, headFallsBackToGet);
+            return new Options(value, schema, requireServerPrefix, headFallsBackToGet, basePaths);
         }
 
         public Options withSchema(SchemaValidator.Options value) {
-            return new Options(levels, value, requireServerPrefix, headFallsBackToGet);
+            return new Options(levels, value, requireServerPrefix, headFallsBackToGet, basePaths);
         }
 
         public Options withRequireServerPrefix(boolean value) {
-            return new Options(levels, schema, value, headFallsBackToGet);
+            return new Options(levels, schema, value, headFallsBackToGet, basePaths);
         }
 
         public Options withHeadFallsBackToGet(boolean value) {
-            return new Options(levels, schema, requireServerPrefix, value);
+            return new Options(levels, schema, requireServerPrefix, value, basePaths);
+        }
+
+        public Options withBasePaths(List<String> value) {
+            return new Options(levels, schema, requireServerPrefix, headFallsBackToGet, value);
         }
     }
 
@@ -109,7 +120,7 @@ public final class OpenApiValidator {
     private OpenApiValidator(OpenApiDocument api, Options options) {
         this.api = api;
         this.options = options;
-        this.router = new Router(api, options.requireServerPrefix(), options.headFallsBackToGet());
+        this.router = new Router(api, options.requireServerPrefix(), options.headFallsBackToGet(), options.basePaths());
         this.schemas = new SchemaValidator(api.schemas(), options.schema());
         this.shapes = new SchemaShapes(api.schemas());
         this.parameters = new ParameterParser(shapes);

@@ -28,7 +28,11 @@ public final class Router {
     private final boolean requireServerPrefix;
     private final boolean headFallsBackToGet;
 
-    public Router(OpenApiDocument api, boolean requireServerPrefix, boolean headFallsBackToGet) {
+    /**
+     * A router that also accepts {@code basePaths} (such as a configured mount point) as prefixes
+     * of every path, in addition to the server URL paths.
+     */
+    public Router(OpenApiDocument api, boolean requireServerPrefix, boolean headFallsBackToGet, List<String> basePaths) {
         this.requireServerPrefix = requireServerPrefix;
         this.headFallsBackToGet = headFallsBackToGet;
         var byPath = new LinkedHashMap<String, Map<String, ApiOperation>>();
@@ -36,7 +40,9 @@ public final class Router {
         var list = new ArrayList<Entry>();
         byPath.forEach((path, operations) -> {
             var servers = operations.values().iterator().next().pathItem().servers();
-            var prefixes = (servers.isEmpty() ? api.model().servers() : servers).stream().map(Router::prefix).distinct().map(PathTemplate::compile).toList();
+            var paths = new ArrayList<>(basePaths);
+            (servers.isEmpty() ? api.model().servers() : servers).stream().map(Router::prefix).forEach(paths::add);
+            var prefixes = paths.stream().distinct().map(PathTemplate::compile).toList();
             list.add(new Entry(PathTemplate.compile(path), prefixes, operations));
         });
         list.sort(Comparator.comparing(Entry::template, PathTemplate::compareSpecificity));

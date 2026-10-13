@@ -44,6 +44,9 @@ class OpenApiValidatorTest {
         assertThat(request(HttpRequest.of("GET", "/pets").withHeader("X-API-Key", "k").withHeader("X-Request-Id", ID))).isEmpty();
         var strict = OpenApiValidator.of(API, OpenApiValidator.Options.DEFAULT.withRequireServerPrefix(true));
         assertThat(issues(strict.validateRequest(HttpRequest.of("GET", "/pets")).report())).containsExactly("request.path.missing@path");
+        var mounted = OpenApiValidator.of(API, OpenApiValidator.Options.DEFAULT.withRequireServerPrefix(true).withBasePaths(List.of("/mounted/api")));
+        assertThat(mounted.validateRequest(HttpRequest.of("GET", "/mounted/api/pets/mine")).match()).isPresent();
+        assertThat(mounted.options().basePaths()).containsExactly("/mounted/api");
         assertThat(request(HttpRequest.of("GET", "/v1/unknown"))).containsExactly("request.path.missing@path");
         assertThat(request(HttpRequest.of("PATCH", "/v1/pets"))).containsExactly("request.operation.notAllowed@method");
         assertThat(VALIDATOR.validateRequest(HttpRequest.of("GET", "/v1/pets/mine")).match().orElseThrow().operation().operationId())
