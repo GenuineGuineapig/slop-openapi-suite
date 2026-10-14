@@ -248,6 +248,8 @@ public final class SchemaRegistry {
                 anchors.putIfAbsent(anchor(resourceBase, anchor), schema);
                 dynamicAnchors.computeIfAbsent(resourceBase, uri -> new HashMap<>()).putIfAbsent(anchor, schema);
             });
+            object.object("xml").filter(xml -> xml.has("nodeType") && (xml.has("attribute") || xml.has("wrapped")))
+                .ifPresent(xml -> report(schema, "XML 'nodeType' cannot be combined with 'attribute' or 'wrapped'"));
             object.string("$ref").ifPresent(ref -> pending.add(Map.entry(schema, ref)));
             object.string("$dynamicRef").ifPresent(ref -> pending.add(Map.entry(schema, ref)));
             schema.discriminator().ifPresent(d -> d.mapping().values().forEach(value -> pending.add(Map.entry(schema, mappingTarget(schema, value)))));

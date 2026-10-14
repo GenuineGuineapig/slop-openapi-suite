@@ -139,7 +139,7 @@ class OpenApiFnPluginTest {
 
     @Test
     void honoursTheToggles() throws Exception {
-        write("api.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object") + "x-unknown: 1\nunknown: 1\n");
+        write("api.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object") + "x-unknown: 1\njsonSchemaDialect: https://example.com/custom-dialect\n");
         var project = project(true);
         var task = register(project, "pets", "api.yaml");
         extension(project).getSpecs().getByName("pets", spec -> {

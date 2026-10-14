@@ -48,13 +48,14 @@ class MainTest {
     void writesEverythingToTheOutputByDefault() throws Exception {
         var spec = Files.writeString(dir.resolve("api.yaml"), """
             openapi: 3.1.0
-            info: {title: t, version: v, colour: red}
+            info: {title: t, version: v}
+            jsonSchemaDialect: https://example.com/custom-dialect
             paths: {}
             """);
         var code = run("--spec", spec.toString(), "--name", "t", "--package", "t", "--output", dir.resolve("out").toString(), "--no-server",
             "--no-tests");
         assertThat(code).as(err()).isZero();
-        assertThat(err()).contains("Unknown field 'colour'");
+        assertThat(err()).contains("Unknown jsonSchemaDialect 'https://example.com/custom-dialect'");
         assertThat(dir.resolve("out/META-INF/openapi-fn/t/spec.properties")).exists();
         assertThat(dir.resolve("out/t/TClients.java")).exists();
     }

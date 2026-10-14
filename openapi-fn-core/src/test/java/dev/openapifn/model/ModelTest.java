@@ -18,7 +18,11 @@ class ModelTest {
 
     @Test
     void specVersions() {
-        assertThat(SpecVersion.of("3.1")).contains(SpecVersion.V3_1);
+        assertThat(SpecVersion.of("3.1")).isEmpty();
+        assertThat(SpecVersion.of("3.1.0")).contains(SpecVersion.V3_1);
+        assertThat(SpecVersion.of("3.1.1-rc1")).contains(SpecVersion.V3_1);
+        assertThat(SpecVersion.of("3.2.\u09ea")).isEmpty();
+        assertThat(SpecVersion.V3_2.prefix()).isEqualTo("3.2");
         assertThat(SpecVersion.of("3.0.4")).contains(SpecVersion.V3_0);
         assertThat(SpecVersion.of("3.2.0")).contains(SpecVersion.V3_2);
         assertThat(SpecVersion.of("3.10.0")).isEmpty();

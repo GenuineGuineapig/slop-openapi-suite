@@ -82,8 +82,8 @@ final class OpenApiParser {
     private static final Set<String> HEADER_FIELDS = Set.of("description", "required", "deprecated", "style", "explode", "schema", "example",
         "examples", "content");
     private static final Set<String> REQUEST_BODY_FIELDS = Set.of("description", "content", "required");
-    private static final Set<String> MEDIA_TYPE_FIELDS = Set.of("schema", "itemSchema", "example", "examples", "encoding", "prefixEncoding",
-        "itemEncoding");
+    private static final Set<String> MEDIA_TYPE_FIELDS = Set.of("description", "schema", "itemSchema", "example", "examples", "encoding",
+        "prefixEncoding", "itemEncoding");
     private static final Set<String> ENCODING_FIELDS = Set.of("contentType", "headers", "style", "explode", "allowReserved", "encoding",
         "prefixEncoding", "itemEncoding");
     private static final Set<String> RESPONSE_FIELDS = Set.of("summary", "description", "headers", "content", "links");
@@ -95,6 +95,27 @@ final class OpenApiParser {
     private static final Set<String> OAUTH_FLOWS_FIELDS = Set.of("implicit", "password", "clientCredentials", "authorizationCode",
         "deviceAuthorization");
     private static final Set<String> OAUTH_FLOW_FIELDS = Set.of("authorizationUrl", "deviceAuthorizationUrl", "tokenUrl", "refreshUrl", "scopes");
+
+    /** Fields added after OpenAPI 3.0, by object type: they are errors in descriptions of earlier versions. */
+    private static final Map<String, Map<String, SpecVersion>> INTRODUCED = Map.ofEntries(
+        Map.entry("OpenAPI Object", Map.of("webhooks", SpecVersion.V3_1, "jsonSchemaDialect", SpecVersion.V3_1, "$self", SpecVersion.V3_2)),
+        Map.entry("Info Object", Map.of("summary", SpecVersion.V3_1)),
+        Map.entry("License Object", Map.of("identifier", SpecVersion.V3_1)),
+        Map.entry("Server Object", Map.of("name", SpecVersion.V3_2)),
+        Map.entry("Components Object", Map.of("pathItems", SpecVersion.V3_1, "mediaTypes", SpecVersion.V3_2)),
+        Map.entry("Path Item Object", Map.of("query", SpecVersion.V3_2, "additionalOperations", SpecVersion.V3_2)),
+        Map.entry("Media Type Object", Map.of("description", SpecVersion.V3_2, "itemSchema", SpecVersion.V3_2, "prefixEncoding", SpecVersion.V3_2,
+            "itemEncoding", SpecVersion.V3_2)),
+        Map.entry("Encoding Object", Map.of("encoding", SpecVersion.V3_2, "prefixEncoding", SpecVersion.V3_2, "itemEncoding", SpecVersion.V3_2)),
+        Map.entry("Response Object", Map.of("summary", SpecVersion.V3_2)),
+        Map.entry("Example Object", Map.of("dataValue", SpecVersion.V3_2, "serializedValue", SpecVersion.V3_2)),
+        Map.entry("Tag Object", Map.of("summary", SpecVersion.V3_2, "parent", SpecVersion.V3_2, "kind", SpecVersion.V3_2)),
+        Map.entry("Security Scheme Object", Map.of("deprecated", SpecVersion.V3_2, "oauth2MetadataUrl", SpecVersion.V3_2)),
+        Map.entry("OAuth Flows Object", Map.of("deviceAuthorization", SpecVersion.V3_2)),
+        Map.entry("OAuth Flow Object", Map.of("deviceAuthorizationUrl", SpecVersion.V3_2)));
+
+    /** Header names are HTTP field names (RFC 9110 tokens). */
+    private static final java.util.regex.Pattern TOKEN = java.util.regex.Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private final DocumentLoader loader;
     private final List<Diagnostic> diagnostics = new ArrayList<>();
@@ -127,6 +148,7 @@ final class OpenApiParser {
             return Optional.empty();
         }
         version = detected.get();
+        root.introduced("OpenAPI Object");
         var dialect = root.string("jsonSchemaDialect");
         defaultDialect = version == SpecVersion.V3_0
             ? Dialect.OAS_3_0
@@ -260,12 +282,12 @@ final class OpenApiParser {
                 .filter(p -> p.in() == ParameterLocation.PATH).map(Parameter::name).toList();
             for (var name : templated) {
                 if (!declared.contains(name)) {
-                    error(cursor, method + " " + path + ": path parameter '" + name + "' is not declared");
+                    warning(cursor, method + " " + path + ": path parameter '" + name + "' is not declared");
                 }
             }
             for (var name : declared) {
                 if (!templated.contains(name)) {
-                    error(cursor, method + " " + path + ": path parameter '" + name + "' does not occur in the path template");
+                    warning(cursor, method + " " + path + ": path parameter '" + name + "' does not occur in the path template");
                 }
             }
         });
@@ -292,7 +314,10 @@ final class OpenApiParser {
         var local = new PathItem(obj.string("summary"), obj.string("description"), operations, obj.list("servers", this::server),
             obj.list("parameters", c -> component(c, PARAMETER_FIELDS, this::parameter)), obj.extensions());
         checkDuplicateParameters(cursor, local.parameters());
-        return Optional.of(referenced.map(base -> merge(base, local)).orElse(local));
+        var item = referenced.map(base -> merge(base, local)).orElse(local);
+        checkQuerystring(cursor, item.parameters());
+        item.operations().values().forEach(operation -> checkQuerystring(cursor, operation.effectiveParameters(item)));
+        return Optional.of(item);
     }
 
     private static PathItem merge(PathItem base, PathItem local) {
@@ -352,6 +377,15 @@ final class OpenApiParser {
             return Optional.empty();
         }
         var location = in.get();
+        if (location == ParameterLocation.QUERYSTRING && version.compareTo(SpecVersion.V3_2) < 0) {
+            error(cursor, "Querystring parameters require OpenAPI 3.2");
+        }
+        if (location == ParameterLocation.PATH && (name.contains("{") || name.contains("}"))) {
+            error(cursor, "Path parameter name '" + name + "' must not contain '{' or '}'");
+        }
+        if (location == ParameterLocation.HEADER && !TOKEN.matcher(name).matches()) {
+            error(cursor, "Header parameter name '" + name + "' is not a valid HTTP field name");
+        }
         var style = obj.string("style").flatMap(value -> {
             var parsed = ParameterStyle.of(value);
             if (parsed.isEmpty()) {
@@ -362,9 +396,17 @@ final class OpenApiParser {
         if (!allowedStyles(location).contains(style)) {
             error(cursor, "Style '" + style.value() + "' is not allowed for " + location.value() + " parameters");
         }
+        if (style == ParameterStyle.COOKIE && version.compareTo(SpecVersion.V3_2) < 0) {
+            error(cursor, "Style 'cookie' requires OpenAPI 3.2");
+        }
+        if (obj.json.has("allowReserved") && !allowsReserved(location, style)) {
+            error(cursor, "'allowReserved' is not allowed for " + location.value() + " parameters" + (location == ParameterLocation.COOKIE
+                ? " with style '" + style.value() + "'" : ""));
+        }
+        checkExampleOrExamples(cursor, obj);
         var required = obj.bool("required", false);
         if (location == ParameterLocation.PATH && !required) {
-            error(cursor, "Path parameter '" + name + "' must be required");
+            warning(cursor, "Path parameter '" + name + "' must be required");
             required = true;
         }
         var schema = obj.get("schema").flatMap(this::schema);
@@ -376,6 +418,46 @@ final class OpenApiParser {
         return Optional.of(new Parameter(name, location, obj.string("description"), required, obj.bool("deprecated", false),
             obj.bool("allowEmptyValue", false), style, obj.bool("explode", style.explodeByDefault()), obj.bool("allowReserved", false),
             schema, obj.value("example"), obj.map("examples", (n, c) -> component(c, EXAMPLE_FIELDS, this::example)), content, obj.extensions()));
+    }
+
+    /** {@code allowReserved} is for query parameters, and since 3.2 also for path and form-style cookie parameters. */
+    private boolean allowsReserved(ParameterLocation location, ParameterStyle style) {
+        return location == ParameterLocation.QUERY || version == SpecVersion.V3_2
+            && (location == ParameterLocation.PATH || location == ParameterLocation.COOKIE && style == ParameterStyle.FORM);
+    }
+
+    /** The {@code headers} of a response or encoding, whose names must be HTTP field names. */
+    private Map<String, Header> headers(Obj obj) {
+        return obj.map("headers", (name, c) -> {
+            if (!TOKEN.matcher(name).matches()) {
+                error(c, "Header name '" + name + "' is not a valid HTTP field name");
+            }
+            return component(c, HEADER_FIELDS, this::header);
+        });
+    }
+
+    private void checkExampleOrExamples(Cursor cursor, Obj obj) {
+        if (obj.json.has("example") && obj.json.has("examples")) {
+            error(cursor, "'example' and 'examples' are mutually exclusive");
+        }
+    }
+
+    /** {@code encoding} applies to named parts, {@code prefixEncoding} and {@code itemEncoding} to positional ones. */
+    private void checkEncodings(Cursor cursor, Obj obj) {
+        if (obj.json.has("encoding") && (obj.json.has("prefixEncoding") || obj.json.has("itemEncoding"))) {
+            error(cursor, "'encoding' cannot be combined with 'prefixEncoding' or 'itemEncoding'");
+        }
+    }
+
+    /** At most one {@code querystring} parameter, and none together with {@code query} parameters. */
+    private void checkQuerystring(Cursor cursor, List<Parameter> parameters) {
+        var querystrings = parameters.stream().filter(p -> p.in() == ParameterLocation.QUERYSTRING).count();
+        if (querystrings > 1) {
+            error(cursor, "At most one querystring parameter is allowed");
+        }
+        if (querystrings > 0 && parameters.stream().anyMatch(p -> p.in() == ParameterLocation.QUERY)) {
+            error(cursor, "A querystring parameter cannot be combined with query parameters");
+        }
     }
 
     private static Set<ParameterStyle> allowedStyles(ParameterLocation location) {
@@ -406,6 +488,7 @@ final class OpenApiParser {
         var obj = new Obj(cursor, "Header Object", HEADER_FIELDS);
         obj.string("style").filter(style -> !style.equals("simple")).ifPresent(style -> error(cursor, "Header style must be 'simple'"));
         checkSchemaOrContent(cursor, obj, false);
+        checkExampleOrExamples(cursor, obj);
         return Optional.of(new Header(obj.string("description"), obj.bool("required", false), obj.bool("deprecated", false),
             obj.bool("explode", false), obj.get("schema").flatMap(this::schema), obj.value("example"),
             obj.map("examples", (n, c) -> component(c, EXAMPLE_FIELDS, this::example)), obj.map("content", (type, c) -> component(c, MEDIA_TYPE_FIELDS, this::mediaType)),
@@ -423,6 +506,8 @@ final class OpenApiParser {
 
     private Optional<MediaType> mediaType(Cursor cursor) {
         var obj = new Obj(cursor, "Media Type Object", MEDIA_TYPE_FIELDS);
+        checkExampleOrExamples(cursor, obj);
+        checkEncodings(cursor, obj);
         return Optional.of(new MediaType(obj.get("schema").flatMap(this::schema), obj.get("itemSchema").flatMap(this::schema),
             obj.value("example"), obj.map("examples", (n, c) -> component(c, EXAMPLE_FIELDS, this::example)), obj.map("encoding", (n, c) -> encoding(c)),
             obj.list("prefixEncoding", this::encoding), obj.get("itemEncoding").flatMap(this::encoding), obj.extensions()));
@@ -430,6 +515,7 @@ final class OpenApiParser {
 
     private Optional<Encoding> encoding(Cursor cursor) {
         var obj = new Obj(cursor, "Encoding Object", ENCODING_FIELDS);
+        checkEncodings(cursor, obj);
         var style = obj.string("style").flatMap(value -> {
             var parsed = ParameterStyle.of(value);
             if (parsed.isEmpty()) {
@@ -437,7 +523,7 @@ final class OpenApiParser {
             }
             return parsed;
         });
-        return Optional.of(new Encoding(obj.string("contentType"), obj.map("headers", (n, c) -> component(c, HEADER_FIELDS, this::header)), style,
+        return Optional.of(new Encoding(obj.string("contentType"), headers(obj), style,
             obj.optionalBool("explode"), obj.bool("allowReserved", false), obj.map("encoding", (n, c) -> encoding(c)),
             obj.list("prefixEncoding", this::encoding), obj.get("itemEncoding").flatMap(this::encoding), obj.extensions()));
     }
@@ -472,7 +558,7 @@ final class OpenApiParser {
             obj.missing("description");
         }
         return Optional.of(new Response(obj.string("summary"), obj.string("description"),
-            obj.map("headers", (name, c) -> component(c, HEADER_FIELDS, this::header)), obj.map("content", (type, c) -> component(c, MEDIA_TYPE_FIELDS, this::mediaType)),
+            headers(obj), obj.map("content", (type, c) -> component(c, MEDIA_TYPE_FIELDS, this::mediaType)),
             obj.map("links", (name, c) -> component(c, LINK_FIELDS, this::link)), obj.extensions()));
     }
 
@@ -544,7 +630,7 @@ final class OpenApiParser {
             .forEach(op -> op.security().ifPresent(requirements::addAll)));
         requirements.stream().flatMap(r -> r.schemes().keySet().stream()).distinct()
             .filter(name -> !defined.contains(name) && !name.contains(":") && !name.contains("/"))
-            .forEach(name -> error(root.cursor, "Security scheme '" + name + "' is not defined in components"));
+            .forEach(name -> warning(root.cursor, "Security scheme '" + name + "' is not defined in components"));
     }
 
     private Optional<SecurityScheme> securityScheme(Cursor cursor) {
@@ -724,6 +810,15 @@ final class OpenApiParser {
         private final JsonObject json;
         private final boolean valid;
 
+        /** Reports fields that the description's version does not have yet. */
+        void introduced(String type) {
+            INTRODUCED.getOrDefault(type, Map.of()).forEach((field, since) -> {
+                if (json.has(field) && version.compareTo(since) < 0) {
+                    error(cursor.child(field, json.get(field).orElseThrow()), "Field '" + field + "' of the " + type + " requires OpenAPI " + since.prefix());
+                }
+            });
+        }
+
         Obj(Cursor cursor, String type, Set<String> known) {
             this.cursor = cursor;
             this.valid = cursor.value() instanceof JsonObject;
@@ -731,7 +826,10 @@ final class OpenApiParser {
                 this.json = object;
                 if (!known.isEmpty()) {
                     object.keys().stream().filter(key -> !key.startsWith("x-") && !known.contains(key))
-                        .forEach(key -> warning(cursor.child(key, object.get(key).orElseThrow()), "Unknown field '" + key + "' in " + type));
+                        .forEach(key -> error(cursor.child(key, object.get(key).orElseThrow()), "Unknown field '" + key + "' in " + type));
+                }
+                if (!type.equals("OpenAPI Object")) {
+                    introduced(type);
                 }
             } else {
                 error(cursor, type + " must be an object");

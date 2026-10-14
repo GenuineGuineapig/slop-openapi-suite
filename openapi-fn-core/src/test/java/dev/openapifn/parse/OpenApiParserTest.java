@@ -44,6 +44,10 @@ class OpenApiParserTest {
         return "openapi: 3.1.0\ninfo: {title: t, version: v}\n" + body;
     }
 
+    static String v32(String body) {
+        return "openapi: 3.2.0\ninfo: {title: t, version: v}\n" + body;
+    }
+
     static String v30(String body) {
         return "openapi: 3.0.3\ninfo: {title: t, version: v}\n" + body;
     }
@@ -279,24 +283,28 @@ class OpenApiParserTest {
               /a/{p}:
                 get:
                   parameters:
-                    - {name: p, in: path, required: true, style: label, schema: {type: string}, example: x, examples: {e: {value: 1}}}
+                    - {name: p, in: path, required: true, style: label, schema: {type: string}, example: x}
                     - {name: q, in: query, style: deepObject, explode: true, allowReserved: true, allowEmptyValue: true, deprecated: true, schema: {}}
-                    - {name: qs, in: querystring, content: {application/x-www-form-urlencoded: {schema: {type: object}}}}
                     - {name: c, in: cookie, style: cookie, schema: {}}
                     - {name: c2, in: cookie, schema: {}}
-                    - {name: h, in: header, schema: {}}
+                    - {name: h, in: header, schema: {}, examples: {e: {value: 1}}}
+                  responses: {'200': {description: ok}}
+              /b:
+                get:
+                  parameters:
+                    - {name: qs, in: querystring, content: {application/x-www-form-urlencoded: {schema: {type: object}}}}
                   responses: {'200': {description: ok}}
             """);
         var params = doc.operations().getFirst().parameters();
         assertThat(params).extracting(p -> p.style() + "/" + p.explode())
-            .containsExactly("LABEL/false", "DEEP_OBJECT/true", "FORM/true", "COOKIE/true", "FORM/true", "SIMPLE/false");
+            .containsExactly("LABEL/false", "DEEP_OBJECT/true", "COOKIE/true", "FORM/true", "SIMPLE/false");
         assertThat(params.get(0).example()).contains(JsonString.of("x"));
-        assertThat(params.get(0).examples().get("e").value()).isPresent();
+        assertThat(params.get(4).examples().get("e").value()).isPresent();
         assertThat(params.get(1).allowReserved()).isTrue();
         assertThat(params.get(1).allowEmptyValue()).isTrue();
         assertThat(params.get(1).deprecated()).isTrue();
-        assertThat(params.get(2).effectiveSchema()).isPresent();
-        assertThat(params.get(4).effectiveSchema()).isPresent();
+        assertThat(doc.operations().getLast().parameters().getFirst().effectiveSchema()).isPresent();
+        assertThat(params.get(3).effectiveSchema()).isPresent();
         assertThat(messages("""
             openapi: 3.2.0
             info: {title: t, version: v}
@@ -330,13 +338,13 @@ class OpenApiParserTest {
                           file: {contentType: image/png, headers: {X-Rate: {schema: {type: integer}, required: true}}, style: form, explode: true, allowReserved: true}
                       multipart/mixed:
                         itemSchema: {type: string}
-                        prefixEncoding: [{contentType: text/plain}]
-                        itemEncoding: {contentType: application/json, encoding: {a: {}}, prefixEncoding: [{}], itemEncoding: {}}
+                        prefixEncoding: [{contentType: text/plain, prefixEncoding: [{}], itemEncoding: {}}]
+                        itemEncoding: {contentType: application/json, encoding: {a: {}}}
                   responses:
                     '200':
                       summary: s
                       headers:
-                        X-Next: {description: next, deprecated: true, explode: true, schema: {type: string}, example: x, examples: {a: {value: 1}}}
+                        X-Next: {description: next, deprecated: true, explode: true, schema: {type: string}, examples: {a: {value: 1}}}
                         X-Json: {content: {application/json: {schema: {}}}}
                       links:
                         self: {operationId: x, parameters: {id: $response.body#/id}, requestBody: 1, description: d, server: {url: /s}}
@@ -446,8 +454,93 @@ class OpenApiParserTest {
     }
 
     @Test
+    void structuralRules() {
+        assertThat(messages(v32("""
+            paths:
+              /a/{Bad{Path}}:
+                parameters:
+                  - {name: qs1, in: querystring, content: {application/json: {}}}
+                  - {name: qs2, in: querystring, content: {application/json: {}}}
+                get:
+                  parameters:
+                    - {name: 'Bad{Path}', in: path, required: true, schema: {}}
+                    - {name: 'Bad}', in: path, required: true, schema: {}}
+                    - {name: 'Bad[Header]', in: header, schema: {}}
+                    - {name: q, in: query, schema: {}, example: 1, examples: {a: {value: 1}}}
+                    - {name: h, in: header, allowReserved: true, schema: {}}
+                    - {name: c, in: cookie, style: cookie, allowReserved: true, schema: {}}
+                    - {name: f, in: cookie, allowReserved: true, schema: {}}
+                    - {name: p, in: path, required: true, allowReserved: true, schema: {}}
+                  responses:
+                    '200':
+                      description: ok
+                      headers:
+                        'Bad=Header': {schema: {}}
+                        X-Fine: {schema: {}, example: 1, examples: {a: {value: 1}}}
+                      content:
+                        multipart/mixed:
+                          example: 1
+                          examples: {a: {value: 1}}
+                          encoding: {}
+                          itemEncoding: {encoding: {}, prefixEncoding: []}
+            components:
+              schemas:
+                Attr: {type: string, xml: {attribute: true, nodeType: attribute}}
+                List: {type: array, xml: {wrapped: true, nodeType: element}}
+                Fine: {type: string, xml: {nodeType: text}}
+            """))).containsExactlyInAnyOrder(
+            "At most one querystring parameter is allowed", "At most one querystring parameter is allowed",
+            "A querystring parameter cannot be combined with query parameters",
+            "Path parameter name 'Bad{Path}' must not contain '{' or '}'", "Path parameter name 'Bad}' must not contain '{' or '}'",
+            "GET /a/{Bad{Path}}: path parameter 'Bad}' does not occur in the path template",
+            "Header parameter name 'Bad[Header]' is not a valid HTTP field name",
+            "Header name 'Bad=Header' is not a valid HTTP field name",
+            "'example' and 'examples' are mutually exclusive", "'example' and 'examples' are mutually exclusive",
+            "'example' and 'examples' are mutually exclusive",
+            "'allowReserved' is not allowed for header parameters",
+            "'allowReserved' is not allowed for cookie parameters with style 'cookie'",
+            "'encoding' cannot be combined with 'prefixEncoding' or 'itemEncoding'",
+            "'encoding' cannot be combined with 'prefixEncoding' or 'itemEncoding'",
+            "XML 'nodeType' cannot be combined with 'attribute' or 'wrapped'",
+            "XML 'nodeType' cannot be combined with 'attribute' or 'wrapped'",
+            "GET /a/{Bad{Path}}: path parameter 'Bad{Path' is not declared",
+            "GET /a/{Bad{Path}}: path parameter 'Bad{Path}' does not occur in the path template",
+            "GET /a/{Bad{Path}}: path parameter 'p' does not occur in the path template");
+    }
+
+    @Test
+    void fieldsOfLaterVersionsAreRejected() {
+        assertThat(messages(v31("""
+            $self: https://example.com/api
+            servers: [{url: /, name: main}]
+            paths:
+              /a:
+                query: {responses: {'200': {description: ok, summary: s}}}
+                get:
+                  parameters:
+                    - {name: qs, in: querystring, content: {application/json: {}}}
+                    - {name: c, in: cookie, style: cookie, schema: {}}
+                    - {name: q, in: query, allowReserved: true, schema: {}}
+                    - {name: p, in: cookie, allowReserved: true, schema: {}}
+                  responses: {'200': {description: ok}}
+            """))).containsExactlyInAnyOrder(
+            "Field '$self' of the OpenAPI Object requires OpenAPI 3.2", "Field 'name' of the Server Object requires OpenAPI 3.2",
+            "Field 'query' of the Path Item Object requires OpenAPI 3.2", "Querystring parameters require OpenAPI 3.2",
+            "Style 'cookie' requires OpenAPI 3.2", "'allowReserved' is not allowed for cookie parameters with style 'form'",
+            "A querystring parameter cannot be combined with query parameters", "Field 'summary' of the Response Object requires OpenAPI 3.2");
+        assertThat(messages("""
+            openapi: 3.0.3
+            info: {title: t, version: v, summary: s}
+            webhooks: {}
+            paths: {}
+            """)).containsExactlyInAnyOrder("Field 'summary' of the Info Object requires OpenAPI 3.1",
+            "Field 'webhooks' of the OpenAPI Object requires OpenAPI 3.1");
+        assertThat(messages(v31("paths: {}\nfoo: 1"))).containsExactly("Unknown field 'foo' in OpenAPI Object");
+    }
+
+    @Test
     void callbacksExamplesLinksAndTags() {
-        var doc = ok(v31("""
+        var doc = ok(v32("""
             security: [{key: []}]
             paths:
               /a:
@@ -513,7 +606,7 @@ class OpenApiParserTest {
         assertThat(examples.get("full").data()).isPresent();
         assertThat(examples.get("data").data().orElseThrow().toJson()).isEqualTo("{\"a\":1}");
         assertThat(examples.get("external").data()).isEmpty();
-        assertThat(messages(v31("""
+        assertThat(messages(v32("""
             components:
               examples:
                 a: {value: 1, dataValue: 1, externalValue: x}
@@ -528,7 +621,7 @@ class OpenApiParserTest {
 
     @Test
     void securitySchemes() {
-        var doc = ok(v31("""
+        var doc = ok(v32("""
             components:
               securitySchemes:
                 key: {type: apiKey, name: k, in: cookie, description: d, deprecated: true}
@@ -636,7 +729,7 @@ class OpenApiParserTest {
 
     @Test
     void references() {
-        var doc = ok(v31("""
+        var doc = ok(v32("""
             components:
               parameters:
                 Base: {name: q, in: query, description: original, schema: {type: string}}
