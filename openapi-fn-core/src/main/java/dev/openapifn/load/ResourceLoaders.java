@@ -24,6 +24,25 @@ public final class ResourceLoaders {
         return bySchemes(Map.of("file", fileSystem(), Uris.CLASSPATH_SCHEME, classpath(ResourceLoaders.class.getClassLoader())));
     }
 
+    /**
+     * {@link #defaults()} plus {@code http:} and {@code https:} retrieval, for build-time tools that
+     * resolve remote references (and bundle them, see {@link #aliased}).
+     */
+    public static ResourceLoader withRemote(Duration timeout) {
+        var remote = http(HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(timeout).build(), timeout);
+        return withSchemes(defaults(), Map.of("http", remote, "https", remote));
+    }
+
+    /**
+     * Loads the documents named in {@code aliases} from the location mapped to instead, e.g. remote
+     * documents from bundled copies. Documents keep the URI they were requested with, so their
+     * relative references resolve as before.
+     */
+    public static ResourceLoader aliased(ResourceLoader loader, Map<URI, URI> aliases) {
+        var copy = Map.copyOf(aliases);
+        return uri -> loader.load(copy.getOrDefault(uri, uri));
+    }
+
     /** Loads {@code file:} URIs. */
     public static ResourceLoader fileSystem() {
         return uri -> Result.attempt(() -> Files.readString(Path.of(uri), StandardCharsets.UTF_8),

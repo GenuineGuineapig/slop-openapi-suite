@@ -68,6 +68,9 @@ class LoadingTest {
         assertThat(extended.load(URI.create("x:/1"))).isEqualTo(Result.ok("x"));
         assertThat(extended.load(URI.create("mem:/a"))).isEqualTo(Result.ok("a"));
         assertThat(ResourceLoaders.defaults().load(URI.create("classpath:/loading/hello.yaml")).isOk()).isTrue();
+        var aliased = ResourceLoaders.aliased(memory, Map.of(URI.create("https://example.com/a"), URI.create("mem:/a")));
+        assertThat(aliased.load(URI.create("https://example.com/a"))).isEqualTo(Result.ok("a"));
+        assertThat(aliased.load(URI.create("mem:/a"))).isEqualTo(Result.ok("a"));
     }
 
     @Test
@@ -88,6 +91,9 @@ class LoadingTest {
             var base = "http://127.0.0.1:" + server.getAddress().getPort();
             var loader = ResourceLoaders.http(HttpClient.newHttpClient(), Duration.ofSeconds(5));
             assertThat(loader.load(URI.create(base + "/ok"))).isEqualTo(Result.ok("ok: true"));
+            var remote = ResourceLoaders.withRemote(Duration.ofSeconds(5));
+            assertThat(remote.load(URI.create(base + "/ok"))).isEqualTo(Result.ok("ok: true"));
+            assertThat(remote.load(URI.create("classpath:/loading/hello.yaml")).isOk()).isTrue();
             assertThat(loader.load(URI.create(base + "/missing")).failure()).contains("Cannot fetch " + base + "/missing: HTTP 404");
         } finally {
             server.stop(0);

@@ -5,6 +5,7 @@ import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import dev.openapifn.http.Multipart;
 import dev.openapifn.http.ParameterParser;
 import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.http.UrlCodec;
@@ -14,6 +15,7 @@ import dev.openapifn.json.JsonPointer;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.ApiOperation;
+import dev.openapifn.model.Header;
 import dev.openapifn.model.MediaType;
 import dev.openapifn.model.Parameter;
 import dev.openapifn.model.ParameterLocation;
@@ -344,27 +346,58 @@ public final class OpenApiValidator {
     }
 
     private void responseHeaders(Response declared, Headers headers, Issues issues) {
-        declared.headers().forEach((name, header) -> {
+        headers(declared.headers(), headers, IssueKeys.RESPONSE_HEADER, "header.", issues);
+    }
+
+    /** Validates {@code headers} against header definitions ({@code Content-Type} is described by the media type instead). */
+    private void headers(Map<String, Header> definitions, Headers headers, String key, String locationPrefix, Issues issues) {
+        definitions.forEach((name, header) -> {
             if (name.equalsIgnoreCase("Content-Type")) {
                 return;
             }
-            var location = "header." + name;
+            var location = locationPrefix + name;
             var parameter = header.asParameter(name);
             var value = parameters.parse(parameter, new ParameterParser.Sources(Map.of(), List.of(), "", headers, List.of()), Set.of());
             if (value.isErr()) {
-                issues.add(IssueKeys.RESPONSE_HEADER + ".invalid", value.failure().orElseThrow(), location);
+                issues.add(key + ".invalid", value.failure().orElseThrow(), location);
                 return;
             }
             var parsed = value.toOptional().orElseThrow();
             if (parsed.isEmpty()) {
                 if (header.required()) {
-                    issues.add(IssueKeys.RESPONSE_HEADER + ".missing", "required header '" + name + "' is missing", location);
+                    issues.add(key + ".missing", "required header '" + name + "' is missing", location);
                 }
                 return;
             }
-            parameter.effectiveSchema().ifPresent(schema ->
-                issues.schema(IssueKeys.RESPONSE_HEADER + ".schema", location, schemas.validate(schema, parsed.get())));
+            parameter.effectiveSchema().ifPresent(schema -> issues.schema(key + ".schema", location, schemas.validate(schema, parsed.get())));
         });
+    }
+
+    /**
+     * Checks multipart parts against their Encoding Objects: the part's content type must be one
+     * the encoding allows, and the headers it describes must conform. Named parts of
+     * {@code multipart/form-data} use {@code encoding}; positional parts use {@code prefixEncoding}
+     * and {@code itemEncoding}.
+     */
+    private void parts(byte[] content, ContentType type, MediaType mediaType, String side, Issues issues) {
+        var formData = type.subtype().equals("form-data");
+        var parts = Multipart.parse(content, type.parameter("boundary").orElseThrow()).toOptional().orElseThrow();
+        for (int i = 0; i < parts.size(); i++) {
+            var part = parts.get(i);
+            var index = i;
+            var encoding = formData ? part.name().map(mediaType.encoding()::get)
+                : index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
+            var location = "body." + (formData ? part.name().orElse("") : Integer.toString(index));
+            encoding.ifPresent(declared -> {
+                declared.contentType().ifPresent(allowed -> part.contentType().flatMap(ContentType::parse).ifPresent(actual -> {
+                    var ranges = java.util.Arrays.stream(allowed.split(",")).map(String::trim).toList();
+                    if (ContentType.bestMatch(ranges, actual).isEmpty()) {
+                        issues.add(side + ".body.part.contentType", "part content type '" + actual.essence() + "' is not one of " + ranges, location);
+                    }
+                }));
+                headers(declared.headers(), part.headers(), side + ".body.part.header", location + ".", issues);
+            });
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -394,6 +427,9 @@ public final class OpenApiValidator {
             return Optional.empty();
         }
         var value = parsed.toOptional().orElseThrow();
+        if (contentType.get().type().equals("multipart")) {
+            parts(content, contentType.get(), mediaType, side, issues);
+        }
         var key = side + ".body.schema";
         if (mediaType.itemSchema().isPresent() && value instanceof JsonArray items) {
             var itemSchema = mediaType.itemSchema().get();

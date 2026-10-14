@@ -95,6 +95,15 @@ paths:
                 meta: {$ref: '#/components/schemas/Pet'}
                 caption: {type: string, maxLength: 10}
                 sizes: {type: array, items: {type: integer}}
+            encoding:
+              file:
+                contentType: image/png, image/jpeg
+                headers:
+                  X-Checksum: {schema: {type: string, pattern: '^[0-9a-f]+$'}}
+                  Content-Type: {required: true, schema: {type: string}}
+              meta:
+                headers:
+                  X-Version: {required: true, schema: {type: integer}}
           image/png:
             schema: {type: string, format: binary, maxLength: 8}
           text/plain:
@@ -127,6 +136,12 @@ paths:
                   retry: {type: integer}
             multipart/mixed:
               itemSchema: {$ref: '#/components/schemas/Event'}
+              prefixEncoding:
+                - contentType: application/json
+              itemEncoding:
+                contentType: application/json, text/plain
+                headers:
+                  X-Seq: {schema: {type: integer}}
   /matrix/{coords}:
     get:
       operationId: matrix

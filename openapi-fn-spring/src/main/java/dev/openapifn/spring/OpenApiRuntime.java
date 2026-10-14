@@ -13,12 +13,17 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.Response;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.spring.servlet.ServletMessages;
+import dev.openapifn.validation.IssueKeys;
+import dev.openapifn.validation.Level;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.Route;
+import dev.openapifn.validation.ValidationIssue;
+import dev.openapifn.validation.ValidationReport;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,14 +48,27 @@ public final class OpenApiRuntime {
     private final JsonMapper mapper;
     private final boolean failOnInvalidRequest;
     private final BodyWriter writer;
+    private final Map<String, ApiOperation> receivers;
 
     public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest) {
+        this(name, api, validator, mapper, failOnInvalidRequest, Map.of());
+    }
+
+    /**
+     * @param receivers the operation ids of the webhooks and callbacks the application receives, by
+     *     the path their controllers are mapped to (these operations have no path to route by)
+     */
+    public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest,
+                          Map<String, String> receivers) {
         this.name = name;
         this.api = api;
         this.validator = validator;
         this.mapper = mapper;
         this.failOnInvalidRequest = failOnInvalidRequest;
         this.writer = new BodyWriter(new SchemaShapes(api.schemas()));
+        var operations = new java.util.LinkedHashMap<String, ApiOperation>();
+        receivers.forEach((path, id) -> operations.put(path, operation(id)));
+        this.receivers = Map.copyOf(operations);
     }
 
     public String name() {
@@ -77,6 +95,25 @@ public final class OpenApiRuntime {
 
     // ---------------------------------------------------------------------------------------------
     // Requests
+
+    /** Whether {@code request} targets an operation of this description: a described path or a receiver. */
+    public boolean routes(dev.openapifn.http.HttpRequest request) {
+        return receivers.containsKey(request.path()) || !(validator.route(request) instanceof Route.NotFound);
+    }
+
+    /** Validates {@code request} against the operation it targets: a receiver's webhook or callback, or the routed path operation. */
+    public RequestValidation validate(dev.openapifn.http.HttpRequest request) {
+        var receiver = receivers.get(request.path());
+        if (receiver == null) {
+            return validator.validateRequest(request);
+        }
+        if (!receiver.method().equals(request.method())) {
+            var issue = new ValidationIssue(IssueKeys.REQUEST_OPERATION_NOT_ALLOWED, Level.ERROR, request.method() + " is not allowed for "
+                + request.path() + "; allowed: [" + receiver.method() + "]", "method");
+            return new RequestValidation(new ValidationReport(List.of(issue)), Optional.empty(), Map.of(), Optional.empty());
+        }
+        return validator.validateRequest(new OperationMatch(receiver, Map.of()), request);
+    }
 
     /**
      * Validates and parses {@code request} for the operation {@code operationId}, reusing the

@@ -1,7 +1,6 @@
 package dev.openapifn.spring;
 
 import dev.openapifn.http.HttpRequest;
-import dev.openapifn.validation.Route;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,8 +30,8 @@ public final class OpenApiRuntimes {
         return runtimes;
     }
 
-    /** The first runtime whose description has a path matching {@code request} (whatever the method). */
+    /** The first runtime with a path or receiver matching {@code request} (whatever the method). */
     public Optional<OpenApiRuntime> routing(HttpRequest request) {
-        return runtimes.values().stream().filter(runtime -> !(runtime.validator().route(request) instanceof Route.NotFound)).findFirst();
+        return runtimes.values().stream().filter(runtime -> runtime.routes(request)).findFirst();
     }
 }

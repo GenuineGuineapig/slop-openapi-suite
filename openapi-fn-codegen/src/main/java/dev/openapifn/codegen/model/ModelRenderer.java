@@ -333,7 +333,7 @@ public final class ModelRenderer {
     private void union(UnionDef union, Source out, Imports imports) {
         var name = union.name();
         union.discriminator().ifPresentOrElse(
-            property -> typeInfo(out, imports, property, union.names(), Optional.empty()),
+            property -> typeInfo(out, imports, property, union.names(), mapper.defaultMapping(union.schema()).filter(union.members()::contains)),
             () -> out.line("@" + imports.ref(JSON_DESERIALIZE) + "(using = " + imports.ref(name) + ".Deserializer.class)"));
         out.open("public sealed interface " + name.simpleName() + implementsClause(name, imports, "extends") + " permits "
             + union.members().stream().map(member -> imports.ref(member)).collect(Collectors.joining(", ")));
@@ -351,7 +351,8 @@ public final class ModelRenderer {
 
     private void parent(ParentDef parent, Source out, Imports imports) {
         var name = parent.name();
-        typeInfo(out, imports, parent.discriminator(), parent.subtypes(), Optional.of(parent.defaultName()));
+        typeInfo(out, imports, parent.discriminator(), parent.subtypes(), mapper.defaultMapping(parent.schema()).filter(parent.subtypes()::containsKey)
+            .or(() -> Optional.of(parent.defaultName())));
         out.open("public sealed interface " + name.simpleName() + implementsClause(name, imports, "extends") + " permits "
             + parent.subtypes().keySet().stream().map(imports::ref).collect(Collectors.joining(", ")));
         for (var property : sharedProperties(parent)) {

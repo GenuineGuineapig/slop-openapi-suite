@@ -96,7 +96,7 @@ public final class OpenApiValidationFilter extends OncePerRequestFilter {
             return;
         }
         var cached = CachedBodyRequest.of(request);
-        var validation = runtime.get().validator().validateRequest(ServletMessages.toHttpRequest(cached));
+        var validation = runtime.get().validate(ServletMessages.toHttpRequest(cached));
         cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, validation);
         if (settings.validateRequests() && validation.report().hasErrors()) {
             var status = IssueKeys.status(validation.report().errors().getFirst().key());

@@ -128,4 +128,53 @@ class GeneratorTest {
             "PongResponse pong();", "Ping2Response ping2();");
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
     }
+
+    @Test
+    void remoteReferencesAreBundledAndServedFromTheBundle() {
+        var remote = java.util.Map.of(
+            java.net.URI.create("https://schemas.example.com/common/point.yaml"), """
+                type: object
+                required: [x, unit]
+                properties:
+                  x: {type: integer}
+                  unit: {$ref: 'unit.yaml'}
+                """,
+            java.net.URI.create("https://schemas.example.com/common/unit.yaml"), "{type: string, enum: [mm, cm]}\n");
+        var loader = new dev.openapifn.parse.OpenApiLoader(dev.openapifn.load.ResourceLoaders.withSchemes(dev.openapifn.load.ResourceLoaders.defaults(),
+            java.util.Map.of("https", dev.openapifn.load.ResourceLoaders.inMemory(remote))));
+        var api = loader.parse(dir.resolve("api.yaml").toUri(), """
+            openapi: 3.1.0
+            info: {title: Remote, version: 1.0.0}
+            paths:
+              /points:
+                post:
+                  operationId: addPoint
+                  requestBody:
+                    required: true
+                    content:
+                      application/json: {schema: {$ref: 'https://schemas.example.com/common/point.yaml'}}
+                  responses:
+                    '200':
+                      description: the point
+                      content:
+                        application/json: {schema: {$ref: 'https://schemas.example.com/common/point.yaml'}}
+            """).orElseThrow(diagnostics -> new AssertionError(diagnostics.toString()));
+        var compilation = Compilation.of(api, GeneratorConfig.of("remote", "org.example.remote"), dir.resolve("out"), Map.of(
+            "org/example/remote/RemoteApplication.java", """
+                package org.example.remote;
+
+                @org.springframework.boot.autoconfigure.SpringBootApplication
+                public class RemoteApplication {
+                }
+                """));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.file("META-INF/openapi-fn/remote/spec.properties")).contains(
+            "alias.0.uri=https://schemas.example.com/common/point.yaml\n",
+            "alias.0.location=classpath:META-INF/openapi-fn/remote/remote/schemas.example.com/common/point.yaml\n",
+            "alias.1.uri=https://schemas.example.com/common/unit.yaml\n");
+        assertThat(compilation.file("META-INF/openapi-fn/remote/remote/schemas.example.com/common/unit.yaml")).contains("\"mm\"");
+        var summary = Launch.tests(compilation, "org.example.remote.api.DefaultControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+        assertThat(summary.succeeded()).isEqualTo(2);
+    }
 }

@@ -220,12 +220,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
 
     /** The default path a receiving controller maps a webhook or callback to, e.g. {@code /webhooks/newPet}. */
     public String receiverPath() {
-        return "/" + receiverKind() + "/" + method;
-    }
-
-    /** {@code webhooks} or {@code callbacks}. */
-    public String receiverKind() {
-        return operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks";
+        return "/" + (operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks") + "/" + method;
     }
 
     /** All request record components in order. */

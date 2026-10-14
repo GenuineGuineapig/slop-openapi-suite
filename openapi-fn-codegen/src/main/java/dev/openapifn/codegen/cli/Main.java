@@ -3,10 +3,12 @@ package dev.openapifn.codegen.cli;
 import dev.openapifn.codegen.GeneratedFile;
 import dev.openapifn.codegen.Generator;
 import dev.openapifn.codegen.GeneratorConfig;
+import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.IntConsumer;
@@ -55,7 +57,7 @@ public final class Main {
                 return 2;
             }
         }
-        var api = OpenApiLoader.defaults().load(Path.of(options.get("--spec")));
+        var api = new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(Path.of(options.get("--spec")));
         if (api.isErr()) {
             api.failure().orElseThrow().forEach(err::println);
             return 1;

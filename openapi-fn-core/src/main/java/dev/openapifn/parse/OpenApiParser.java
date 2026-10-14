@@ -101,6 +101,7 @@ final class OpenApiParser {
     private final Deque<URI> resolving = new ArrayDeque<>();
     private final List<Schema> schemas = new ArrayList<>();
     private final Set<String> operationIds = new LinkedHashSet<>();
+    private final List<Map.Entry<Cursor, String>> linkedOperations = new ArrayList<>();
     private SpecVersion version = SpecVersion.V3_1;
     private Dialect defaultDialect = Dialect.DRAFT_2020_12;
 
@@ -152,6 +153,8 @@ final class OpenApiParser {
             root.list("security", this::securityRequirement), root.list("tags", this::tag), root.get("externalDocs").flatMap(this::externalDocs),
             root.extensions());
         checkSecurityReferences(root, model);
+        linkedOperations.stream().filter(link -> !operationIds.contains(link.getValue()))
+            .forEach(link -> warning(link.getKey(), "Link target operation '" + link.getValue() + "' does not exist"));
         return Optional.of(model);
     }
 
@@ -502,6 +505,14 @@ final class OpenApiParser {
         if (obj.json.has("operationRef") == obj.json.has("operationId")) {
             error(cursor, "Exactly one of 'operationRef' and 'operationId' is required");
         }
+        obj.string("operationId").ifPresent(id -> linkedOperations.add(Map.entry(cursor, id)));
+        obj.string("operationRef").filter(ref -> ref.startsWith("#")).ifPresent(ref -> {
+            var target = Uris.parse(ref).toOptional().map(Uris::fragment).flatMap(fragment -> JsonPointer.parse(fragment).toOptional())
+                .flatMap(cursor.document()::resolve);
+            if (target.isEmpty()) {
+                warning(cursor, "Link operationRef '" + ref + "' does not resolve");
+            }
+        });
         var parameters = obj.json.object("parameters").map(JsonObject::members).orElse(Map.of());
         return Optional.of(new Link(obj.string("operationRef"), obj.string("operationId"), parameters, obj.value("requestBody"),
             obj.string("description"), obj.get("server").flatMap(this::server), obj.extensions()));

@@ -37,6 +37,35 @@ class GeneratorOptionsTest {
             java.net.URI.create("file:/a/b/c/e/z.yaml")))).isEqualTo("file:/a/b/");
     }
 
+    @Test
+    void bundlesRemoteDocumentsByOrigin() {
+        assertThat(Bundle.remotePath(java.net.URI.create("https://schemas.example.com:8443/common/point.yaml"))).isEqualTo(
+            "remote/schemas.example.com_8443/common/point.yaml");
+        assertThat(Bundle.remotePath(java.net.URI.create("https://example.com"))).isEqualTo("remote/example.com/index");
+        assertThat(Bundle.remotePath(java.net.URI.create("https://example.com/specs/"))).isEqualTo("remote/example.com/specs/index");
+        assertThat(Bundle.remotePath(java.net.URI.create("https://example.com/spec?v=2"))).isEqualTo("remote/example.com/spec_" + Integer.toHexString("v=2".hashCode()));
+        assertThat(Bundle.remotePath(java.net.URI.create("urn:example:pets"))).isEqualTo("remote/urn/example:pets");
+    }
+
+    @Test
+    void bundlesDocumentsOfOtherHostsAsRemote() {
+        var root = java.net.URI.create("https://api.example.com/v1/openapi.yaml");
+        var documents = new java.util.LinkedHashMap<java.net.URI, dev.openapifn.load.Document>();
+        for (var uri : List.of(root, java.net.URI.create("https://api.example.com/v1/schemas/pet.yaml"), java.net.URI.create("https://schemas.example.com/x.yaml"))) {
+            documents.put(uri, dev.openapifn.load.DocumentParser.parse(uri, "{}").orElseThrow(e -> new AssertionError(e.toString())));
+        }
+        var bundle = Bundle.of("api", root, documents, java.util.Optional.empty(), List.of(new Bundle.Receiver("hook", "POST hook", "/webhooks/hook")));
+        assertThat(bundle.location()).isEqualTo("classpath:META-INF/openapi-fn/api/openapi.yaml");
+        assertThat(paths(bundle.files())).containsExactlyInAnyOrder("META-INF/openapi-fn/api/openapi.yaml", "META-INF/openapi-fn/api/schemas/pet.yaml",
+            "META-INF/openapi-fn/api/remote/schemas.example.com/x.yaml", "META-INF/openapi-fn/api/spec.properties");
+        assertThat(bundle.files().getLast().content()).endsWith("""
+            alias.0.uri=https://schemas.example.com/x.yaml
+            alias.0.location=classpath:META-INF/openapi-fn/api/remote/schemas.example.com/x.yaml
+            receiver.hook.operation=POST hook
+            receiver.hook.path=/webhooks/hook
+            """);
+    }
+
     private static List<String> paths(List<GeneratedFile> files) {
         return files.stream().map(GeneratedFile::path).toList();
     }

@@ -64,7 +64,9 @@ public final class Generator {
                 files.add(source(operation.response(), renderer.response(operation)));
             }
         }
-        var bundle = Bundle.of(config.name(), api.uri(), api.schemas().documents(), config.basePath());
+        var receivers = config.server() ? groups.values().stream().flatMap(List::stream).filter(OperationModel::outbound)
+            .map(operation -> new Bundle.Receiver(operation.method(), operation.id(), operation.receiverPath())).toList() : List.<Bundle.Receiver>of();
+        var bundle = Bundle.of(config.name(), api.uri(), api.schemas().documents(), config.basePath(), receivers);
         files.addAll(bundle.files());
         files.add(source(names.spec(), renderer.spec(bundle.location(), serverUrl)));
         if (config.server()) {

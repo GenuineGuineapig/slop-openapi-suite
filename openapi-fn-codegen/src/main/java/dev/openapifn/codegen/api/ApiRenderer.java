@@ -266,7 +266,7 @@ public final class ApiRenderer {
      */
     static String mappingPath(OperationModel operation, GeneratorNames names) {
         if (operation.outbound()) {
-            return "${openapi-fn.specs." + names.apiName() + "." + operation.receiverKind() + "." + operation.method() + ".path:" + operation.receiverPath() + "}";
+            return "${openapi-fn.specs." + names.apiName() + ".receivers." + operation.method() + ".path:" + operation.receiverPath() + "}";
         }
         var path = operation.operation().path();
         for (var parameter : operation.operation().parameters()) {

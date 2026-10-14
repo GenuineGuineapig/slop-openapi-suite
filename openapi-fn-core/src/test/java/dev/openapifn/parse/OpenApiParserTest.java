@@ -427,6 +427,25 @@ class OpenApiParserTest {
     }
 
     @Test
+    void linksMustTargetExistingOperations() {
+        assertThat(messages(v31("""
+            paths:
+              /a:
+                get:
+                  operationId: getA
+                  responses:
+                    '200':
+                      description: ok
+                      links:
+                        self: {operationId: getA}
+                        missing: {operationId: getB}
+                        local: {operationRef: '#/paths/~1a/get'}
+                        dangling: {operationRef: '#/paths/~1b/get'}
+                        remote: {operationRef: 'https://example.com/api.yaml#/paths/~1x/get'}
+            """))).containsExactlyInAnyOrder("Link target operation 'getB' does not exist", "Link operationRef '#/paths/~1b/get' does not resolve");
+    }
+
+    @Test
     void callbacksExamplesLinksAndTags() {
         var doc = ok(v31("""
             security: [{key: []}]
@@ -504,7 +523,7 @@ class OpenApiParserTest {
                 both: {operationId: a, operationRef: b}
             """))).containsExactlyInAnyOrder("Example 'value' is mutually exclusive with [dataValue, externalValue]",
             "Example 'serializedValue' and 'externalValue' are mutually exclusive", "Exactly one of 'operationRef' and 'operationId' is required",
-            "Exactly one of 'operationRef' and 'operationId' is required");
+            "Exactly one of 'operationRef' and 'operationId' is required", "Link target operation 'a' does not exist");
     }
 
     @Test

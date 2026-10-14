@@ -134,6 +134,13 @@ public final class TypeMapper {
         return Optional.ofNullable(definitions.get(name));
     }
 
+    /** The generated class a discriminator's {@code defaultMapping} (OpenAPI 3.2) names, if it is one. */
+    public Optional<ClassName> defaultMapping(Schema schema) {
+        return schema.discriminator().flatMap(dev.openapifn.schema.Discriminator::defaultMapping).flatMap(value -> registry.resolveMapping(schema, value))
+            .flatMap(target -> Optional.ofNullable(named.get(registry.deref(target).location()))).filter(ClassName.class::isInstance)
+            .map(ClassName.class::cast);
+    }
+
     /** The sealed interfaces {@code name} implements. */
     public Set<ClassName> interfacesOf(ClassName name) {
         return interfaces.getOrDefault(name, Set.of());

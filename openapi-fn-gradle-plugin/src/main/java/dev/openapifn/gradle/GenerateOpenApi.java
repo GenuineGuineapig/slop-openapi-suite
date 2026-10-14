@@ -4,9 +4,11 @@ import dev.openapifn.codegen.GeneratedFile;
 import dev.openapifn.codegen.Generator;
 import dev.openapifn.codegen.GeneratorConfig;
 import dev.openapifn.load.Diagnostic;
+import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
@@ -27,7 +29,11 @@ import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 
-/** Generates sources, test sources and resources from one API description. */
+/**
+ * Generates sources, test sources and resources from one API description. Remote references are
+ * fetched and bundled; their content is not a tracked input, so re-run the task (or build with
+ * {@code --rerun-tasks}) when a remote document changes.
+ */
 @CacheableTask
 public abstract class GenerateOpenApi extends DefaultTask {
 
@@ -75,7 +81,7 @@ public abstract class GenerateOpenApi extends DefaultTask {
     @TaskAction
     public void generate() throws IOException {
         var location = getSpec().get().getAsFile().toPath();
-        var loaded = OpenApiLoader.defaults().load(location);
+        var loaded = new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(location);
         var api = loaded.toOptional().orElseThrow(() -> new GradleException("Invalid OpenAPI description " + location + ":\n"
             + describe(loaded.failure().orElseThrow())));
         api.warnings().forEach(warning -> getLogger().warn("openapi-fn: {}", warning));

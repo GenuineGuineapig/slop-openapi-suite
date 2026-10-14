@@ -254,7 +254,7 @@ components:
         - {type: 'null'}
     Shape:
       oneOf: [{$ref: '#/components/schemas/Circle'}, {$ref: '#/components/schemas/Square'}]
-      discriminator: {propertyName: type}
+      discriminator: {propertyName: type, defaultMapping: '#/components/schemas/Circle'}
     Circle: {type: object, required: [type], properties: {type: {type: string}, r: {type: number}}}
     Square: {type: object, required: [type], properties: {type: {type: string}, side: {type: number}}}
     Hybrid:

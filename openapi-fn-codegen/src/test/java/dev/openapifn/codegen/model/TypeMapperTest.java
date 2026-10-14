@@ -202,6 +202,31 @@ class TypeMapperTest {
     }
 
     @Test
+    void discriminatorDefaultMappingsBecomeTheDefaultImplementation() {
+        var mapper = mapper("3.2.0", """
+            Cat: {type: object, required: [kind], properties: {kind: {type: string}}}
+            Dog: {type: object, required: [kind], properties: {kind: {type: string}}}
+            Elsewhere: {type: object}
+            Pet:
+              oneOf: [{$ref: '#/components/schemas/Cat'}, {$ref: '#/components/schemas/Dog'}]
+              discriminator: {propertyName: kind, defaultMapping: Dog}
+            Stray:
+              oneOf: [{$ref: '#/components/schemas/Cat'}]
+              discriminator: {propertyName: kind, defaultMapping: Elsewhere}
+            Vehicle: {type: object, discriminator: {propertyName: kind, defaultMapping: '#/components/schemas/Car'}, properties: {kind: {type: string}}}
+            Car: {allOf: [{$ref: '#/components/schemas/Vehicle'}]}
+            Boat: {allOf: [{$ref: '#/components/schemas/Vehicle'}]}
+            Plane: {type: object, discriminator: {propertyName: kind, defaultMapping: Nowhere}, properties: {kind: {type: string}}}
+            Glider: {allOf: [{$ref: '#/components/schemas/Plane'}]}
+            """);
+        var renderer = new ModelRenderer(mapper);
+        assertThat(renderer.file(definition(mapper, model("Pet"), UnionDef.class))).contains("defaultImpl = Dog.class");
+        assertThat(renderer.file(definition(mapper, model("Stray"), UnionDef.class))).doesNotContain("defaultImpl");
+        assertThat(renderer.file(definition(mapper, model("Vehicle"), ParentDef.class))).contains("defaultImpl = Car.class");
+        assertThat(renderer.file(definition(mapper, model("Plane"), ParentDef.class))).contains("defaultImpl = Plane.Default.class");
+    }
+
+    @Test
     void honoursNullableNextToReferencesInOpenApi30() {
         var mapper = mapper("3.0.3", """
             Address: {type: object, properties: {street: {type: string}}}

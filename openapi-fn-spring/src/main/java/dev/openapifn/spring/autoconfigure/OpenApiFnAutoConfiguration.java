@@ -11,7 +11,9 @@ import dev.openapifn.spring.client.OpenApiClients;
 import dev.openapifn.spring.servlet.OpenApiValidationFilter;
 import dev.openapifn.validation.LevelPolicy;
 import dev.openapifn.validation.OpenApiValidator;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,8 +42,7 @@ public class OpenApiFnAutoConfiguration {
     @ConditionalOnMissingBean
     public OpenApiRuntimes openApiRuntimes(OpenApiFnProperties properties, ObjectProvider<JsonMapper> mapper, ResourceLoader resourceLoader) {
         var classLoader = Objects.requireNonNullElse(resourceLoader.getClassLoader(), OpenApiFnAutoConfiguration.class.getClassLoader());
-        var loader = new OpenApiLoader(ResourceLoaders.bySchemes(Map.of("file", ResourceLoaders.fileSystem(),
-            Uris.CLASSPATH_SCHEME, ResourceLoaders.classpath(classLoader))));
+        var documents = ResourceLoaders.bySchemes(Map.of("file", ResourceLoaders.fileSystem(), Uris.CLASSPATH_SCHEME, ResourceLoaders.classpath(classLoader)));
         var jsonMapper = mapper.getIfAvailable(JsonMapper::new);
         var validation = properties.validation();
         var levels = LevelPolicy.DEFAULT;
@@ -56,15 +57,23 @@ public class OpenApiFnAutoConfiguration {
             if (location == null) {
                 throw new IllegalStateException("OpenAPI description '" + name + "' has no location");
             }
-            var api = loader.load(location).orElseThrow(diagnostics -> new IllegalStateException("Invalid OpenAPI description '" + name + "' ("
+            var aliases = new HashMap<URI, URI>();
+            spec.getValue().aliases().forEach((from, to) -> aliases.put(uri(name, from), uri(name, to)));
+            var api = new OpenApiLoader(ResourceLoaders.aliased(documents, aliases)).load(location).orElseThrow(diagnostics -> new IllegalStateException("Invalid OpenAPI description '" + name + "' ("
                 + location + "):\n" + diagnostics.stream().map(Object::toString).collect(Collectors.joining("\n"))));
             var basePath = spec.getValue().basePath();
             var options = OpenApiValidator.Options.DEFAULT.withLevels(levels)
                 .withSchema(SchemaValidator.Options.DEFAULT.withAssertFormats(validation.assertFormats()))
                 .withBasePaths(basePath == null ? List.of() : List.of(basePath));
-            runtimes.add(new OpenApiRuntime(name, api, OpenApiValidator.of(api, options), jsonMapper, validation.request().enabled()));
+            var receivers = new java.util.LinkedHashMap<String, String>();
+            spec.getValue().receivers().values().forEach(receiver -> receivers.put(receiver.path(), receiver.operation()));
+            runtimes.add(new OpenApiRuntime(name, api, OpenApiValidator.of(api, options), jsonMapper, validation.request().enabled(), receivers));
         }
         return new OpenApiRuntimes(runtimes);
+    }
+
+    private static URI uri(String spec, String text) {
+        return Uris.parse(text).orElseThrow(error -> new IllegalStateException("Invalid alias in OpenAPI description '" + spec + "': " + error));
     }
 
     @Bean

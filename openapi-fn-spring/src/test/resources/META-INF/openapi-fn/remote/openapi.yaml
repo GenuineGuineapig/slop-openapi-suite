@@ -1,0 +1,14 @@
+openapi: 3.1.0
+info: {title: Remote references, version: 1.0.0}
+paths:
+  /pets/{id}:
+    get:
+      operationId: getRemotePet
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200':
+          description: A pet described in a remote document
+          content:
+            application/json:
+              schema: {$ref: 'https://schemas.example.com/common/pet.yaml'}

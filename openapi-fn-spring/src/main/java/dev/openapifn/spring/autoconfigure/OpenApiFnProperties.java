@@ -25,8 +25,21 @@ public record OpenApiFnProperties(@DefaultValue Map<String, Spec> specs, @Defaul
      *
      * @param location {@code classpath:...}, a file path or a URL
      * @param basePath the path the API is mounted on, when it differs from the server URLs
+     * @param aliases documents to load from another location, by URI: generated bundles map remote
+     *     references to their bundled copies, so that nothing is fetched at runtime
+     * @param receivers the generated controllers receiving webhooks and callbacks, by Java method name
      */
-    public record Spec(@Nullable String location, @Nullable String basePath) {
+    public record Spec(@Nullable String location, @Nullable String basePath, @DefaultValue Map<String, String> aliases,
+                       @DefaultValue Map<String, Receiver> receivers) {
+    }
+
+    /**
+     * Where a webhook or callback is received.
+     *
+     * @param operation the operation id (registered by generated code)
+     * @param path the path the receiving controller is mapped to
+     */
+    public record Receiver(@Nullable String operation, @Nullable String path) {
     }
 
     /**

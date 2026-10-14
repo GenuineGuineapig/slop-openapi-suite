@@ -39,6 +39,20 @@ class FilterModesTest {
         }
 
         @Test
+        void webhookReceiversAreValidatedLikePaths() throws Exception {
+            mvc.perform(post("/hooks/adopted").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Rex\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Rex"));
+            mvc.perform(post("/hooks/adopted").contentType(MediaType.APPLICATION_JSON).content("{\"tag\":\"x\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].key").value("request.body.schema.required"));
+            mvc.perform(post("/hooks/adopted").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"broken\"}"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.errors[0].key").value("response.body.schema.required"));
+            mvc.perform(get("/hooks/adopted")).andExpect(status().isMethodNotAllowed());
+        }
+
+        @Test
         void unknownPathsAreRejected() throws Exception {
             mvc.perform(get("/api/undocumented"))
                 .andExpect(status().isNotFound())

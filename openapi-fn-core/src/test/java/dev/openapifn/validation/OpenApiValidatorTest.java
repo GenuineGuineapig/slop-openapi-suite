@@ -166,6 +166,7 @@ class OpenApiValidatorTest {
             --b\r
             Content-Disposition: form-data; name="meta"\r
             Content-Type: application/json\r
+            X-Version: 2\r
             \r
             {"name": "Rex"}\r
             --b\r
@@ -187,6 +188,13 @@ class OpenApiValidatorTest {
             .containsExactly("request.body.schema.maxLength@body/caption", "request.body.schema.type@body/sizes/1");
         assertThat(request(put.withBody("multipart/form-data; boundary=b", "--b\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\nhi\r\n--b--")))
             .containsExactly("request.body.schema.required@body", "request.body.schema.required@body");
+        // Parts are checked against their Encoding Objects: allowed content types and described headers.
+        assertThat(request(put.withBody("multipart/form-data; boundary=b", body.replace("Content-Type: image/png", "Content-Type: image/gif")
+            .replace("X-Version: 2", "X-Version: two").replace("filename=\"a.png\"\r\n", "filename=\"a.png\"\r\nX-Checksum: XYZ\r\n"))))
+            .containsExactly("request.body.part.contentType@body.file", "request.body.part.header.schema.pattern@body.file.X-Checksum",
+                "request.body.part.header.schema.type@body.meta.X-Version");
+        assertThat(request(put.withBody("multipart/form-data; boundary=b", body.replace("X-Version: 2\r\n", "").replace("Content-Type: image/png\r\n", ""))))
+            .containsExactly("request.body.part.header.missing@body.meta.X-Version");
         assertThat(request(put.withBody("multipart/form-data", body))).containsExactly("request.body.invalid@body");
         assertThat(request(put.withBody("multipart/form-data; boundary=zz", body))).containsExactly("request.body.invalid@body");
         assertThat(request(put.withHeader("Content-Type", "image/png").withBody(new byte[] {1, 2, 3}))).isEmpty();
@@ -255,6 +263,12 @@ class OpenApiValidatorTest {
         assertThat(response(events, ok.withBody("multipart/mixed; boundary=x",
             "--x\r\nContent-Type: application/json\r\n\r\n{\"type\": \"a\"}\r\n--x\r\nContent-Type: text/plain\r\n\r\nhello\r\n--x--")))
             .containsExactly("response.body.schema.type@body/1");
+        assertThat(response(events, ok.withBody("multipart/mixed; boundary=x",
+            "--x\r\nContent-Type: text/plain\r\n\r\n{\"type\": \"a\"}\r\n--x\r\nContent-Type: text/csv\r\nX-Seq: one\r\n\r\n{\"type\": \"b\"}\r\n"
+                + "--x\r\n\r\n{\"type\": \"c\"}\r\n--x--")))
+            .containsExactly("response.body.part.contentType@body.0", "response.body.part.contentType@body.1",
+                "response.body.part.header.schema.type@body.1.X-Seq", "response.body.schema.type@body/0", "response.body.schema.type@body/1",
+                "response.body.schema.type@body/2");
     }
 
     @Test

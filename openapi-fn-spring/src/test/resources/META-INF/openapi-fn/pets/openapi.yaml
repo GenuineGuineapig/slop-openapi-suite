@@ -88,6 +88,19 @@ paths:
           description: ok
           content:
             application/json: {schema: {type: object, required: [ok]}}
+webhooks:
+  petAdopted:
+    post:
+      operationId: petAdopted
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+      responses:
+        '200':
+          description: Acknowledged with the adopted pet
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/Pet'}}
 components:
   schemas:
     Pet:

@@ -54,7 +54,7 @@ class SpringIntegrationTest {
             .andExpect(jsonPath("$[0].name").value("Rex"));
         assertThat(Calls.RECEIVED).containsExactly(3, List.of("a", "b"), "t-1", "s1");
         mvc.perform(get("/api/pets?limit=7")).andExpect(status().isOk()).andExpect(header().doesNotExist("X-Ids"));
-        assertThat(runtimes.all()).containsOnlyKeys("pets");
+        assertThat(runtimes.all()).containsOnlyKeys("pets", "remote");
     }
 
     @Test
