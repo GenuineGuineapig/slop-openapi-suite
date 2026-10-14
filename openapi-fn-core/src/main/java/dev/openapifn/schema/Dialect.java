@@ -1,10 +1,12 @@
 package dev.openapifn.schema;
 
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 /**
- * The JSON Schema dialect a schema is interpreted with. Keywords are honoured across dialects
- * wherever their meaning does not conflict; the flags below capture the conflicting semantics.
+ * The JSON Schema dialect a schema is interpreted with. Keywords a dialect does not have are
+ * ignored (see {@link #foreignKeywords()}); the flags below capture keywords whose meaning differs.
  */
 public enum Dialect {
     /** The OpenAPI 3.0 Schema Object (an extended subset of JSON Schema draft 4/5). */
@@ -53,6 +55,41 @@ public enum Dialect {
     /** The keyword that establishes a new base URI, if the dialect has one. */
     public Optional<String> idKeyword() {
         return Optional.ofNullable(idKeyword);
+    }
+
+    /**
+     * Keywords other dialects evaluate that this one does not have. They are ignored, so that a
+     * schema referenced across drafts is processed as its own draft. The OpenAPI 3.0 dialect
+     * honours them all: descriptions often use them, although the 3.0 Schema Object lacks them.
+     */
+    public Set<String> foreignKeywords() {
+        return switch (this) {
+            case OAS_3_0 -> Set.of();
+            case DRAFT_4 -> Keywords.FOREIGN_TO_4;
+            case DRAFT_6 -> Keywords.FOREIGN_TO_6;
+            case DRAFT_7 -> Keywords.FOREIGN_TO_7;
+            case DRAFT_2019_09 -> Keywords.SINCE_2020_12;
+            case DRAFT_2020_12 -> Keywords.UNTIL_2019_09;
+        };
+    }
+
+    /** Evaluated keywords by the draft that introduced (or last had) them. */
+    private static final class Keywords {
+        static final Set<String> SINCE_6 = Set.of("const", "contains", "propertyNames");
+        static final Set<String> SINCE_7 = Set.of("if", "then", "else", "contentEncoding", "contentMediaType");
+        static final Set<String> SINCE_2019_09 = Set.of("$recursiveRef", "dependentRequired", "dependentSchemas", "unevaluatedProperties",
+            "unevaluatedItems", "minContains", "maxContains", "contentSchema");
+        static final Set<String> SINCE_2020_12 = Set.of("prefixItems", "$dynamicRef");
+        static final Set<String> UNTIL_2019_09 = Set.of("$recursiveRef");
+        static final Set<String> FOREIGN_TO_7 = union(SINCE_2019_09, SINCE_2020_12);
+        static final Set<String> FOREIGN_TO_6 = union(SINCE_7, FOREIGN_TO_7);
+        static final Set<String> FOREIGN_TO_4 = union(SINCE_6, FOREIGN_TO_6);
+
+        private static Set<String> union(Set<String> first, Set<String> second) {
+            var result = new HashSet<>(first);
+            result.addAll(second);
+            return Set.copyOf(result);
+        }
     }
 
     /** Identifies a dialect from a {@code $schema} or {@code jsonSchemaDialect} URI. */

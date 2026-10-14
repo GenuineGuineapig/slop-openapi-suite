@@ -1,5 +1,6 @@
 package dev.openapifn.schema;
 
+import dev.openapifn.fn.Result;
 import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
@@ -48,16 +49,20 @@ public final class SchemaRegistry {
     private final Map<URI, Schema> anchors;
     private final Map<URI, Map<String, Schema>> dynamicAnchors;
     private final Dialect defaultDialect;
+    private final Map<String, Set<String>> vocabularies;
     private final Map<URI, Optional<Schema>> cache = new ConcurrentHashMap<>();
+    private final Map<URI, Optional<String>> metaschemas = new ConcurrentHashMap<>();
 
     private SchemaRegistry(Map<URI, Document> documents, Function<URI, Optional<Document>> documentLookup, Map<URI, Resource> resources,
-                           Map<URI, Schema> anchors, Map<URI, Map<String, Schema>> dynamicAnchors, Dialect defaultDialect) {
+                           Map<URI, Schema> anchors, Map<URI, Map<String, Schema>> dynamicAnchors, Dialect defaultDialect,
+                           Map<String, Set<String>> vocabularies) {
         this.documents = documents;
         this.documentLookup = documentLookup;
         this.resources = resources;
         this.anchors = anchors;
         this.dynamicAnchors = dynamicAnchors;
         this.defaultDialect = defaultDialect;
+        this.vocabularies = vocabularies;
     }
 
     /** The outcome of building a registry: the registry and the problems found. */
@@ -78,7 +83,36 @@ public final class SchemaRegistry {
 
     /** A registry without documents, for schema-less processing. */
     public static SchemaRegistry empty() {
-        return new SchemaRegistry(Map.of(), uri -> Optional.empty(), Map.of(), Map.of(), Map.of(), Dialect.DRAFT_2020_12);
+        return new SchemaRegistry(Map.of(), uri -> Optional.empty(), Map.of(), Map.of(), Map.of(), Dialect.DRAFT_2020_12, Map.of());
+    }
+
+    /**
+     * The vocabularies in effect for {@code schema} when the {@code $schema} of its resource (or of
+     * an enclosing one) is a custom metaschema declaring {@code $vocabulary}; empty when every
+     * keyword of its dialect applies.
+     */
+    public Optional<Set<String>> vocabularies(Schema schema) {
+        if (vocabularies.isEmpty()) {
+            return Optional.empty();
+        }
+        return metaschemas.computeIfAbsent(schema.location(), location -> documentLookup.apply(schema.document())
+            .flatMap(document -> metaschemaAt(document, schema.pointer()))).map(vocabularies::get);
+    }
+
+    /** The custom metaschema in effect at {@code pointer}: the innermost {@code $schema} on the way there, unless it names a dialect. */
+    private static Optional<String> metaschemaAt(Document document, JsonPointer pointer) {
+        Optional<String> metaschema = Optional.empty();
+        var current = JsonPointer.ROOT;
+        for (int i = 0; i <= pointer.tokens().size(); i++) {
+            var declared = current.resolve(document.root()).flatMap(JsonValue::asObject).flatMap(o -> o.string("$schema"));
+            if (declared.isPresent()) {
+                metaschema = declared.filter(uri -> Dialect.fromUri(uri).isEmpty());
+            }
+            if (i < pointer.tokens().size()) {
+                current = current.child(pointer.tokens().get(i));
+            }
+        }
+        return metaschema;
     }
 
     /** Resolves an absolute reference (already resolved against the referencing schema's base URI). */
@@ -205,12 +239,14 @@ public final class SchemaRegistry {
         private final Map<URI, Map<String, Schema>> dynamicAnchors = new HashMap<>();
         private final ArrayDeque<Map.Entry<Schema, String>> pending = new ArrayDeque<>();
         private final List<Diagnostic> diagnostics = new ArrayList<>();
+        private final Set<String> metaschemas = new HashSet<>();
+        private final Map<String, Set<String>> vocabularies = new HashMap<>();
         private final SchemaRegistry live;
 
         Builder(DocumentLoader loader, Dialect defaultDialect) {
             this.loader = loader;
             this.defaultDialect = defaultDialect;
-            this.live = new SchemaRegistry(Map.of(), loader::loaded, resources, anchors, dynamicAnchors, defaultDialect);
+            this.live = new SchemaRegistry(Map.of(), loader::loaded, resources, anchors, dynamicAnchors, defaultDialect, Map.of());
         }
 
         /**
@@ -250,6 +286,7 @@ public final class SchemaRegistry {
             });
             object.object("xml").filter(xml -> xml.has("nodeType") && (xml.has("attribute") || xml.has("wrapped")))
                 .ifPresent(xml -> report(schema, "XML 'nodeType' cannot be combined with 'attribute' or 'wrapped'"));
+            object.string("$schema").filter(uri -> Dialect.fromUri(uri).isEmpty() && metaschemas.add(uri)).ifPresent(uri -> metaschema(schema, uri));
             object.string("$ref").ifPresent(ref -> pending.add(Map.entry(schema, ref)));
             object.string("$dynamicRef").ifPresent(ref -> pending.add(Map.entry(schema, ref)));
             schema.discriminator().ifPresent(d -> d.mapping().values().forEach(value -> pending.add(Map.entry(schema, mappingTarget(schema, value)))));
@@ -299,6 +336,29 @@ public final class SchemaRegistry {
             }
         }
 
+        /**
+         * Reads the {@code $vocabulary} of a custom metaschema. A metaschema that requires a
+         * vocabulary this library does not know cannot be processed; optional ones are ignored.
+         */
+        private void metaschema(Schema from, String uri) {
+            var document = Uris.parse(uri).toOptional().map(Uris::withoutFragment).map(loader::load).flatMap(Result::toOptional);
+            if (document.isEmpty()) {
+                warn(from, "Cannot load the metaschema '" + uri + "'; the keywords of the dialect apply");
+                return;
+            }
+            document.get().root().asObject().flatMap(root -> root.object("$vocabulary")).ifPresent(declared -> {
+                var active = new HashSet<String>();
+                declared.members().forEach((vocabulary, required) -> {
+                    if (Vocabularies.isKnown(vocabulary)) {
+                        active.add(vocabulary);
+                    } else if (required.equals(JsonBoolean.TRUE)) {
+                        report(from, "The metaschema '" + uri + "' requires the unknown vocabulary '" + vocabulary + "'");
+                    }
+                });
+                vocabularies.put(uri, Set.copyOf(active));
+            });
+        }
+
         private void report(Schema from, String message) {
             add(Diagnostic.error(message, from.document(), from.pointer()), from);
         }
@@ -317,7 +377,7 @@ public final class SchemaRegistry {
             dynamicAnchors.forEach((uri, map) -> frozenDynamic.put(uri, Map.copyOf(map)));
             var documents = loader.documents();
             return new SchemaRegistry(documents, uri -> Optional.ofNullable(documents.get(uri)), Map.copyOf(resources), Map.copyOf(anchors),
-                Collections.unmodifiableMap(frozenDynamic), defaultDialect);
+                Collections.unmodifiableMap(frozenDynamic), defaultDialect, Map.copyOf(vocabularies));
         }
     }
 }

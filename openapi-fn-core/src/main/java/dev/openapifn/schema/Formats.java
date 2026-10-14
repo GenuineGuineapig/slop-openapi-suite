@@ -17,6 +17,8 @@ public final class Formats {
     private static final Pattern DURATION = Pattern.compile(
         "P(?:(?:\\d+D|\\d+M(?:\\d+D)?|\\d+Y(?:\\d+M(?:\\d+D)?)?)(?:T(?:\\d+H(?:\\d+M(?:\\d+S)?)?|\\d+M(?:\\d+S)?|\\d+S))?"
             + "|T(?:\\d+H(?:\\d+M(?:\\d+S)?)?|\\d+M(?:\\d+S)?|\\d+S)|\\d+W)");
+    private static final Pattern RFC_1123 = Pattern.compile(
+        "(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*");
     private static final Pattern IPV4 = Pattern.compile("(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}");
     private static final Pattern HEX_GROUP = Pattern.compile("[0-9a-fA-F]{1,4}");
     private static final Pattern UUID_PATTERN = Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
@@ -34,6 +36,11 @@ public final class Formats {
     private static final BigDecimal FLOAT_MAX = new BigDecimal(Float.toString(Float.MAX_VALUE));
     private static final BigDecimal DOUBLE_MAX = new BigDecimal(Double.toString(Double.MAX_VALUE));
 
+    /** {@code hostname}: an IDNA2008 host name of A-labels (JSON Schema draft 7 and later, OpenAPI). */
+    static final FormatValidator HOSTNAME = FormatValidator.forStrings(value -> Idna.isValid(value, false), "hostname");
+    /** {@code hostname} as JSON Schema draft 4 defines it: an RFC 1123 host name of letters, digits and hyphens. */
+    static final FormatValidator RFC_1123_HOSTNAME = FormatValidator.forStrings(value -> RFC_1123.matcher(value).matches(), "hostname");
+
     private static final Map<String, FormatValidator> STANDARD = Map.ofEntries(
         Map.entry("date", FormatValidator.forStrings(Formats::isDate, "RFC 3339 full-date")),
         Map.entry("time", FormatValidator.forStrings(Formats::isTime, "RFC 3339 full-time")),
@@ -41,7 +48,7 @@ public final class Formats {
         Map.entry("duration", FormatValidator.forStrings(value -> DURATION.matcher(value).matches(), "ISO 8601 duration")),
         Map.entry("email", FormatValidator.forStrings(value -> isEmail(value, false), "email address")),
         Map.entry("idn-email", FormatValidator.forStrings(value -> isEmail(value, true), "internationalized email address")),
-        Map.entry("hostname", FormatValidator.forStrings(value -> Idna.isValid(value, false), "hostname")),
+        Map.entry("hostname", HOSTNAME),
         Map.entry("idn-hostname", FormatValidator.forStrings(value -> Idna.isValid(value, true), "internationalized hostname")),
         Map.entry("ipv4", FormatValidator.forStrings(value -> IPV4.matcher(value).matches(), "IPv4 address")),
         Map.entry("ipv6", FormatValidator.forStrings(Formats::isIpv6, "IPv6 address")),

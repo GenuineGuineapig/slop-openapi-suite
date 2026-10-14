@@ -43,8 +43,17 @@ public final class EcmaRegex {
                     case 's' -> out.append(inClass ? WHITESPACE : "[" + WHITESPACE + "]");
                     case 'S' -> out.append(inClass ? "\\S" : "[^" + WHITESPACE + "]");
                     case 'p', 'P' -> i = property(regex, i, next, out);
+                    case 'c' -> {
+                        // A control character: the letter's code modulo 32, in either case (Java maps only upper-case letters).
+                        var letter = i + 1 < regex.length() ? regex.charAt(i + 1) : ' ';
+                        if (!(letter >= 'a' && letter <= 'z' || letter >= 'A' && letter <= 'Z')) {
+                            return Result.err("Invalid regular expression '" + regex + "': \\c must be followed by a letter");
+                        }
+                        out.append(String.format("\\x%02X", letter % 32));
+                        i++;
+                    }
                     default -> {
-                        if (Character.isLetter(next) && "bBfnrtcxuk".indexOf(next) < 0) {
+                        if (Character.isLetter(next) && "bBfnrtxuk".indexOf(next) < 0) {
                             return Result.err("Invalid regular expression '" + regex + "': invalid escape \\" + next);
                         }
                         out.append(c).append(next);

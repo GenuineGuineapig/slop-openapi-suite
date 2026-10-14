@@ -151,6 +151,7 @@ public final class SchemaValidator {
                 return accept ? Evaluation.VALID
                     : new Evaluation(List.of(error(path, schema, "false", "no value is allowed here")), Set.of(), Set.of());
             }
+            schema = effective(schema);
             var key = schema.location() + "@" + path;
             if (!active.add(key)) {
                 return Evaluation.VALID;
@@ -174,6 +175,26 @@ public final class SchemaValidator {
                 }
                 active.remove(key);
             }
+        }
+
+        /**
+         * {@code schema} without the keywords its dialect does not have and, under a custom
+         * metaschema, those of the vocabularies it does not enable.
+         */
+        private Schema effective(Schema schema) {
+            var object = (JsonObject) schema.json();
+            var foreign = schema.dialect().foreignKeywords();
+            var inactive = registry.vocabularies(schema).map(Vocabularies::inactiveKeywords).orElse(Set.of());
+            var ignored = false;
+            for (var keyword : object.keys()) {
+                ignored |= foreign.contains(keyword) || inactive.contains(keyword);
+            }
+            if (!ignored) {
+                return schema;
+            }
+            var kept = new java.util.LinkedHashMap<>(object.members());
+            kept.keySet().removeIf(keyword -> foreign.contains(keyword) || inactive.contains(keyword));
+            return new Schema(new JsonObject(kept), schema.document(), schema.pointer(), schema.baseUri(), schema.dialect());
         }
 
         private Evaluation evaluateKeywords(Schema schema, JsonValue instance, JsonPointer path) {
@@ -261,7 +282,7 @@ public final class SchemaValidator {
 
         private void generic(Schema schema, JsonValue instance, JsonPointer path, Collector out) {
             var types = schema.types();
-            if (!types.isEmpty() && types.stream().noneMatch(type -> matchesType(type, instance))) {
+            if (!types.isEmpty() && types.stream().noneMatch(type -> matchesType(type, instance, schema.dialect()))) {
                 out.errors.add(error(path, schema, "type", "must be " + describeTypes(types) + " but was " + instance.typeName()));
             }
             var enumValues = schema.enumValues();
@@ -270,16 +291,24 @@ public final class SchemaValidator {
             }
             schema.constValue().filter(expected -> !expected.equals(instance))
                 .ifPresent(expected -> out.errors.add(error(path, schema, "const", "must be " + expected.toJson())));
-            if (options.assertFormats()) {
-                schema.format().flatMap(format -> Optional.ofNullable(options.formats().get(format)))
+            var assertFormats = options.assertFormats() || registry.vocabularies(schema).filter(v -> v.contains(Vocabularies.FORMAT_ASSERTION)).isPresent();
+            if (assertFormats) {
+                schema.format().flatMap(format -> Optional.ofNullable(formatValidator(format, schema.dialect())))
                     .flatMap(validator -> validator.validate(instance))
                     .ifPresent(message -> out.errors.add(error(path, schema, "format", message)));
             }
         }
 
-        private static boolean matchesType(String type, JsonValue instance) {
+        /** Draft 4 host names follow RFC 1123, unless another validator was configured. */
+        private FormatValidator formatValidator(String format, Dialect dialect) {
+            var validator = options.formats().get(format);
+            return validator == Formats.HOSTNAME && dialect == Dialect.DRAFT_4 ? Formats.RFC_1123_HOSTNAME : validator;
+        }
+
+        /** Draft 4 tells integers from numbers with a fraction by their spelling: {@code 1.0} is not an integer there. */
+        private static boolean matchesType(String type, JsonValue instance, Dialect dialect) {
             return switch (type) {
-                case "integer" -> instance instanceof JsonNumber number && number.isIntegral();
+                case "integer" -> instance instanceof JsonNumber number && number.isIntegral() && (dialect != Dialect.DRAFT_4 || number.value().scale() <= 0);
                 case "number" -> instance instanceof JsonNumber;
                 default -> instance.typeName().equals(type);
             };

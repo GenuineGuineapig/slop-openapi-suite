@@ -17,6 +17,10 @@ class EcmaRegexTest {
     static Stream<Arguments> translations() {
         return Stream.of(
             Arguments.of("^\\d+$", "123", true),
+            Arguments.of("^\\cc$", "\u0003", true),
+            Arguments.of("^\\cC$", "\u0003", true),
+            Arguments.of("^[\\cz]$", "\u001a", true),
+            Arguments.of("^\\cZ$", "Z", false),
             Arguments.of("^\\d$", "\u0663", false),
             Arguments.of("^[\\d]$", "5", true),
             Arguments.of("^[\\d]$", "a", false),
@@ -77,7 +81,7 @@ class EcmaRegexTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"\\a", "\\e", "(?i)abc", "(?ims)a", "(", "\\p{Foo=Bar}", "\\p", "\\p{L"})
+    @ValueSource(strings = {"\\c", "\\c1", "\\c{", "\\c[", "\\a", "\\e", "(?i)abc", "(?ims)a", "(", "\\p{Foo=Bar}", "\\p", "\\p{L"})
     void rejectsInvalidExpressions(String regex) {
         assertThat(EcmaRegex.compile(regex).failure().orElseThrow()).startsWith("Invalid regular expression");
     }

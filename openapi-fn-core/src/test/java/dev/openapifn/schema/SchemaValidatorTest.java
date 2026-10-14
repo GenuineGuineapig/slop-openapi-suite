@@ -132,6 +132,49 @@ class SchemaValidatorTest {
     }
 
     @Test
+    void customMetaschemasEnableVocabularies() {
+        var metaschema = """
+            {"$schema": "https://json-schema.org/draft/2020-12/schema",
+             "$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/core": true, "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+                             "https://example.com/vocab/optional": false, "https://example.com/vocab/required": true}}
+            """;
+        var build = Schemas.build("""
+            {"$schema": "mem:/meta.json", "properties": {"n": {"minimum": 10}, "bad": false},
+             "$defs": {"standard": {"$schema": "https://json-schema.org/draft/2020-12/schema", "minimum": 10},
+                       "again": {"$id": "mem:/again.json", "$schema": "mem:/meta.json", "type": "string"},
+                       "unloadable": {"$id": "mem:/unloadable.json", "$schema": "mem:/missing.json", "type": "string"},
+                       "plain": {"$id": "mem:/plain.json", "$schema": "mem:/plain-meta.json", "type": "string"}}}
+            """, D, Map.of("meta.json", metaschema, "plain-meta.json", "{\"$schema\": \"https://json-schema.org/draft/2020-12/schema\"}"));
+        assertThat(build.diagnostics()).extracting(dev.openapifn.load.Diagnostic::message).containsExactlyInAnyOrder(
+            "The metaschema 'mem:/meta.json' requires the unknown vocabulary 'https://example.com/vocab/required'",
+            "Cannot load the metaschema 'mem:/missing.json'; the keywords of the dialect apply");
+        var registry = build.registry();
+        var validator = new SchemaValidator(registry);
+        var root = Schemas.root(registry);
+        assertThat(validator.validate(root, json("{\"n\": 1}"))).as("validation vocabulary off").isEmpty();
+        assertThat(validator.validate(root, json("{\"bad\": 1}"))).as("applicator vocabulary on").isNotEmpty();
+        var standard = registry.resolve(java.net.URI.create("mem:/root.json#/$defs/standard")).orElseThrow();
+        assertThat(registry.vocabularies(standard)).isEmpty();
+        assertThat(validator.validate(standard, json("1"))).isNotEmpty();
+        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/again.json")).orElseThrow(), json("1"))).isEmpty();
+        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/unloadable.json")).orElseThrow(), json("1"))).isNotEmpty();
+        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/plain.json")).orElseThrow(), json("1"))).isNotEmpty();
+        var detached = Schema.at(json("{\"minimum\": 10}"), java.net.URI.create("mem:/elsewhere.json"), dev.openapifn.json.JsonPointer.ROOT,
+            java.net.URI.create("mem:/elsewhere.json"), D);
+        assertThat(validator.validate(detached, json("1"))).isNotEmpty();
+    }
+
+    @Test
+    void keywordsOfLaterDraftsAreIgnored() {
+        var schema = "{\"if\": {\"type\": \"string\"}, \"then\": false, \"const\": 1}";
+        assertThat(Schemas.validate(schema, Dialect.DRAFT_6, "\"x\"")).extracting(SchemaError::keyword).containsExactly("const");
+        assertThat(Schemas.validate(schema, Dialect.DRAFT_4, "\"x\"")).isEmpty();
+        assertThat(Schemas.validate(schema, Dialect.DRAFT_7, "\"x\"")).hasSize(2);
+        assertThat(Schemas.validate(schema, Dialect.OAS_3_0, "\"x\"")).hasSize(2);
+        assertThat(Dialect.DRAFT_6.foreignKeywords()).contains("if", "prefixItems").doesNotContain("const");
+    }
+
+    @Test
     void formatOptions() {
         var registry = Schemas.build("{\"format\": \"even\"}", D, Map.of()).registry();
         var root = Schemas.root(registry);

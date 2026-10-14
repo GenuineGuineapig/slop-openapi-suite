@@ -78,7 +78,8 @@ usually because the specification gives it none (descriptions, documentation lin
 
 | Feature | Support |
 |---|---|
-| JSON Schema drafts 4, 6, 7, 2019-09, 2020-12 and the OAS 3.0 dialect | `SchemaValidator`, checked against the official JSON-Schema-Test-Suite (all required and optional tests, except custom `$vocabulary` metaschemas and one draft-4 hostname case) |
+| JSON Schema drafts 4, 6, 7, 2019-09, 2020-12 and the OAS 3.0 dialect | `SchemaValidator`, checked against the official JSON-Schema-Test-Suite: every required and optional test passes. Each draft is processed as itself, also when referenced from another (keywords it lacks are ignored; the OAS 3.0 dialect honours them all) |
+| `$schema` naming a custom metaschema with `$vocabulary` | Only the enabled vocabularies' keywords apply; `format-assertion` makes `format` an assertion; an unknown required vocabulary is an error |
 | `$ref` with siblings, `$id`, `$anchor`, `$dynamicRef` / `$dynamicAnchor`, `$recursiveRef` | Validation. Codegen turns dynamic-anchor templates into generic records. A `#/…` reference missing from an `$id` resource falls back to the document, with a warning |
 | `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentSchemas`, `unevaluatedProperties` / `unevaluatedItems`, `prefixItems`, `contains` | Validation. Codegen: `allOf` merges properties (later members refine earlier ones), `oneOf`/`anyOf` become sealed unions |
 | `discriminator` (`mapping`, `defaultMapping` 3.2, implicit names) | Validation picks the member to report on; codegen generates Jackson subtype information |

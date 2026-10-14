@@ -18,7 +18,8 @@ It replaces two tools:
 
 It reads OpenAPI **3.0, 3.1 and 3.2** (and **Swagger / OpenAPI 2.0**, converted on load). A
 description can span several documents, local or remote, linked with `$ref`. Schemas use the full
-JSON Schema vocabulary, verified against the official JSON Schema test suite. See
+JSON Schema vocabulary (drafts 4 to 2020-12, custom metaschemas with `$vocabulary` included); every
+required and optional test of the official JSON Schema test suite passes. See
 [docs/spec-coverage.md](docs/spec-coverage.md) for coverage of the specification, feature by feature.
 
 ## Quick start

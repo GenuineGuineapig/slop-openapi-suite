@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicContainer;
 import org.junit.jupiter.api.DynamicNode;
@@ -30,21 +29,11 @@ import org.junit.jupiter.api.TestFactory;
 
 /**
  * Runs the official JSON-Schema-Test-Suite (vendored under {@code src/test/resources}) against
- * {@link SchemaValidator}. Required tests run without format assertion; {@code optional/format}
- * runs with it.
+ * {@link SchemaValidator}: every required and optional test. Required tests run without format
+ * assertion, {@code optional/format} runs with it, and {@code optional/content.json} asserts
+ * content.
  */
 class JsonSchemaTestSuiteTest {
-
-    /**
-     * Tests that exercise features this library deliberately does not implement, keyed by
-     * {@code draft/file/group description/test description} prefix.
-     */
-    private static final Set<String> SKIPPED = Set.of(
-        // Custom metaschemas with $vocabulary that disable vocabularies are not supported.
-        "draft2020-12/vocabulary.json/",
-        "draft2019-09/vocabulary.json/",
-        // Host names follow IDNA2008 in every dialect, which reserves "--" in positions 3 and 4 (RFC 1123 allowed it).
-        "draft4/optional/format/hostname.json/validation of host names/hostname with consecutive hyphens (RFC1123)");
 
     private static final Path ROOT = resource("/json-schema-test-suite");
     private static final Map<URI, String> REMOTES = remotes();
@@ -73,6 +62,7 @@ class JsonSchemaTestSuiteTest {
         var dir = ROOT.resolve("tests").resolve(draft);
         var nodes = new ArrayList<DynamicNode>();
         files(dir).forEach(file -> nodes.add(file(draft, dir.relativize(file).toString(), file, dialect, false)));
+        files(dir.resolve("optional")).forEach(file -> nodes.add(file(draft, "optional/" + file.getFileName(), file, dialect, false)));
         files(dir.resolve("optional/format")).forEach(file -> nodes.add(file(draft, "optional/format/" + file.getFileName(), file, dialect, true)));
         return nodes.stream();
     }
@@ -90,9 +80,6 @@ class JsonSchemaTestSuiteTest {
                 var testObject = (JsonObject) test;
                 var testDescription = testObject.string("description").orElseThrow();
                 var key = draft + "/" + name + "/" + description + "/" + testDescription;
-                if (SKIPPED.stream().anyMatch(key::startsWith)) {
-                    continue;
-                }
                 var data = testObject.get("data").orElseThrow();
                 var valid = testObject.bool("valid").orElseThrow();
                 tests.add(DynamicTest.dynamicTest(testDescription, () -> run(key, uri, schemaJson, dialect, assertFormats, data, valid)));
@@ -107,7 +94,9 @@ class JsonSchemaTestSuiteTest {
         loader.register(new Document(uri, schemaJson, SourceMap.EMPTY));
         var root = Schema.at(schemaJson, uri, JsonPointer.ROOT, uri, dialect);
         var build = SchemaRegistry.build(List.of(root), loader, dialect);
-        var validator = new SchemaValidator(build.registry(), SchemaValidator.Options.DEFAULT.withAssertFormats(assertFormats));
+        // The optional content tests assert contentEncoding and contentMediaType, which are annotations by default.
+        var options = SchemaValidator.Options.DEFAULT.withAssertFormats(assertFormats).withAssertContent(key.contains("/optional/content.json/"));
+        var validator = new SchemaValidator(build.registry(), options);
         var errors = validator.validate(root, data);
         assertThat(errors.isEmpty())
             .as("%s: expected %s for %s but got %s", key, valid ? "valid" : "invalid", data.toJson(), SchemaValidator.describe(errors))
