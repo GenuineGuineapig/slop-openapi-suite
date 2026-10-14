@@ -153,6 +153,29 @@ passes, and only passes on items that are valid. When responses fail on violatio
 response becomes a 500 problem while nothing has been sent yet; later, the stream ends before the
 invalid item. An invalid request item ends the request's stream with a 400 problem.
 
+## Several media types of different types
+
+When a response offers media types whose bodies have different Java types (JSON Lines items and
+server-sent events, say, or JSON data and plain text), each gets a variant of its own, sent as its
+media type: `SubscribeTripResponse.Ok` and `SubscribeTripResponse.OkEventStream`. The request
+record then carries the client's `Accept` header, so the implementation can answer with what the
+client wants, and generated clients decode the variant the response's `Content-Type` names:
+
+```java
+public SubscribeTripResponse subscribeTrip(SubscribeTripRequest request) {
+    if (request.accept() != null && !request.accept().accepts("application/jsonl")) {
+        return SubscribeTripResponse.okEventStream(events(request.id()), "no-cache", null);
+    }
+    return SubscribeTripResponse.ok(updates(request.id()), "no-cache", null);
+}
+
+// A client asking for server-sent events:
+trips.subscribeTrip(new SubscribeTripRequest(tripId, Accept.of("text/event-stream")));
+```
+
+Request bodies work the same way: a component per media type (`body`, `bodyPlain`, …), bound from
+the one the request carries; clients send the one that is set.
+
 ## Validation at runtime
 
 The auto-configured `OpenApiValidationFilter` validates every request routed to a described
@@ -288,8 +311,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
   `uniqueItems` remembers the items seen so far. `OpenApiClientValidationInterceptor`, for
   `RestClient`s other than the generated clients', sees whole request bodies, because Spring
   buffers request bodies for interceptors (generated clients validate without buffering).
-* **One Java type per body.** A response that may be JSON Lines or SSE is typed by its first
-  media type (JSON first); the other is still accepted and validated, but not typed separately.
 * **Remote references are fetched on every build.** The Gradle task fetches them to see whether
   they changed; it is up to date (or taken from the build cache) while they did not.
 * **Links are checked, not used.** Their target operations must exist, but links have no runtime

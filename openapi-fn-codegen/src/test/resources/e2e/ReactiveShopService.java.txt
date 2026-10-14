@@ -119,4 +119,15 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi,
     public Mono<PetCreatedPutResponse> petCreatedPut(PetCreatedPutRequest request) {
         return Mono.just(PetCreatedPutResponse.ok("ack:" + request.body()));
     }
+
+    @Override
+    public Mono<GetReceiptResponse> getReceipt(GetReceiptRequest request) {
+        var textOnly = request.accept() != null && !request.accept().accepts("application/json");
+        return Mono.just(textOnly ? GetReceiptResponse.okPlain("Total: 12.50") : GetReceiptResponse.ok(new GetReceiptResponse.OkBody(new BigDecimal("12.50"))));
+    }
+
+    @Override
+    public Mono<AddOrderNoteResponse> addOrderNote(AddOrderNoteRequest request) {
+        return Mono.just(AddOrderNoteResponse.ok(request.body() != null ? "json:" + request.body().text() : "text:" + request.bodyPlain()));
+    }
 }

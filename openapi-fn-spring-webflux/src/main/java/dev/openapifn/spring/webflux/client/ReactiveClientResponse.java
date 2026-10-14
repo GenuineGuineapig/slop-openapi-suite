@@ -67,6 +67,11 @@ public final class ReactiveClientResponse {
         return headers.first("Content-Type");
     }
 
+    /** Whether the {@code Content-Type} is one of {@code mediaType}, see {@link ClientResponse#hasContentType}. */
+    public boolean hasContentType(String mediaType) {
+        return head().hasContentType(mediaType);
+    }
+
     /** The header {@code name} converted to {@code type}, see {@link ClientResponse#header(String, Class)}. */
     public <T> @Nullable T header(String name, Class<T> type) {
         return head().header(name, type);

@@ -106,21 +106,21 @@ class TrainTravelApiIntegrationTest {
             assertThat(ok.cacheControl()).isEqualTo("max-age=3600");
         });
         // QUERY is the HTTP method for safe requests with a body (OpenAPI 3.2).
-        var queried = stations.queryStations(new QueryStationsRequest(null, null, new StationQuery(null, null, "FR"))).block();
+        var queried = stations.queryStations(new QueryStationsRequest(null, null, new StationQuery(null, null, "FR"), null)).block();
         assertThat(queried).isInstanceOfSatisfying(QueryStationsResponse.Ok.class,
             ok -> assertThat(ok.body().data()).extracting(Station::name).containsExactly("Paris Gare du Nord"));
     }
 
     @Test
     void findTripsAndFollowOne() {
-        var found = trips.getTrips(new GetTripsRequest(null, null, Timetable.BERLIN.id(), Timetable.PARIS.id(), DEPARTURE, true, null)).block();
+        var found = trips.getTrips(new GetTripsRequest(null, null, Timetable.BERLIN.id(), Timetable.PARIS.id(), DEPARTURE, true, null, null)).block();
         var trip = ((GetTripsResponse.Ok) found).body().data().getFirst();
         assertThat(trip.operator()).isEqualTo("Eurostar");
         assertThat(trip.departureTime()).isEqualTo(DEPARTURE.plusHours(1));
         assertThat(trip.price()).isEqualByComparingTo("59.90");
 
         // A custom SUBSCRIBE method (OpenAPI 3.2 additionalOperations) streaming JSON Lines: each update arrives as it is produced.
-        var updates = (SubscribeTripResponse.Ok) trips.subscribeTrip(new SubscribeTripRequest(trip.id())).block();
+        var updates = (SubscribeTripResponse.Ok) trips.subscribeTrip(new SubscribeTripRequest(trip.id(), null)).block();
         var arrivals = new java.util.ArrayList<Long>();
         assertThat(updates.body().doOnNext(update -> arrivals.add(System.nanoTime())).map(TripUpdate::type).collectList().block())
             .containsExactly(TripUpdate.Type.DELAY, TripUpdate.Type.PLATFORM, TripUpdate.Type.DEPARTED);
@@ -144,7 +144,7 @@ class TrainTravelApiIntegrationTest {
             assertThat(body.passengerName()).isEqualTo("Ada Lovelace");
         });
 
-        assertThat(bookings.getBookings(new GetBookingsRequest(null, null)).block()).isInstanceOfSatisfying(GetBookingsResponse.Ok.class,
+        assertThat(bookings.getBookings(new GetBookingsRequest(null, null, null)).block()).isInstanceOfSatisfying(GetBookingsResponse.Ok.class,
             ok -> assertThat(ok.body().data()).extracting(Booking::id).contains(created.id()));
         assertThat(bookings.getBooking(new GetBookingRequest(created.id())).block()).isInstanceOfSatisfying(GetBookingResponse.Ok.class,
             ok -> assertThat(ok.body().hasBicycle()).isTrue());

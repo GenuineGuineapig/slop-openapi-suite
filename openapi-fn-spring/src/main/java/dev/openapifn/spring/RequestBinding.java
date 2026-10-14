@@ -85,6 +85,38 @@ public final class RequestBinding {
         return value == null ? null : convert(JacksonJson.toJsonNode(value), type, in + "." + name);
     }
 
+    /** The media types the client accepts. */
+    public Accept accept() {
+        return Accept.parse(request.headers().first("Accept").orElse(null));
+    }
+
+    /** Whether the request's {@code Content-Type} is one of {@code mediaType} (a media type or range). */
+    public boolean hasContentType(String mediaType) {
+        return request.contentType().flatMap(ContentType::parse)
+            .flatMap(actual -> ContentType.parse(mediaType).filter(range -> range.includes(actual))).isPresent();
+    }
+
+    /**
+     * The request body as {@code type} if it is of {@code mediaType}, else {@code null}: for
+     * operations whose media types have bodies of different types, one component each.
+     */
+    public <T> @Nullable T body(String mediaType, Class<T> type) {
+        return hasContentType(mediaType) ? body(type) : null;
+    }
+
+    public <T> @Nullable T body(String mediaType, TypeReference<T> type) {
+        return hasContentType(mediaType) ? body(type) : null;
+    }
+
+    /** The items of the body if it is of {@code mediaType}, else {@code null}; see {@link #items(Class)}. */
+    public <T> @Nullable Stream<T> items(String mediaType, Class<T> type) {
+        return hasContentType(mediaType) ? items(type) : null;
+    }
+
+    public <T> @Nullable Stream<T> items(String mediaType, TypeReference<T> type) {
+        return hasContentType(mediaType) ? items(type) : null;
+    }
+
     /** The request body, or {@code null} when there is none. */
     public <T> @Nullable T body(Class<T> type) {
         return body(mapper.constructType(type));

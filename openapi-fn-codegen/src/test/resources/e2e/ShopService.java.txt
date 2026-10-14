@@ -119,4 +119,15 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi,
     public PetCreatedPutResponse petCreatedPut(PetCreatedPutRequest request) {
         return PetCreatedPutResponse.ok("ack:" + request.body());
     }
+
+    @Override
+    public GetReceiptResponse getReceipt(GetReceiptRequest request) {
+        var textOnly = request.accept() != null && !request.accept().accepts("application/json");
+        return textOnly ? GetReceiptResponse.okPlain("Total: 12.50") : GetReceiptResponse.ok(new GetReceiptResponse.OkBody(new BigDecimal("12.50")));
+    }
+
+    @Override
+    public AddOrderNoteResponse addOrderNote(AddOrderNoteRequest request) {
+        return AddOrderNoteResponse.ok(request.body() != null ? "json:" + request.body().text() : "text:" + request.bodyPlain());
+    }
 }

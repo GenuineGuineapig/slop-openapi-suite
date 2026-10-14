@@ -39,11 +39,12 @@ public final class ReactiveEndToEnd {
         });
         var searched = pets.searchPets(new SearchPetsRequest(new SearchPetsRequest.Body("e"))).block();
         results.add("search:" + ((SearchPetsResponse.Ok) searched).body().size());
-        results.add("get:" + switch (pets.getPet(new GetPetRequest(2L)).block()) {
+        results.add("get:" + switch (pets.getPet(new GetPetRequest(2L, null)).block()) {
             case GetPetResponse.Ok ok -> ok.body().name();
+            case GetPetResponse.OkPlain plain -> plain.body();
             case GetPetResponse.NotFound ignored -> "missing";
         });
-        results.add("get404:" + (pets.getPet(new GetPetRequest(99L)).block() instanceof GetPetResponse.NotFound));
+        results.add("get404:" + (pets.getPet(new GetPetRequest(99L, null)).block() instanceof GetPetResponse.NotFound));
         @SuppressWarnings("deprecation")
         var deleted = pets.deletePet(new DeletePetRequest(1L)).block();
         results.add("delete:" + deleted.status());
@@ -62,6 +63,12 @@ public final class ReactiveEndToEnd {
         var imported = orders.importEvents(new ImportEventsRequest(Flux.just(new OrderEvent("placed", EndToEndIds.ORDER),
             new OrderEvent("shipped", EndToEndIds.ORDER)))).block();
         results.add("imported:" + ((ImportEventsResponse.Ok) imported).body());
+        var receipt = orders.getReceipt(new GetReceiptRequest(EndToEndIds.ORDER, null)).block();
+        var receiptText = orders.getReceipt(new GetReceiptRequest(EndToEndIds.ORDER, dev.openapifn.spring.Accept.of("text/plain"))).block();
+        results.add("receipt:" + ((GetReceiptResponse.Ok) receipt).body().total() + ":" + ((GetReceiptResponse.OkPlain) receiptText).body());
+        var jsonNote = orders.addOrderNote(new AddOrderNoteRequest(EndToEndIds.ORDER, new AddOrderNoteRequest.Body("hi"), null)).block();
+        var textNote = orders.addOrderNote(new AddOrderNoteRequest(EndToEndIds.ORDER, null, "ho")).block();
+        results.add("notes:" + ((AddOrderNoteResponse.Ok) jsonNote).body() + ":" + ((AddOrderNoteResponse.Ok) textNote).body());
         results.add("health:" + ((HealthResponse.Ok) defaults.health().block()).body());
 
         // Webhooks and callbacks are sent to receivers; here the same application receives them.

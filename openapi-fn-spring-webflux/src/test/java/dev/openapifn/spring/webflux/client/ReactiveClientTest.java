@@ -166,6 +166,8 @@ class ReactiveClientTest {
         assertThat(untyped.items(Integer.class).collectList().block()).isEmpty();
         assertThat(untyped.header("X-Missing", String.class)).isNull();
         var delimited = new ReactiveClientResponse(200, Headers.of("X-Codes", "1|2"), Flux.empty(), MAPPER, null);
+        assertThat(delimited.hasContentType("text/plain")).isFalse();
+        assertThat(new ReactiveClientResponse(200, Headers.of("Content-Type", "text/plain"), Flux.empty(), MAPPER, null).hasContentType("text/*")).isTrue();
         assertThat(delimited.header("X-Codes", Integer[].class, "|")).containsExactly(1, 2);
         assertThat(delimited.header("X-Codes", new TypeReference<List<Integer>>() { }, "|")).containsExactly(1, 2);
         assertThat(untyped.contentType()).isEmpty();

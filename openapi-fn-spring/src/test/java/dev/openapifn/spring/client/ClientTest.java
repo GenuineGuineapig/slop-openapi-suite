@@ -350,7 +350,12 @@ class ClientTest {
         assertThat(call.body().encodings()).containsOnlyKeys("tags");
         var client = setup(RestClient.builder()).client();
         assertThat(new String(client.encode(call.body()).body(), StandardCharsets.UTF_8)).isEqualTo("tags=a%7Cb");
+        var typed = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "text/plain; charset=UTF-8"), new byte[0], MAPPER);
+        assertThat(typed.hasContentType("text/plain")).isTrue();
+        assertThat(typed.hasContentType("text/*")).isTrue();
+        assertThat(typed.hasContentType("application/json")).isFalse();
         var response = new ClientResponse(200, dev.openapifn.http.Headers.of("X-Codes", "1 2"), new byte[0], MAPPER);
+        assertThat(response.hasContentType("text/plain")).isFalse();
         assertThat(response.header("X-Codes", Integer[].class, " ")).containsExactly(1, 2);
         assertThat(response.header("X-Codes", new TypeReference<List<Integer>>() { }, " ")).containsExactly(1, 2);
     }

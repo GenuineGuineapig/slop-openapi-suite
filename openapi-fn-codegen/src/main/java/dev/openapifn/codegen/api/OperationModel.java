@@ -19,6 +19,7 @@ import dev.openapifn.schema.Schema;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,9 +40,11 @@ import java.util.Set;
  * @param variants the response variants
  * @param receiverPath the default path a receiving controller maps a webhook or callback to, such
  *     as {@code /webhooks/newPet} (empty for path operations)
+ * @param accept the request component carrying the {@code Accept} header, when responses offer
+ *     media types of different Java types
  */
 public record OperationModel(ApiOperation operation, String id, String method, String group, Optional<ClassName> request, List<ParamModel> parameters,
-                             Optional<BodyModel> body, ClassName response, List<VariantModel> variants, String receiverPath) {
+                             Optional<BodyModel> body, ClassName response, List<VariantModel> variants, String receiverPath, Optional<Property> accept) {
 
     /**
      * A parameter.
@@ -53,14 +56,26 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     }
 
     /**
+     * A body of a media type other than the primary one whose Java type differs: a request record
+     * component, or a response variant, of its own.
+     *
+     * @param contentType the media type
+     * @param mediaType its Media Type Object
+     * @param property the request record component (for requests)
+     */
+    public record AlternativeBody(String contentType, MediaType mediaType, Property property) {
+    }
+
+    /**
      * The request body.
      *
      * @param contentType the media type requests are sent with
      * @param mediaType its Media Type Object
      * @param property the request record component ({@code body})
      * @param contentTypes all described media types
+     * @param alternatives the media types with bodies of other Java types, each a component of its own
      */
-    public record BodyModel(String contentType, MediaType mediaType, Property property, List<String> contentTypes) {
+    public record BodyModel(String contentType, MediaType mediaType, Property property, List<String> contentTypes, List<AlternativeBody> alternatives) {
 
         /** Whether the body is sent as named {@code multipart/form-data} parts (other multipart types are positional lists). */
         public boolean formData() {
@@ -76,8 +91,12 @@ public record OperationModel(ApiOperation operation, String id, String method, S
      * @param response the Response Object
      * @param body the body component, if the response has content
      * @param headers header components by header name
+     * @param mediaType the media type the variant is sent as, when the response offers media types
+     *     of different Java types (each a variant of its own)
+     * @param alternative whether it is the variant of a media type other than the primary one
      */
-    public record VariantModel(String key, String name, Response response, Optional<Property> body, Map<String, Property> headers) {
+    public record VariantModel(String key, String name, Response response, Optional<Property> body, Map<String, Property> headers,
+                               Optional<String> mediaType, boolean alternative) {
 
         /** Whether the status is fixed (otherwise the record carries a {@code status} component). */
         public boolean fixedStatus() {
@@ -138,14 +157,31 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             var mediaType = requestBody.content().get(contentType);
             var schema = mediaType.schema().orElse(empty());
             var type = bodyType(contentType, mediaType, mapper, requestName, "Body", stream);
-            return new BodyModel(contentType, mediaType, new Property("body", "body", type, requestBody.required(),
-                !requestBody.required() || mapper.nullable(schema), schema), List.copyOf(requestBody.content().keySet()));
+            var alternatives = new ArrayList<AlternativeBody>();
+            requestBody.content().forEach((other, otherMediaType) -> {
+                var formData = ContentType.parse(other).filter(t -> t.essence().equals("multipart/form-data")).isPresent();
+                if (!other.equals(contentType) && !formData && !sameBody(contentType, mediaType, other, otherMediaType, mapper)) {
+                    var label = mediaLabel(other);
+                    var otherType = bodyType(other, otherMediaType, mapper, requestName, "Body" + label, stream);
+                    if (!otherType.equals(type)) {
+                        var otherSchema = otherMediaType.schema().orElse(empty());
+                        var javaName = Names.unique("body" + label, componentNames);
+                        alternatives.add(new AlternativeBody(other, otherMediaType, new Property(javaName, javaName, otherType, false, true, otherSchema)));
+                    }
+                }
+            });
+            var required = requestBody.required() && alternatives.isEmpty();
+            return new BodyModel(contentType, mediaType, new Property("body", "body", type, required, !required || mapper.nullable(schema), schema),
+                List.copyOf(requestBody.content().keySet()), alternatives);
         }));
-        var request = parameters.isEmpty() && body.isEmpty() ? Optional.<ClassName>empty() : Optional.of(requestName);
+        var variants = variants(operation, mapper, responseName, stream);
+        var accept = variants.stream().anyMatch(VariantModel::alternative)
+            ? Optional.of(Names.unique("accept", componentNames)).map(javaName -> new Property(javaName, javaName, ACCEPT, false, true, empty()))
+            : Optional.<Property>empty();
+        var request = parameters.isEmpty() && body.isEmpty() && accept.isEmpty() ? Optional.<ClassName>empty() : Optional.of(requestName);
         var receiverPath = operation.kind() == ApiOperation.Kind.PATH ? ""
             : "/" + (operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks") + "/" + method;
-        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants(operation, mapper, responseName, stream),
-            receiverPath);
+        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants, receiverPath, accept);
     }
 
     private static List<VariantModel> variants(ApiOperation operation, TypeMapper mapper, ClassName responseName, ClassName stream) {
@@ -158,11 +194,23 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             var key = entry.getKey();
             var name = Names.unique(variantName(key), taken);
             var response = entry.getValue();
-            var body = primary(response.content()).map(contentType -> {
+            var primary = primary(response.content());
+            var body = primary.map(contentType -> {
                 var mediaType = response.content().get(contentType);
                 var type = bodyType(contentType, mediaType, mapper, responseName, name + "Body", stream);
                 return new Property("body", "body", type, true, mapper.nullable(mediaType.schema().orElse(empty())), mediaType.schema().orElse(empty()));
             });
+            var alternatives = new LinkedHashMap<String, Property>();
+            primary.ifPresent(contentType -> response.content().forEach((other, otherMediaType) -> {
+                if (!other.equals(contentType) && !sameBody(contentType, response.content().get(contentType), other, otherMediaType, mapper)) {
+                    var otherName = Names.unique(name + mediaLabel(other), taken);
+                    var type = bodyType(other, otherMediaType, mapper, responseName, otherName + "Body", stream);
+                    if (!type.equals(body.orElseThrow().type())) {
+                        alternatives.put(other + "\n" + otherName, new Property("body", "body", type, true,
+                            mapper.nullable(otherMediaType.schema().orElse(empty())), otherMediaType.schema().orElse(empty())));
+                    }
+                }
+            }));
             var headers = new java.util.LinkedHashMap<String, Property>();
             var headerNames = new HashSet<String>(List.of("body", "status", "headers", "contentType"));
             response.headers().forEach((header, definition) -> {
@@ -173,7 +221,11 @@ public record OperationModel(ApiOperation operation, String id, String method, S
                         !definition.required() || mapper.nullable(schema), schema));
                 }
             });
-            variants.add(new VariantModel(key, name, response, body, headers));
+            variants.add(new VariantModel(key, name, response, body, headers, alternatives.isEmpty() ? Optional.empty() : primary, false));
+            alternatives.forEach((label, property) -> {
+                var parts = label.split("\n", 2);
+                variants.add(new VariantModel(key, parts[1], response, Optional.of(property), headers, Optional.of(parts[0]), true));
+            });
         }
         return variants;
     }
@@ -186,6 +238,52 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             return "Status" + key.toUpperCase(java.util.Locale.ROOT);
         }
         return REASONS.getOrDefault(Integer.parseInt(key), "Status" + key);
+    }
+
+    /** The request component type carrying the {@code Accept} header. */
+    static final ClassName ACCEPT = ClassName.of("dev.openapifn.spring", "Accept");
+
+    private enum BodyKind { SEQUENCE, SCHEMA, TEXT, BINARY }
+
+    /**
+     * Whether two media types have bodies of the same Java type: of the same kind (streamed items,
+     * schema-typed, text or binary) with the same schemas.
+     */
+    private static boolean sameBody(String contentType, MediaType mediaType, String other, MediaType otherMediaType, TypeMapper mapper) {
+        var kind = bodyKind(contentType, mediaType, mapper);
+        return kind == bodyKind(other, otherMediaType, mapper) && (kind == BodyKind.TEXT || kind == BodyKind.BINARY
+            || schemaKey(mediaType.schema(), mapper).equals(schemaKey(otherMediaType.schema(), mapper))
+                && schemaKey(mediaType.itemSchema(), mapper).equals(schemaKey(otherMediaType.itemSchema(), mapper)));
+    }
+
+    /** The kind of Java type {@link #bodyType} gives a body. */
+    private static BodyKind bodyKind(String contentType, MediaType mediaType, TypeMapper mapper) {
+        var type = ContentType.parse(contentType);
+        var item = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(schema -> new SchemaShapes(mapper.registry()).items(schema)));
+        if (type.filter(ItemFramer::isSequentialMediaType).isPresent() && item.isPresent()) {
+            return BodyKind.SEQUENCE;
+        }
+        var text = type.filter(t -> t.type().equals("text") && !t.isXml()).isPresent();
+        var structured = type.filter(t -> t.isJson() || t.isXml() || t.type().equals("multipart")
+            || t.essence().equals("application/x-www-form-urlencoded")).isPresent();
+        var schema = mediaType.schema();
+        var binary = schema.map(s -> mapper.registry().deref(s)).flatMap(Schema::format).filter("binary"::equals).isPresent();
+        if (schema.isPresent() && !binary && (structured || text)) {
+            return BodyKind.SCHEMA;
+        }
+        return text ? BodyKind.TEXT : BodyKind.BINARY;
+    }
+
+    /** The same schema whether referenced or inline: the referenced location, else the inline JSON. */
+    private static String schemaKey(Optional<Schema> schema, TypeMapper mapper) {
+        return schema.map(s -> s.ref().isPresent() ? mapper.registry().deref(s).location().toString() : s.object().toJson()).orElse("");
+    }
+
+    /** A name for a media type's variant or component: {@code EventStream} for {@code text/event-stream}. */
+    static String mediaLabel(String contentType) {
+        var type = ContentType.parse(contentType).orElseThrow();
+        var subtype = type.subtype().replaceFirst("^(x-|vnd\\.)", "");
+        return Names.pascal(subtype.equals("*") ? type.type().equals("*") ? "any" : type.type() : subtype);
     }
 
     /** The media type used for typing and for sending: JSON first, then the first one. */
@@ -238,14 +336,18 @@ public record OperationModel(ApiOperation operation, String id, String method, S
      * method share their receiver path (a subscriber registers one URL).
      */
     public OperationModel withReceiverPath(String path) {
-        return new OperationModel(operation, id, method, group, request, parameters, body, response, variants, path);
+        return new OperationModel(operation, id, method, group, request, parameters, body, response, variants, path, accept);
     }
 
     /** All request record components in order. */
     public List<Property> requestProperties() {
         var properties = new ArrayList<Property>();
         parameters.forEach(parameter -> properties.add(parameter.property()));
-        body.ifPresent(b -> properties.add(b.property()));
+        body.ifPresent(b -> {
+            properties.add(b.property());
+            b.alternatives().forEach(alternative -> properties.add(alternative.property()));
+        });
+        accept.ifPresent(properties::add);
         return properties;
     }
 

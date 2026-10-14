@@ -162,6 +162,40 @@ paths:
           description: The number of imported events
           content:
             application/json: {schema: {type: integer}}
+  /orders/{orderId}/receipt:
+    get:
+      operationId: getReceipt
+      tags: [orders]
+      security: []
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The receipt, as data or as text
+          content:
+            application/json:
+              schema: {type: object, required: [total], properties: {total: {type: number}}}
+            text/plain:
+              schema: {type: string}
+  /orders/{orderId}/notes:
+    post:
+      operationId: addOrderNote
+      tags: [orders]
+      security: []
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [text], properties: {text: {type: string}}}
+          text/plain:
+            schema: {type: string}
+      responses:
+        '200':
+          description: The note as stored
+          content:
+            text/plain: {schema: {type: string}}
   /health:
     get:
       operationId: health

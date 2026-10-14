@@ -105,27 +105,35 @@ class TrainTravelApiIntegrationTest {
             assertThat(ok.cacheControl()).isEqualTo("max-age=3600");
         });
         // QUERY is the HTTP method for safe requests with a body (OpenAPI 3.2).
-        var queried = stations.queryStations(new QueryStationsRequest(null, null, new StationQuery(null, null, "FR")));
+        var queried = stations.queryStations(new QueryStationsRequest(null, null, new StationQuery(null, null, "FR"), null));
         assertThat(queried).isInstanceOfSatisfying(QueryStationsResponse.Ok.class,
             ok -> assertThat(ok.body().data()).extracting(Station::name).containsExactly("Paris Gare du Nord"));
     }
 
     @Test
     void findTripsAndFollowOne() {
-        var found = trips.getTrips(new GetTripsRequest(null, null, Timetable.BERLIN.id(), Timetable.PARIS.id(), DEPARTURE, true, null));
+        var found = trips.getTrips(new GetTripsRequest(null, null, Timetable.BERLIN.id(), Timetable.PARIS.id(), DEPARTURE, true, null, null));
         var trip = ((GetTripsResponse.Ok) found).body().data().getFirst();
         assertThat(trip.operator()).isEqualTo("Eurostar");
         assertThat(trip.departureTime()).isEqualTo(DEPARTURE.plusHours(1));
         assertThat(trip.price()).isEqualByComparingTo("59.90");
 
         // A custom SUBSCRIBE method (OpenAPI 3.2 additionalOperations) streaming JSON Lines: each update arrives as it is produced.
-        var updates = (SubscribeTripResponse.Ok) trips.subscribeTrip(new SubscribeTripRequest(trip.id()));
+        var updates = (SubscribeTripResponse.Ok) trips.subscribeTrip(new SubscribeTripRequest(trip.id(), null));
         var arrivals = new java.util.ArrayList<Long>();
         try (var stream = updates.body()) {
             assertThat(stream.peek(update -> arrivals.add(System.nanoTime())).map(TripUpdate::type))
                 .containsExactly(TripUpdate.Type.DELAY, TripUpdate.Type.PLATFORM, TripUpdate.Type.DEPARTED);
         }
         assertThat(java.time.Duration.ofNanos(arrivals.getLast() - arrivals.getFirst())).isGreaterThan(MockTrips.UPDATE_INTERVAL);
+
+        // A client that only accepts server-sent events gets them, typed as the description's other variant.
+        var events = trips.subscribeTrip(new SubscribeTripRequest(trip.id(), dev.openapifn.spring.Accept.of("text/event-stream")));
+        assertThat(events).isInstanceOfSatisfying(SubscribeTripResponse.OkEventStream.class, stream -> {
+            try (var items = stream.body()) {
+                assertThat(items.toList()).extracting(SubscribeTripResponse.OkEventStreamBodyItem::event).containsExactly("delay", "platform", "departed");
+            }
+        });
     }
 
     @Test
@@ -145,7 +153,7 @@ class TrainTravelApiIntegrationTest {
             assertThat(body.passengerName()).isEqualTo("Ada Lovelace");
         });
 
-        assertThat(bookings.getBookings(new GetBookingsRequest(null, null))).isInstanceOfSatisfying(GetBookingsResponse.Ok.class,
+        assertThat(bookings.getBookings(new GetBookingsRequest(null, null, null))).isInstanceOfSatisfying(GetBookingsResponse.Ok.class,
             ok -> assertThat(ok.body().data()).extracting(Booking::id).contains(created.id()));
         assertThat(bookings.getBooking(new GetBookingRequest(created.id()))).isInstanceOfSatisfying(GetBookingResponse.Ok.class,
             ok -> assertThat(ok.body().hasBicycle()).isTrue());

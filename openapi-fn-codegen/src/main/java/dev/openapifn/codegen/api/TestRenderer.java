@@ -136,9 +136,10 @@ public final class TestRenderer {
 
     /** The first fixed 2xx variant, else the first variant. */
     private static OperationModel.VariantModel stubbedVariant(OperationModel operation) {
-        return operation.variants().stream().filter(v -> v.fixedStatus() && v.key().startsWith("2")).findFirst()
-            .or(() -> operation.variants().stream().filter(v -> v.key().startsWith("2")).findFirst())
-            .orElse(operation.variants().getFirst());
+        var primaries = operation.variants().stream().filter(v -> !v.alternative()).toList();
+        return primaries.stream().filter(v -> v.fixedStatus() && v.key().startsWith("2")).findFirst()
+            .or(() -> primaries.stream().filter(v -> v.key().startsWith("2")).findFirst())
+            .orElse(primaries.getFirst());
     }
 
     private Optional<String> responseExpression(OperationModel operation, OperationModel.VariantModel variant, int status, Imports imports) {

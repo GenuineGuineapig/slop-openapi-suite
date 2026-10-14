@@ -3,6 +3,7 @@ package dev.openapifn.spring.webflux;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.ItemFramer;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.spring.Accept;
 import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.spring.JacksonJson;
 import dev.openapifn.spring.OpenApiValidationException;
@@ -64,6 +65,29 @@ public final class ReactiveBinding {
 
     public <T> @Nullable T parameter(String in, String name, TypeReference<T> type) {
         return binding.parameter(in, name, type);
+    }
+
+    /** The media types the client accepts. */
+    public Accept accept() {
+        return binding.accept();
+    }
+
+    /** The request body as {@code type} if it is of {@code mediaType}, else {@code null}; see {@link RequestBinding#body(String, Class)}. */
+    public <T> @Nullable T body(String mediaType, Class<T> type) {
+        return binding.body(mediaType, type);
+    }
+
+    public <T> @Nullable T body(String mediaType, TypeReference<T> type) {
+        return binding.body(mediaType, type);
+    }
+
+    /** The items of the body if it is of {@code mediaType}, else {@code null}; see {@link #items(Class)}. */
+    public <T> @Nullable Flux<T> items(String mediaType, Class<T> type) {
+        return binding.hasContentType(mediaType) ? items(type) : null;
+    }
+
+    public <T> @Nullable Flux<T> items(String mediaType, TypeReference<T> type) {
+        return binding.hasContentType(mediaType) ? items(type) : null;
     }
 
     /** The request body, or {@code null} when there is none; a streamed body is read with {@link #items}. */

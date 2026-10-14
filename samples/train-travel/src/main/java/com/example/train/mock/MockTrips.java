@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Mock trips: every connection of {@link Timetable} departs at the requested time and the next hour. */
 @Component
@@ -38,10 +39,17 @@ public class MockTrips implements TripsApi {
             new GetTripsResponse.OkBody.Links(URI.create(Timetable.BASE + "/trips"), null, null)), "max-age=60", null);
     }
 
+    private final JsonMapper mapper;
+
+    public MockTrips(JsonMapper mapper) {
+        this.mapper = mapper;
+    }
+
     /**
      * Live updates of a trip: a delay, a platform change and the departure, produced one by one
      * (a pause stands in for waiting on the next real event). Each update is sent, and validated,
-     * as soon as it is produced.
+     * as soon as it is produced: as JSON Lines, or as server-sent events (each update as the JSON
+     * data of an event named after its type) for clients that only accept those.
      */
     @Override
     public SubscribeTripResponse subscribeTrip(SubscribeTripRequest request) {
@@ -51,12 +59,17 @@ public class MockTrips implements TripsApi {
             TripUpdate.builder().type(TripUpdate.Type.PLATFORM).tripId(request.id()).occurredAt(at.plusMinutes(6)).platform("7"),
             TripUpdate.builder().type(TripUpdate.Type.DEPARTED).tripId(request.id()).occurredAt(at.plusHours(1)));
         var first = new java.util.concurrent.atomic.AtomicBoolean(true);
-        return SubscribeTripResponse.ok(updates.map(update -> {
+        var live = updates.map(update -> {
             if (!first.getAndSet(false)) {
                 pause();
             }
             return update.build();
-        }), "no-cache", null);
+        });
+        if (request.accept() != null && !request.accept().accepts("application/jsonl")) {
+            return SubscribeTripResponse.okEventStream(live.map(update -> new SubscribeTripResponse.OkEventStreamBodyItem(update.type().value(),
+                mapper.writeValueAsString(update))), "no-cache", null);
+        }
+        return SubscribeTripResponse.ok(live, "no-cache", null);
     }
 
     private static void pause() {

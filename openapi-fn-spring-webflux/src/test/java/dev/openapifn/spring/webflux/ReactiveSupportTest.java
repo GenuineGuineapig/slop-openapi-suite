@@ -153,6 +153,17 @@ class ReactiveSupportTest {
         assertThat(binding.validation().report().isEmpty()).isTrue();
         assertThat(binding.items(Map.class).collectList().block()).containsExactly(Map.of("a", 1));
         assertThatThrownBy(() -> binding.items(Integer.class).collectList().block()).isInstanceOf(OpenApiValidationException.class);
+        var accepting = MockServerWebExchange.from(MockServerHttpRequest.post("/events").header("Content-Type", "application/json")
+            .header("Accept", "text/plain").body("[{\"a\":2}]"));
+        var typed = runtime.bind(accepting, "publish").block();
+        assertThat(typed.accept().accepts("text/plain")).isTrue();
+        assertThat((List<?>) typed.body("application/json", List.class)).hasSize(1);
+        assertThat(typed.body("text/plain", new tools.jackson.core.type.TypeReference<List<Map<String, Integer>>>() { })).isNull();
+        assertThat(typed.items("application/json", Map.class).collectList().block()).containsExactly(Map.of("a", 2));
+        assertThat(typed.items("text/plain", Map.class)).isNull();
+        assertThat(typed.items("application/json", new tools.jackson.core.type.TypeReference<Map<String, Integer>>() { }).collectList().block())
+            .containsExactly(Map.of("a", 2));
+        assertThat(typed.items("text/plain", new tools.jackson.core.type.TypeReference<Map<String, Integer>>() { })).isNull();
         var lines = MockServerWebExchange.from(MockServerHttpRequest.post("/events").header("Content-Type", "application/jsonl").body("1\n"));
         var lenient = new ReactiveRuntime(new OpenApiRuntime("events", RUNTIME.api(), RUNTIME.validator(), RUNTIME.mapper(), false));
         assertThatThrownBy(() -> lenient.bind(lines, "publish").block().items(Map.class).collectList().block())

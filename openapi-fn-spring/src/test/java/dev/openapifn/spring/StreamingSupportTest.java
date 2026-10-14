@@ -113,6 +113,36 @@ class StreamingSupportTest {
     }
 
     @Test
+    void bindsBodiesByMediaType() {
+        var runtime = servlet(true);
+        var lines = runtime.bind(request("application/jsonl", "{\"n\":1}\n"), "publish");
+        assertThat(lines.hasContentType("application/jsonl")).isTrue();
+        assertThat(lines.items("application/json", Map.class)).isNull();
+        assertThat(lines.items("application/jsonl", Map.class)).containsExactly(Map.of("n", 1));
+        var array = runtime.bind(request("application/json", "[{\"n\":2}]"), "publish");
+        assertThat(array.items("application/jsonl", new TypeReference<Map<String, Integer>>() { })).isNull();
+        assertThat(array.items("application/*", new TypeReference<Map<String, Integer>>() { })).containsExactly(Map.of("n", 2));
+        assertThat((List<?>) array.body("application/jsonl", List.class)).isNull();
+        assertThat((List<?>) array.body("application/json", List.class)).hasSize(1);
+        assertThat(array.body("application/json", new TypeReference<List<Map<String, Integer>>>() { })).containsExactly(Map.of("n", 2));
+        assertThat(array.body("text/plain", new TypeReference<List<Map<String, Integer>>>() { })).isNull();
+        assertThat(array.hasContentType("nonsense")).isFalse();
+        var accepting = request("application/json", "[]");
+        accepting.addHeader("Accept", "text/plain, application/json;q=0");
+        assertThat(servlet(false).bind(accepting, "publish").accept()).satisfies(accept -> {
+            assertThat(accept.accepts("text/plain")).isTrue();
+            assertThat(accept.accepts("application/json")).isFalse();
+            assertThat(accept.accepts("nonsense")).isFalse();
+            assertThat(accept).hasToString("text/plain, application/json;q=0");
+        });
+        assertThat(runtime.bind(request("application/json", "[]"), "publish").accept().accepts("image/png")).isTrue();
+        assertThat(Accept.of("image/*").accepts("image/png")).isTrue();
+        assertThat(Accept.parse(" , text/plain").ranges()).containsExactly("text/plain");
+        var untyped = new MockHttpServletRequest("POST", "/events");
+        assertThat(runtime.bind(untyped, "publish").hasContentType("application/json")).isFalse();
+    }
+
+    @Test
     void reportsUnreadableBodies() {
         var broken = new MockHttpServletRequest("POST", "/events") {
             @Override

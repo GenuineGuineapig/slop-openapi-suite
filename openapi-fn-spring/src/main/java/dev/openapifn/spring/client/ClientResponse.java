@@ -130,6 +130,11 @@ public final class ClientResponse {
         return headers.first("Content-Type");
     }
 
+    /** Whether the {@code Content-Type} is one of {@code mediaType} (a media type or range). */
+    public boolean hasContentType(String mediaType) {
+        return contentType().flatMap(ContentType::parse).flatMap(actual -> ContentType.parse(mediaType).filter(range -> range.includes(actual))).isPresent();
+    }
+
     /** The body converted to {@code type}: JSON is read with Jackson, other content as text, bytes or a {@link FilePart}. */
     public <T> @Nullable T body(Class<T> type) {
         return body(mapper.constructType(type));

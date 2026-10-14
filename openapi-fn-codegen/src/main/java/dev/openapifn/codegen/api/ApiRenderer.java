@@ -169,6 +169,8 @@ public final class ApiRenderer {
         if (variant.fixedStatus()) {
             out.blank().line("@Override").open("public int status()").line("return " + variant.key() + ";").close();
         }
+        variant.mediaType().ifPresent(mediaType -> out.blank().line("@Override").open("public String contentType()")
+            .line("return " + Names.literal(TestRenderer.concrete(mediaType)) + ";").close());
         if (!variant.headers().isEmpty()) {
             var map = imports.ref(TypeRef.MAP) + "<String, " + "@" + imports.ref(TypeMapper.NULLABLE) + " Object>";
             out.blank().line("@Override").open("public " + map + " headers()");
@@ -339,14 +341,29 @@ public final class ApiRenderer {
         var arguments = new ArrayList<String>();
         operation.parameters().forEach(p -> arguments.add("binding.parameter(" + Names.literal(p.parameter().in().value()) + ", "
             + Names.literal(p.parameter().name()) + ", " + token(p.property().type(), imports) + ")"));
-        operation.body().ifPresent(b -> arguments.add(read("binding", b.property().type(), imports)));
+        operation.body().ifPresent(b -> {
+            if (b.alternatives().isEmpty()) {
+                arguments.add(read("binding", b.property().type(), imports));
+            } else {
+                // One component per media type: each bound when the request is of its media type.
+                arguments.add(read("binding", Names.literal(b.contentType()) + ", ", b.property().type(), imports));
+                b.alternatives().forEach(alternative -> arguments.add(read("binding", Names.literal(alternative.contentType()) + ", ",
+                    alternative.property().type(), imports)));
+            }
+        });
+        operation.accept().ifPresent(accept -> arguments.add("binding.accept()"));
         return arguments;
     }
 
     /** Reads a body of {@code type} from a request binding or a client response: streamed bodies item by item. */
     private static String read(String source, TypeRef type, Imports imports) {
-        return OperationModel.streamed(type).map(item -> source + ".items(" + token(item, imports) + ")")
-            .orElseGet(() -> source + ".body(" + token(type, imports) + ")");
+        return read(source, "", type, imports);
+    }
+
+    /** Reads a body, passing {@code prefix} (such as a media type argument) first. */
+    private static String read(String source, String prefix, TypeRef type, Imports imports) {
+        return OperationModel.streamed(type).map(item -> source + ".items(" + prefix + token(item, imports) + ")")
+            .orElseGet(() -> source + ".body(" + prefix + token(type, imports) + ")");
     }
 
     /** A Jackson type token: {@code X.class} or {@code new TypeReference<...>() { }}. */
@@ -423,6 +440,10 @@ public final class ApiRenderer {
             out.close();
         }, () -> {
             out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());");
+            body.alternatives().forEach(alternative -> {
+                out.open("if (request." + alternative.property().javaName() + "() != null)");
+                out.line("call = call.body(" + Names.literal(alternative.contentType()) + ", request." + alternative.property().javaName() + "());").close();
+            });
             if (ContentType.parse(body.contentType()).filter(type -> type.essence().equals("application/x-www-form-urlencoded")).isPresent()) {
                 body.mediaType().encoding().forEach((property, encoding) -> {
                     if (encoding.serializes()) {
@@ -431,13 +452,17 @@ public final class ApiRenderer {
                 });
             }
         }));
+        operation.accept().ifPresent(accept -> {
+            out.open("if (request." + accept.javaName() + "() != null)");
+            out.line("call = call.accept(request." + accept.javaName() + "().ranges().toArray(String[]::new));").close();
+        });
         out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + "." + (reactive ? "<" + imports.ref(operation.response()) + ">" : "")
             + "exchange(call, response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
         Optional<OperationModel.VariantModel> fallback = Optional.empty();
-        for (var variant : operation.variants()) {
+        for (var variant : operation.variants().stream().filter(v -> !v.alternative()).toList()) {
             if (variant.fixedStatus()) {
-                out.line("case " + variant.key() + " -> " + decode(operation, variant, false, imports) + ";");
+                out.line("case " + variant.key() + " -> " + decodeByMediaType(operation, variant, false, imports) + ";");
             } else if (variant.key().equals("default")) {
                 fallback = Optional.of(variant);
             } else {
@@ -447,10 +472,10 @@ public final class ApiRenderer {
         out.open("default ->");
         for (var range : ranges) {
             out.open("if (response.status() / 100 == " + range.key().charAt(0) + ")");
-            out.line("yield " + decode(operation, range, true, imports) + ";").close();
+            out.line("yield " + decodeByMediaType(operation, range, true, imports) + ";").close();
         }
         if (fallback.isPresent()) {
-            out.line("yield " + decode(operation, fallback.get(), true, imports) + ";");
+            out.line("yield " + decodeByMediaType(operation, fallback.get(), true, imports) + ";");
         } else if (reactive) {
             out.line("yield response.buffered().flatMap(buffered -> " + imports.ref(TypeRef.MONO) + ".error(new " + imports.ref(UNEXPECTED) + "(buffered)));");
         } else {
@@ -459,6 +484,17 @@ public final class ApiRenderer {
         out.close();
         out.close(");");
         out.close();
+    }
+
+    /** Decodes a variant, or one of its alternatives by the response's media type. */
+    private String decodeByMediaType(OperationModel operation, OperationModel.VariantModel variant, boolean withStatus, Imports imports) {
+        var decoded = decode(operation, variant, withStatus, imports);
+        var alternatives = operation.variants().stream().filter(v -> v.alternative() && v.key().equals(variant.key())).toList().reversed();
+        for (var alternative : alternatives) {
+            decoded = "response.hasContentType(" + Names.literal(alternative.mediaType().orElseThrow()) + ") ? "
+                + decode(operation, alternative, withStatus, imports) + " : " + decoded;
+        }
+        return decoded;
     }
 
     /**
