@@ -27,6 +27,7 @@ val cliJar by tasks.registering(Jar::class) {
     archiveClassifier = "cli"
     manifest.attributes("Main-Class" to "dev.openapifn.codegen.cli.Main")
     from(sourceSets.main.map { it.output })
+    dependsOn(configurations.runtimeClasspath)
     from(configurations.runtimeClasspath.map { classpath -> classpath.map { if (it.isDirectory) it else zipTree(it) } })
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class")
