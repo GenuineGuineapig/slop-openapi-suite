@@ -1,8 +1,8 @@
 package dev.openapifn.spring.app;
 
 import dev.openapifn.spring.ApiResponse;
-import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
+import dev.openapifn.spring.servlet.ServletRuntime;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class AdoptionReceiver {
 
-    private final OpenApiRuntime runtime;
+    private final ServletRuntime runtime;
 
     public AdoptionReceiver(OpenApiRuntimes runtimes) {
-        this.runtime = runtimes.get("pets");
+        this.runtime = new ServletRuntime(runtimes.get("pets"));
     }
 
     record Acknowledged(Object body) implements ApiResponse {

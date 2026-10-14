@@ -5,6 +5,7 @@ import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.Problems;
+import dev.openapifn.spring.ResponseMode;
 import dev.openapifn.validation.IssueKeys;
 import dev.openapifn.validation.Level;
 import dev.openapifn.validation.ValidationIssue;
@@ -38,14 +39,6 @@ import org.springframework.web.util.pattern.PathPatternParser;
  * invalid item.
  */
 public final class OpenApiValidationFilter extends OncePerRequestFilter {
-
-    /** How to treat invalid responses. */
-    public enum ResponseMode {
-        /** Log a warning and pass the response on. */
-        LOG,
-        /** Replace the response with a 500 problem. */
-        FAIL
-    }
 
     /**
      * Filter settings.

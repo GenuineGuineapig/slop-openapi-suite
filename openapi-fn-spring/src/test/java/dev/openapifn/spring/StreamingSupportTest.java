@@ -8,6 +8,7 @@ import dev.openapifn.http.ItemFramer;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
+import dev.openapifn.spring.servlet.ServletRuntime;
 import dev.openapifn.validation.OpenApiValidator;
 import jakarta.servlet.ServletInputStream;
 import java.io.ByteArrayInputStream;
@@ -35,6 +36,10 @@ import tools.jackson.databind.json.JsonMapper;
 class StreamingSupportTest {
 
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+    private static ServletRuntime servlet(boolean failOnInvalid) {
+        return new ServletRuntime(runtime(failOnInvalid));
+    }
 
     private static OpenApiRuntime runtime(boolean failOnInvalid) {
         var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"), """
@@ -89,7 +94,7 @@ class StreamingSupportTest {
 
     @Test
     void bindsStreamedRequestsWithoutTheFilter() {
-        var runtime = runtime(true);
+        var runtime = servlet(true);
         assertThat(runtime.bind(request("application/jsonl", "{\"n\":1}\n{\"n\":2}\n"), "publish").items(Map.class))
             .containsExactly(Map.of("n", 1), Map.of("n", 2));
         assertThat(runtime.bind(request("application/jsonl", "{\"n\":1}\n"), "publish").body(String.class)).isEqualTo("{\"n\":1}\n");
@@ -97,14 +102,14 @@ class StreamingSupportTest {
         assertThat(runtime.bind(request("application/json", ""), "publish").items(Map.class)).isEmpty();
         assertThatThrownBy(() -> runtime.bind(request("application/jsonl", "{}\n"), "publish").items(Map.class).toList())
             .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("request.body.schema.required");
-        var lenient = runtime(false);
+        var lenient = servlet(false);
         assertThat(lenient.bind(request("application/jsonl", "{}\n"), "publish").items(Map.class)).containsExactly(Map.of());
         // An undescribed sequential type is parsed without validation; unparseable items are skipped.
         assertThat(lenient.bind(request("application/x-ndjson", "{\"a\":1}\n{\n"), "publish").items(new TypeReference<Map<String, Integer>>() { }))
             .containsExactly(Map.of("a", 1));
-        assertThat(runtime.validateHead(dev.openapifn.http.HttpRequest.of("POST", "/hooks/events").withHeader("Content-Type", "application/jsonl"))
+        assertThat(runtime.runtime().validateHead(dev.openapifn.http.HttpRequest.of("POST", "/hooks/events").withHeader("Content-Type", "application/jsonl"))
             .report().isEmpty()).isTrue();
-        assertThat(runtime.validateHead(dev.openapifn.http.HttpRequest.of("GET", "/hooks/events")).report().hasErrors()).isTrue();
+        assertThat(runtime.runtime().validateHead(dev.openapifn.http.HttpRequest.of("GET", "/hooks/events")).report().hasErrors()).isTrue();
     }
 
     @Test
@@ -135,14 +140,14 @@ class StreamingSupportTest {
             }
         };
         broken.setContentType("application/jsonl");
-        assertThatThrownBy(() -> runtime(true).bind(broken, "publish").body(String.class)).isInstanceOf(UncheckedIOException.class);
+        assertThatThrownBy(() -> servlet(true).bind(broken, "publish").body(String.class)).isInstanceOf(UncheckedIOException.class);
         var unopenable = new jakarta.servlet.http.HttpServletRequestWrapper(request("application/jsonl", "")) {
             @Override
             public ServletInputStream getInputStream() throws IOException {
                 throw new IOException("closed");
             }
         };
-        assertThatThrownBy(() -> runtime(true).bind(unopenable, "publish").items(Map.class)).isInstanceOf(UncheckedIOException.class);
+        assertThatThrownBy(() -> servlet(true).bind(unopenable, "publish").items(Map.class)).isInstanceOf(UncheckedIOException.class);
     }
 
     @Test
@@ -212,7 +217,7 @@ class StreamingSupportTest {
 
     @Test
     void respondsWithStreams() throws IOException {
-        var runtime = runtime(true);
+        var runtime = servlet(true);
         var request = new MockHttpServletRequest("POST", "/events");
         var entity = runtime.respond(request, "publish", new Items(Stream.of(FilePart.of("f", "text/plain", new byte[] {65})), null));
         var out = new ByteArrayOutputStream();

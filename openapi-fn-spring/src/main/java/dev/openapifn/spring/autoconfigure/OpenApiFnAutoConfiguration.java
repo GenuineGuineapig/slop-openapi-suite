@@ -4,11 +4,11 @@ import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.load.Uris;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.schema.SchemaValidator;
-import dev.openapifn.spring.OpenApiExceptionHandler;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.StreamedBodyConverter;
 import dev.openapifn.spring.client.OpenApiClients;
+import dev.openapifn.spring.servlet.OpenApiExceptionHandler;
 import dev.openapifn.spring.servlet.OpenApiValidationFilter;
 import dev.openapifn.validation.LevelPolicy;
 import dev.openapifn.validation.OpenApiValidator;
@@ -27,6 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.converter.HttpMessageConverters;
 import org.springframework.web.client.RestClient;
@@ -34,8 +35,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Loads the application's API descriptions and provides their runtimes, the validation filter
- * and problem-detail error handling.
+ * Loads the application's API descriptions and provides their runtimes and clients; in Spring MVC
+ * applications also the validation filter and problem-detail error handling (WebFlux has its own
+ * auto-configuration in {@code openapi-fn-spring-webflux}).
  */
 @AutoConfiguration(afterName = "org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration")
 @EnableConfigurationProperties(OpenApiFnProperties.class)
@@ -79,36 +81,40 @@ public class OpenApiFnAutoConfiguration {
         return Uris.parse(text).orElseThrow(error -> new IllegalStateException("Invalid alias in OpenAPI description '" + spec + "': " + error));
     }
 
-    @Bean
+    /** Spring MVC: the validation filter, problem details for binding failures and streamed bodies. */
+    @Configuration(proxyBeanMethods = false)
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-    @ConditionalOnMissingBean(name = "openApiValidationFilter")
-    public FilterRegistrationBean<OpenApiValidationFilter> openApiValidationFilter(OpenApiRuntimes runtimes, OpenApiFnProperties properties) {
-        var validation = properties.validation();
-        var settings = new OpenApiValidationFilter.Settings(validation.request().enabled(), validation.response().enabled(),
-            validation.response().mode(), validation.rejectUnknownPaths(), validation.excludePaths(), validation.maxBodySize().toBytes());
-        var registration = new FilterRegistrationBean<>(new OpenApiValidationFilter(runtimes, settings));
-        registration.setOrder(validation.filterOrder());
-        registration.setName("openApiValidationFilter");
-        return registration;
-    }
+    @ConditionalOnClass(name = "org.springframework.web.servlet.DispatcherServlet")
+    static class Servlet {
 
-    @Bean
-    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-    @ConditionalOnMissingBean
-    public OpenApiExceptionHandler openApiExceptionHandler() {
-        return new OpenApiExceptionHandler();
-    }
+        @Bean
+        @ConditionalOnMissingBean(name = "openApiValidationFilter")
+        FilterRegistrationBean<OpenApiValidationFilter> openApiValidationFilter(OpenApiRuntimes runtimes, OpenApiFnProperties properties) {
+            var validation = properties.validation();
+            var settings = new OpenApiValidationFilter.Settings(validation.request().enabled(), validation.response().enabled(),
+                validation.response().mode(), validation.rejectUnknownPaths(), validation.excludePaths(), validation.maxBodySize().toBytes());
+            var registration = new FilterRegistrationBean<>(new OpenApiValidationFilter(runtimes, settings));
+            registration.setOrder(validation.filterOrder());
+            registration.setName("openApiValidationFilter");
+            return registration;
+        }
 
-    /** Writes the streamed bodies of generated controllers item by item. */
-    @Bean
-    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-    public WebMvcConfigurer openApiFnMessageConverters() {
-        return new WebMvcConfigurer() {
-            @Override
-            public void configureMessageConverters(HttpMessageConverters.ServerBuilder builder) {
-                builder.addCustomConverter(new StreamedBodyConverter());
-            }
-        };
+        @Bean
+        @ConditionalOnMissingBean
+        OpenApiExceptionHandler openApiExceptionHandler() {
+            return new OpenApiExceptionHandler();
+        }
+
+        /** Writes the streamed bodies of generated controllers item by item. */
+        @Bean
+        WebMvcConfigurer openApiFnMessageConverters() {
+            return new WebMvcConfigurer() {
+                @Override
+                public void configureMessageConverters(HttpMessageConverters.ServerBuilder builder) {
+                    builder.addCustomConverter(new StreamedBodyConverter());
+                }
+            };
+        }
     }
 
     /** Clients use the application's {@code RestClient.Builder} (a fresh clone each time) when there is one. */

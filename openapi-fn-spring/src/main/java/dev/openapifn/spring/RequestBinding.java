@@ -1,15 +1,11 @@
 package dev.openapifn.spring;
 
-import dev.openapifn.http.BodyParser;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.Multipart;
-import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonValue;
-import dev.openapifn.model.MediaType;
-import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.validation.Level;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
@@ -22,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -40,8 +35,6 @@ import tools.jackson.databind.node.ObjectNode;
  * media types are streamed: {@link #items} reads and validates them item by item.
  */
 public final class RequestBinding {
-
-    private static final BodyParser PARSER = new BodyParser(new SchemaShapes(SchemaRegistry.empty()));
 
     /**
      * A streamed body.
@@ -160,15 +153,8 @@ public final class RequestBinding {
     }
 
     private static Stream<JsonValue> values(Items items) {
-        var framer = ItemFramer.of(items.contentType()).orElseThrow();
-        Function<ItemFramer.Frame, Optional<JsonValue>> item = items.validator().<Function<ItemFramer.Frame, Optional<JsonValue>>>map(validator -> frame -> {
-            var validated = validator.validate(frame);
-            if (items.failOnInvalid() && validated.report().hasErrors()) {
-                throw new OpenApiValidationException(validated.report());
-            }
-            return validated.value();
-        }).orElseGet(() -> frame -> PARSER.item(frame, items.contentType(), MediaType.EMPTY, 0).toOptional().flatMap(Function.identity()));
-        return ItemStreams.read(items.input().get(), framer, item);
+        return ItemStreams.read(items.input().get(), ItemFramer.of(items.contentType()).orElseThrow(),
+            ItemStreams.requestItems(items.contentType(), items.validator(), items.failOnInvalid()));
     }
 
     private static byte[] readAll(InputStream input) {

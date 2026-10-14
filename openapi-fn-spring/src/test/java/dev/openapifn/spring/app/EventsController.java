@@ -2,8 +2,8 @@ package dev.openapifn.spring.app;
 
 import dev.openapifn.spring.ApiResponse;
 import dev.openapifn.spring.FilePart;
-import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
+import dev.openapifn.spring.servlet.ServletRuntime;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
@@ -28,10 +28,10 @@ public class EventsController {
     /** Released by a client once it has received the first streamed item. */
     public static volatile CountDownLatch received = new CountDownLatch(1);
 
-    private final OpenApiRuntime runtime;
+    private final ServletRuntime runtime;
 
     public EventsController(OpenApiRuntimes runtimes) {
-        this.runtime = runtimes.get("pets");
+        this.runtime = new ServletRuntime(runtimes.get("pets"));
     }
 
     record Events(Object body, Map<String, @Nullable Object> headers, @Nullable String contentType) implements ApiResponse {

@@ -30,7 +30,7 @@ public final class ApiRenderer {
     static final String SPRING = "dev.openapifn.spring";
     static final ClassName API_RESPONSE = ClassName.of(SPRING, "ApiResponse");
     static final ClassName FILE_PART = ClassName.of(SPRING, "FilePart");
-    static final ClassName OPENAPI_RUNTIME = ClassName.of(SPRING, "OpenApiRuntime");
+    static final ClassName SERVLET_RUNTIME = ClassName.of(SPRING + ".servlet", "ServletRuntime");
     static final ClassName OPENAPI_RUNTIMES = ClassName.of(SPRING, "OpenApiRuntimes");
     static final ClassName HTTP_CLIENT = ClassName.of(SPRING + ".client", "OpenApiHttpClient");
     static final ClassName CLIENT_CALL = ClassName.of(SPRING + ".client", "ClientCall");
@@ -219,11 +219,11 @@ public final class ApiRenderer {
             out.line("@" + imports.ref(REQUEST_MAPPING) + "(\"${openapi-fn.specs." + names.apiName() + ".base-path:" + names.basePath() + "}\")");
         }
         out.open("public class " + name.simpleName());
-        out.line("private final " + imports.ref(OPENAPI_RUNTIME) + " runtime;");
+        out.line("private final " + imports.ref(SERVLET_RUNTIME) + " runtime;");
         out.line("private final " + imports.ref(OBJECT_PROVIDER) + "<" + imports.ref(apiName) + "> api;");
         out.blank().open("public " + name.simpleName() + "(" + imports.ref(OPENAPI_RUNTIMES) + " runtimes, " + imports.ref(OBJECT_PROVIDER) + "<"
             + imports.ref(apiName) + "> api)");
-        out.line("this.runtime = runtimes.get(" + imports.ref(names.spec()) + ".NAME);").line("this.api = api;").close();
+        out.line("this.runtime = new " + imports.ref(SERVLET_RUNTIME) + "(runtimes.get(" + imports.ref(names.spec()) + ".NAME));").line("this.api = api;").close();
         var custom = new LinkedHashMap<String, List<OperationModel>>();
         for (var operation : operations) {
             var method = operation.operation().method();

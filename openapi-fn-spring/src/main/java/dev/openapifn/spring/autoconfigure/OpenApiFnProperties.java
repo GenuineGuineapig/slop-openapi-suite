@@ -1,6 +1,6 @@
 package dev.openapifn.spring.autoconfigure;
 
-import dev.openapifn.spring.servlet.OpenApiValidationFilter.ResponseMode;
+import dev.openapifn.spring.ResponseMode;
 import dev.openapifn.validation.Level;
 import java.util.List;
 import java.util.Map;

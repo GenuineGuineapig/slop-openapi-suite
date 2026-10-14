@@ -1,8 +1,13 @@
 package dev.openapifn.spring;
 
+import dev.openapifn.http.BodyParser;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.ItemFramer;
+import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.model.MediaType;
+import dev.openapifn.schema.SchemaRegistry;
+import dev.openapifn.validation.OpenApiValidator;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -25,6 +30,24 @@ public final class ItemStreams {
     /** Whether bodies of {@code contentType} are streamed rather than read at once: those of sequential media types. */
     public static boolean sequential(@Nullable String contentType) {
         return contentType != null && ContentType.parse(contentType).filter(ItemFramer::isSequential).isPresent();
+    }
+
+    private static final BodyParser PARSER = new BodyParser(new SchemaShapes(SchemaRegistry.empty()));
+
+    /**
+     * Parses the item of a frame of a request body: validated by {@code validator} when the media
+     * type is described (an invalid item throws an {@link OpenApiValidationException} when
+     * {@code failOnInvalid}), else parsed as it is (unparseable items are skipped).
+     */
+    public static Function<ItemFramer.Frame, Optional<JsonValue>> requestItems(ContentType contentType, Optional<OpenApiValidator.ItemValidator> validator,
+                                                                               boolean failOnInvalid) {
+        return validator.<Function<ItemFramer.Frame, Optional<JsonValue>>>map(items -> frame -> {
+            var validated = items.validate(frame);
+            if (failOnInvalid && validated.report().hasErrors()) {
+                throw new OpenApiValidationException(validated.report());
+            }
+            return validated.value();
+        }).orElseGet(() -> frame -> PARSER.item(frame, contentType, MediaType.EMPTY, 0).toOptional().flatMap(Function.identity()));
     }
 
     /**

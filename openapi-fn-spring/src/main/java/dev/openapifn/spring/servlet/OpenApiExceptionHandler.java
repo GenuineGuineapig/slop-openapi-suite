@@ -1,5 +1,8 @@
-package dev.openapifn.spring;
+package dev.openapifn.spring.servlet;
 
+import dev.openapifn.spring.OpenApiRuntime;
+import dev.openapifn.spring.OpenApiValidationException;
+import dev.openapifn.spring.Problems;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;

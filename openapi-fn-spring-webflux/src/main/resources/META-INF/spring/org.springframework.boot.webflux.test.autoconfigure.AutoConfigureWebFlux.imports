@@ -1,0 +1,2 @@
+dev.openapifn.spring.autoconfigure.OpenApiFnAutoConfiguration
+dev.openapifn.spring.webflux.autoconfigure.OpenApiFnWebFluxAutoConfiguration

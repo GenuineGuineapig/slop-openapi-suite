@@ -2,6 +2,7 @@ package dev.openapifn.spring;
 
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.http.PathTemplate;
@@ -13,7 +14,7 @@ import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.Response;
 import dev.openapifn.parse.OpenApiDocument;
-import dev.openapifn.spring.servlet.ServletMessages;
+import dev.openapifn.schema.Schema;
 import dev.openapifn.validation.IssueKeys;
 import dev.openapifn.validation.Level;
 import dev.openapifn.validation.OpenApiValidator;
@@ -22,22 +23,23 @@ import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.Route;
 import dev.openapifn.validation.ValidationIssue;
 import dev.openapifn.validation.ValidationReport;
-import jakarta.servlet.http.HttpServletRequest;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.servlet.HandlerMapping;
+import org.springframework.http.HttpHeaders;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The runtime of one API description: binds requests for generated controllers (validating
- * them) and maps their {@link ApiResponse}s to HTTP, including header serialization and content
- * negotiation among the described media types.
+ * The runtime of one API description, independent of the web stack: binds requests for generated
+ * controllers (validating them) and maps their {@link ApiResponse}s to HTTP replies, including
+ * header serialization and content negotiation among the described media types. The servlet and
+ * reactive adapters connect it to Spring MVC and WebFlux.
  */
 public final class OpenApiRuntime {
 
@@ -105,12 +107,12 @@ public final class OpenApiRuntime {
     // Requests
 
     /** Whether {@code request} targets an operation of this description: a described path or a receiver. */
-    public boolean routes(dev.openapifn.http.HttpRequest request) {
+    public boolean routes(HttpRequest request) {
         return receivers.containsKey(request.path()) || !(validator.route(request) instanceof Route.NotFound);
     }
 
     /** Validates {@code request} against the operation it targets: a receiver's webhook or callback, or the routed path operation. */
-    public RequestValidation validate(dev.openapifn.http.HttpRequest request) {
+    public RequestValidation validate(HttpRequest request) {
         return validate(request, false);
     }
 
@@ -118,11 +120,11 @@ public final class OpenApiRuntime {
      * Validates everything but the body of a request whose body is streamed (see {@link ItemStreams#sequential}),
      * like {@link #validate}; the items are validated as they are bound, see {@link RequestBinding#items}.
      */
-    public RequestValidation validateHead(dev.openapifn.http.HttpRequest request) {
+    public RequestValidation validateHead(HttpRequest request) {
         return validate(request, true);
     }
 
-    private RequestValidation validate(dev.openapifn.http.HttpRequest request, boolean head) {
+    private RequestValidation validate(HttpRequest request, boolean head) {
         var receiver = receivers.get(request.path());
         if (receiver == null) {
             return head ? validator.validateRequestHead(request) : validator.validateRequest(request);
@@ -137,66 +139,106 @@ public final class OpenApiRuntime {
     }
 
     /**
-     * Validates and parses {@code request} for the operation {@code operationId}, reusing the
-     * result of the validation filter when present.
+     * Validates and parses a request for the operation {@code operationId}, reusing an earlier
+     * validation of the same operation (by the validation filter). Web-stack adapters such as
+     * {@link dev.openapifn.spring.servlet.ServletRuntime} call this.
      *
+     * @param message the request; without its body when the body is streamed
+     * @param pattern the path pattern the request was mapped by, which yields the raw path values
+     *     (else the description routes the path)
+     * @param validated an earlier validation, typically a request attribute; ignored unless it is a
+     *     {@link RequestValidation} of this operation
+     * @param streamed the body of a sequential media type, read as its items are bound; {@code null}
+     *     when {@code message} carries the body
      * @throws OpenApiValidationException when the request is invalid (and failing is enabled)
      */
-    public RequestBinding bind(HttpServletRequest request, String operationId) {
+    public RequestBinding bind(HttpRequest message, String operationId, @Nullable String pattern, @Nullable Object validated,
+                               @Nullable Supplier<InputStream> streamed) {
+        var validation = validate(message, operationId, pattern, validated, streamed != null);
+        if (streamed == null) {
+            return binding(validation, message);
+        }
+        var contentType = message.contentType().orElseThrow();
+        return new RequestBinding(validation, message, mapper, new RequestBinding.Items(streamed, ContentType.parse(contentType).orElseThrow(),
+            validator.requestItems(validation.match().orElseThrow(), contentType), failOnInvalidRequest));
+    }
+
+    /**
+     * Validates a request for the operation {@code operationId}, reusing an earlier validation of
+     * the same operation; see {@link #bind}.
+     *
+     * @param head whether only the head of the request is validated, its body being streamed
+     * @throws OpenApiValidationException when the request is invalid (and failing is enabled)
+     */
+    public RequestValidation validate(HttpRequest message, String operationId, @Nullable String pattern, @Nullable Object validated, boolean head) {
         var operation = operation(operationId);
-        var streamed = ItemStreams.sequential(request.getContentType());
-        var message = streamed ? ServletMessages.head(request) : ServletMessages.toHttpRequest(request);
-        var match = new OperationMatch(operation, pathValues(request, operation));
-        var validation = request.getAttribute(VALIDATION_ATTRIBUTE) instanceof RequestValidation cached
-            && cached.match().filter(cachedMatch -> cachedMatch.operation().equals(operation)).isPresent()
+        var match = new OperationMatch(operation, pathValues(message, operation, pattern));
+        var validation = validated instanceof RequestValidation cached && cached.match().filter(earlier -> earlier.operation().equals(operation)).isPresent()
             ? cached
-            : streamed ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message);
+            : head ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message);
         if (failOnInvalidRequest && validation.report().hasErrors()) {
             throw new OpenApiValidationException(validation.report());
         }
-        if (!streamed) {
-            return new RequestBinding(validation, message, mapper);
-        }
-        var items = validator.requestItems(match, request.getContentType());
-        return new RequestBinding(validation, message, mapper, new RequestBinding.Items(() -> ServletMessages.input(request),
-            ContentType.parse(request.getContentType()).orElseThrow(), items, failOnInvalidRequest));
+        return validation;
     }
 
-    /** Raw path values from the handler mapping's pattern, falling back to the validator's router. */
-    private Map<String, String> pathValues(HttpServletRequest request, ApiOperation operation) {
-        var path = ServletMessages.path(request);
-        return Optional.ofNullable(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))
-            .flatMap(pattern -> PathTemplate.compile(pattern.toString()).match(path))
-            .or(() -> validator.route(dev.openapifn.http.HttpRequest.of(operation.method(), path)) instanceof Route.Found found
+    /** The binding of a validated request whose {@code message} carries its body (if any). */
+    public RequestBinding binding(RequestValidation validation, HttpRequest message) {
+        return new RequestBinding(validation, message, mapper);
+    }
+
+    /** Raw path values from the mapping pattern, falling back to the validator's router. */
+    private Map<String, String> pathValues(HttpRequest message, ApiOperation operation, @Nullable String pattern) {
+        return Optional.ofNullable(pattern).flatMap(mapped -> PathTemplate.compile(mapped).match(message.path()))
+            .or(() -> validator.route(HttpRequest.of(operation.method(), message.path())) instanceof Route.Found found
                 ? Optional.of(found.match().pathValues()) : Optional.empty())
             .orElse(Map.of());
+    }
+
+    /** Whether {@code failOnInvalidRequest} is set: invalid requests fail binding. */
+    public boolean failsOnInvalidRequests() {
+        return failOnInvalidRequest;
     }
 
     // ---------------------------------------------------------------------------------------------
     // Responses
 
-    /** Maps {@code response} of operation {@code operationId} to a {@link ResponseEntity}. */
-    public ResponseEntity<Object> respond(HttpServletRequest request, String operationId, ApiResponse response) {
+    /**
+     * An HTTP response for an {@link ApiResponse}: its status, its headers (serialized as described,
+     * {@code Content-Type} included) and its body, not yet encoded.
+     *
+     * @param contentType the negotiated content type, when there is a body
+     * @param schema the schema of the body's media type, if described
+     * @param body the body as the operation returned it
+     */
+    public record Reply(int status, HttpHeaders headers, @Nullable ContentType contentType, Optional<Schema> schema, @Nullable Object body) {
+    }
+
+    /**
+     * The reply to {@code response} of operation {@code operationId}: header serialization and
+     * content negotiation among the described media types for {@code accept}.
+     */
+    public Reply reply(@Nullable String accept, String operationId, ApiResponse response) {
         var declared = operation(operationId).operation().responses().forStatus(response.status());
-        var builder = ResponseEntity.status(response.status());
+        var headers = new HttpHeaders();
         response.headers().forEach((header, value) -> {
             if (value != null) {
-                builder.header(header, headerValue(declared, header, value));
+                headers.add(header, headerValue(declared, header, value));
             }
         });
         var body = response.body();
         if (body == null) {
-            return builder.build();
+            return new Reply(response.status(), headers, null, Optional.empty(), null);
         }
         var content = declared.map(Response::content).orElse(Map.of());
-        var negotiated = Optional.ofNullable(response.contentType())
-            .orElseGet(() -> negotiate(request.getHeader("Accept"), content, body));
+        var negotiated = Optional.ofNullable(response.contentType()).orElseGet(() -> negotiate(accept, content, body));
         var parsed = ContentType.parse(negotiated).orElseThrow(() -> new IllegalArgumentException("Invalid media type '" + negotiated + "'"));
         var mediaType = parsed.type().equals("multipart") && parsed.parameter("boundary").isEmpty()
             ? negotiated + "; boundary=" + BodyWriter.boundary() : negotiated;
         var type = ContentType.parse(mediaType).orElseThrow();
+        headers.setContentType(org.springframework.http.MediaType.parseMediaType(mediaType));
         var schema = ContentType.bestMatch(content.keySet(), type).map(content::get).flatMap(MediaType::schema);
-        return builder.contentType(org.springframework.http.MediaType.parseMediaType(mediaType)).body(serialize(body, type, schema));
+        return new Reply(response.status(), headers, type, schema, body);
     }
 
     private String headerValue(Optional<Response> declared, String header, Object value) {
@@ -225,23 +267,29 @@ public final class OpenApiRuntime {
         return body instanceof FilePart file ? file.contentType() : FilePart.OCTET_STREAM;
     }
 
-    /** The body to write: content of files, a {@link StreamedBody} for streams of sequential media types, or the serialized value. */
-    private Object serialize(Object body, ContentType type, Optional<dev.openapifn.schema.Schema> schema) {
+    /** The encoded body of {@code reply} as a whole: the content of files, or the serialized value (streams are collected). */
+    public byte[] encode(Reply reply) {
+        return encode(Objects.requireNonNull(reply.body()), Objects.requireNonNull(reply.contentType()), reply.schema());
+    }
+
+    private byte[] encode(Object body, ContentType type, Optional<Schema> schema) {
         return switch (body) {
             case FilePart file -> file.content();
             case byte[] bytes -> bytes;
-            case Stream<?> items when ItemFramer.isSequential(type) -> new StreamedBody(items, item -> item(item, type), BodyWriter.end(type));
             case Stream<?> items -> {
                 try (items) {
-                    yield serialize(items.toList(), type, schema);
+                    yield encode(items.toList(), type, schema);
                 }
             }
             default -> type.isJson() ? mapper.writeValueAsBytes(body) : writer.write(toJson(body), type, schema);
         };
     }
 
-    /** An item of a sequential body; files become positional parts as they are. */
-    private byte[] item(Object item, ContentType type) {
+    /**
+     * One encoded item of a body of a sequential media type (see {@link ItemFramer#isSequential}),
+     * for writing items as they are produced; files become positional parts as they are.
+     */
+    public byte[] encodeItem(Object item, ContentType type) {
         if (item instanceof FilePart file && type.type().equals("multipart")) {
             return BodyWriter.part(type.parameter("boundary").orElseThrow(), BodyWriter.part(file.contentType(), file.content()));
         }

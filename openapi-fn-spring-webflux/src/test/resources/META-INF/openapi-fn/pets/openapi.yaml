@@ -1,0 +1,153 @@
+openapi: 3.2.0
+info: {title: Pets, version: 1.0.0}
+servers: [{url: /api}]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, maximum: 100}}
+        - {name: tags, in: query, explode: false, schema: {type: array, items: {type: string}}}
+        - {name: X-Trace, in: header, schema: {type: string}}
+        - {name: session, in: cookie, schema: {type: string}}
+      responses:
+        '200':
+          description: Pets
+          headers:
+            X-Total: {required: true, schema: {type: integer}}
+            X-Ids: {schema: {type: array, items: {type: integer}}}
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Pet'}}
+            application/xml:
+              schema: {type: array, xml: {name: pets}, items: {$ref: '#/components/schemas/Pet'}}
+    post:
+      operationId: createPet
+      security: [{key: []}]
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+          application/x-www-form-urlencoded: {schema: {$ref: '#/components/schemas/Pet'}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+        default:
+          description: Error
+          content:
+            application/problem+json: {schema: {type: object}}
+  /pets/{id}:
+    get:
+      operationId: getPet
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200':
+          description: A pet
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+            text/plain: {schema: {type: string}}
+        '404': {description: Not found}
+    delete:
+      operationId: deletePet
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '204': {description: Deleted}
+  /pets/{id}/photo:
+    put:
+      operationId: uploadPhoto
+      parameters:
+        - {name: id, in: path, required: true, style: label, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+                extra: {type: array, items: {type: string, format: binary}}
+                caption: {type: string}
+          image/png: {schema: {type: string, format: binary}}
+          text/plain: {schema: {type: string}}
+      responses:
+        '200':
+          description: Stored
+          content:
+            image/*: {schema: {type: string, format: binary}}
+            application/jsonl: {itemSchema: {type: object}}
+  /events:
+    get:
+      operationId: streamEvents
+      parameters:
+        - {name: format, in: query, schema: {type: string}}
+        - {name: count, in: query, schema: {type: integer}}
+        - {name: invalid, in: query, schema: {type: integer}}
+        - {name: headless, in: query, schema: {type: boolean}}
+      responses:
+        '200':
+          description: Events
+          headers:
+            X-Stream: {required: true, schema: {type: string}}
+          content:
+            application/jsonl: {itemSchema: {$ref: '#/components/schemas/Event'}}
+            text/event-stream:
+              itemSchema: {type: object, required: [data], properties: {event: {type: string}, data: {type: string}}}
+            multipart/mixed: {}
+            application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+    post:
+      operationId: publishEvents
+      parameters:
+        - {name: mode, in: query, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/jsonl: {itemSchema: {$ref: '#/components/schemas/Event'}}
+          application/x-ndjson: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+          application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+      responses:
+        '200':
+          description: The sum of the events
+          content:
+            application/json: {schema: {type: integer}}
+  /broken:
+    get:
+      operationId: broken
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: {schema: {type: object, required: [ok]}}
+webhooks:
+  petAdopted:
+    post:
+      operationId: petAdopted
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+      responses:
+        '200':
+          description: Acknowledged with the adopted pet
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/Pet'}}
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [name]
+      properties:
+        id: {type: integer, readOnly: true}
+        name: {type: string, minLength: 1}
+        tag: {type: string}
+    Event:
+      type: object
+      required: [n]
+      properties:
+        n: {type: integer, minimum: 0}
+  securitySchemes:
+    key: {type: apiKey, name: X-Key, in: header}
