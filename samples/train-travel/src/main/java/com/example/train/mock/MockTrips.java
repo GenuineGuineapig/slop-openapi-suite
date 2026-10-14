@@ -1,0 +1,52 @@
+package com.example.train.mock;
+
+import com.example.train.api.GetTripsRequest;
+import com.example.train.api.GetTripsResponse;
+import com.example.train.api.SubscribeTripRequest;
+import com.example.train.api.SubscribeTripResponse;
+import com.example.train.api.TripsApi;
+import com.example.train.model.TripUpdate;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
+
+/** Mock trips: every connection of {@link Timetable} departs at the requested time and the next hour. */
+@Component
+public class MockTrips implements TripsApi {
+
+    @Override
+    public GetTripsResponse getTrips(GetTripsRequest request) {
+        var connections = Timetable.connections();
+        var trips = java.util.stream.IntStream.range(0, connections.size())
+            .mapToObj(index -> {
+                var connection = connections.get(index);
+                var departure = request.date().plusHours(index);
+                var id = tripId(request.origin(), request.destination(), index);
+                return new GetTripsResponse.OkBody.DataItem(id, request.origin().toString(), request.destination().toString(), departure,
+                    departure.plusHours(5), connection.operator(), connection.price(), connection.bicycles(), connection.dogs(),
+                    URI.create(Timetable.BASE + "/trips/" + id));
+            })
+            .filter(trip -> !Boolean.TRUE.equals(request.bicycles()) || trip.bicyclesAllowed())
+            .filter(trip -> !Boolean.TRUE.equals(request.dogs()) || trip.dogsAllowed())
+            .toList();
+        return GetTripsResponse.ok(new GetTripsResponse.OkBody(MockStations.page(trips, request.page(), request.limit()),
+            new GetTripsResponse.OkBody.Links(URI.create(Timetable.BASE + "/trips"), null, null)), "max-age=60", null);
+    }
+
+    /** Live updates of a trip: a delay, a platform change and the departure (all at once, as a mock). */
+    @Override
+    public SubscribeTripResponse subscribeTrip(SubscribeTripRequest request) {
+        var at = java.time.OffsetDateTime.parse("2024-02-01T09:12:00Z");
+        return SubscribeTripResponse.ok(List.of(
+            TripUpdate.builder().type(TripUpdate.Type.DELAY).tripId(request.id()).occurredAt(at).minutes(12).reason("Signal failure near Hannover").build(),
+            TripUpdate.builder().type(TripUpdate.Type.PLATFORM).tripId(request.id()).occurredAt(at.plusMinutes(6)).platform("7").build(),
+            TripUpdate.builder().type(TripUpdate.Type.DEPARTED).tripId(request.id()).occurredAt(at.plusHours(1)).build()), "no-cache", null);
+    }
+
+    /** A stable trip id for a connection. */
+    public static UUID tripId(UUID origin, UUID destination, int index) {
+        return UUID.nameUUIDFromBytes((origin + "/" + destination + "/" + index).getBytes(StandardCharsets.UTF_8));
+    }
+}

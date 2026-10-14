@@ -1,0 +1,5 @@
+openapi-fn:
+  validation:
+    # Responses that break the contract fail loudly while developing.
+    response:
+      mode: FAIL
