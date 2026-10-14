@@ -96,13 +96,23 @@ class GalaxyApiIntegrationTest {
 
     @Test
     void pagesOfPlanetsAreTyped() {
-        var page = planets.getAllData(new GetAllDataRequest(2L, 0L));
+        var request = new GetAllDataRequest(2L, 2L);
+        var page = planets.getAllData(request);
         assertThat(page).isInstanceOfSatisfying(GetAllDataResponse.Ok.class, ok -> {
             // PaginatedResource<Planet>: a generic class generated from the description's $dynamicRef template.
             List<Planet> data = ok.body().data();
-            assertThat(data).containsExactly(Galaxy.EARTH, Galaxy.MARS);
-            assertThat(ok.body().meta().next()).isEqualTo("/planets?limit=2&offset=2");
+            assertThat(data.getFirst()).isEqualTo(Galaxy.JUPITER);
             assertThat(ok.xPaginationTotal()).isGreaterThanOrEqualTo(3);
+
+            // The links of the response lead to the first planet on it, and back to the first page.
+            var firstPlanet = planets.getFirstPlanet(request, ok);
+            assertThat(firstPlanet.planetId()).isEqualTo(data.getFirst().id());
+            var firstPage = planets.firstPage(request, ok);
+            assertThat(firstPage).isEqualTo(new GetAllDataRequest(2L, 0L));
+            assertThat(planets.getAllData(firstPage)).isInstanceOfSatisfying(GetAllDataResponse.Ok.class, first -> {
+                assertThat(first.body().data()).containsExactly(Galaxy.EARTH, Galaxy.MARS);
+                assertThat(first.body().meta().next()).isEqualTo("/planets?limit=2&offset=2");
+            });
         });
     }
 
@@ -111,11 +121,19 @@ class GalaxyApiIntegrationTest {
         notifier.subscribe(local("/webhooks/postNewPlanet"));
         var draft = Planet.builder().name("Kepler-22b").type(Planet.Type.SUPER_EARTH).habitabilityIndex(0.7f)
             .successCallbackUrl(local("/callbacks/planetCreated")).build();
-        var created = planets.createPlanet(new CreatePlanetRequest(draft));
-        var planet = ((CreatePlanetResponse.Created) created).body();
+        var request = new CreatePlanetRequest(draft);
+        var created = (CreatePlanetResponse.Created) planets.createPlanet(request);
+        var planet = created.body();
         assertThat(planet.name()).isEqualTo("Kepler-22b");
-        assertThat(((CreatePlanetResponse.Created) created).location()).isEqualTo(URI.create("https://galaxy.scalar.com/planets/" + planet.id()));
+        assertThat(created.location()).isEqualTo(URI.create("https://galaxy.scalar.com/planets/" + planet.id()));
         assertThat(receivers.received()).contains("created:Kepler-22b", "webhook:Kepler-22b");
+
+        // The links of the 201 response: the new planet's id (and, for an update, its body) taken from the response.
+        assertThat(planets.getPlanet(planets.getPlanet(request, created))).isInstanceOfSatisfying(GetPlanetResponse.Ok.class,
+            ok -> assertThat(ok.body().name()).isEqualTo("Kepler-22b"));
+        var update = planets.updatePlanet(request, created);
+        assertThat(update.planetId()).isEqualTo(planet.id());
+        assertThat(update.body().name()).isEqualTo("Kepler-22b");
 
         // planetCreated and planetExploded are both sent to the successCallbackUrl; point it at the other receiver now.
         var renamed = planets.updatePlanet(new UpdatePlanetRequest(planet.id(), draft.withName("Kepler-22c")

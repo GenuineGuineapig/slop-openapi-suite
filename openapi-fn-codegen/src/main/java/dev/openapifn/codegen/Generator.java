@@ -3,6 +3,7 @@ package dev.openapifn.codegen;
 import dev.openapifn.codegen.api.ApiRenderer;
 import dev.openapifn.codegen.api.GeneratorNames;
 import dev.openapifn.codegen.api.OperationModel;
+import dev.openapifn.codegen.api.Relations;
 import dev.openapifn.codegen.api.TestRenderer;
 import dev.openapifn.codegen.java.Names;
 import dev.openapifn.codegen.java.TypeRef;
@@ -52,12 +53,15 @@ public final class Generator {
             urls.computeIfAbsent(List.of("webhooks", operation.path()), url -> new ArrayList<>()).add(model);
         }
         var callbacks = Names.unique("Callbacks", groupNames);
+        var owners = new LinkedHashMap<String, OperationModel>();
         for (var callback : api.callbacks()) {
             // Named after the callback, plus the method when the callback has several operations.
             var single = api.callbacks().stream().filter(other -> other.owner().equals(callback.owner()) && other.name().equals(callback.name())).count() == 1;
             var model = OperationModel.of(callback.operation(), callback.id(), callbacks, callback.name() + (single ? "" : " "
                 + callback.operation().method().toLowerCase(Locale.ROOT)), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
+            owners.put(model.id(), groups.values().stream().flatMap(List::stream).filter(owner -> owner.operation().equals(callback.owner())).findFirst()
+                .orElseThrow());
             urls.computeIfAbsent(List.of("callbacks", callback.name(), callback.owner().displayName(), callback.operation().path()), url -> new ArrayList<>())
                 .add(model);
         }
@@ -90,7 +94,10 @@ public final class Generator {
             }
         }
         if (config.client()) {
-            groups.forEach((group, operations) -> files.add(source(names.client(group), renderer.client(group, operations))));
+            var all = groups.values().stream().flatMap(List::stream).toList();
+            var relations = new Relations(link -> api.target(link).flatMap(target -> all.stream().filter(model -> model.operation().equals(target)).findFirst()),
+                owners);
+            groups.forEach((group, operations) -> files.add(source(names.client(group), renderer.client(group, operations, relations))));
             files.add(source(names.clientsConfiguration(), renderer.clientsConfiguration(List.copyOf(groups.keySet()))));
         }
         return files;

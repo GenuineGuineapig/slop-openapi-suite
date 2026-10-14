@@ -14,6 +14,7 @@ import dev.openapifn.http.CollectionFormat;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
+import dev.openapifn.model.ApiOperation;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.schema.Dialect;
 import dev.openapifn.schema.Schema;
@@ -378,9 +379,9 @@ public final class ApiRenderer {
     // Clients
 
     /** The HTTP client of {@code group}. */
-    public String client(String group, List<OperationModel> operations) {
+    public String client(String group, List<OperationModel> operations, Relations relations) {
         var name = names.client(group);
-        var imports = imports(name, Set.of());
+        var imports = imports(name, Set.of("Calls"));
         var out = new Source();
         out.javadoc((operations.stream().anyMatch(OperationModel::outbound) ? "Sends the {@code " + group + "} to the URLs their receivers registered."
             : "A client for the {@code " + group + "} operations.") + " Every described response, errors included, is returned as a value of the "
@@ -404,19 +405,117 @@ public final class ApiRenderer {
             if (operation.operation().operation().deprecated()) {
                 out.line("@Deprecated");
             }
-            clientMethod(operation, constants, out, imports);
+            clientMethod(operation, out, imports);
         }
+        operations.forEach(operation -> links(operation, relations, name, out, imports));
+        operations.stream().filter(operation -> operation.operation().kind() == ApiOperation.Kind.CALLBACK)
+            .forEach(operation -> callbackUrl(operation, relations.owners().get(operation.id()), name, out, imports));
+        out.blank().javadoc("The calls the operations' requests are sent as.");
+        out.open("static final class Calls");
+        out.blank().open("private Calls()").close();
+        for (var operation : operations) {
+            out.blank();
+            callMethod(operation, constants, out, imports);
+        }
+        out.close();
         out.close();
         return unit(name, imports, out);
     }
 
-    private void clientMethod(OperationModel operation, Map<String, String> constants, Source out, Imports imports) {
-        var parameters = new ArrayList<String>();
-        if (operation.outbound()) {
-            parameters.add(imports.ref(TypeRef.URI) + " target");
+    /** The call {@code operation}'s request is sent as, built by the {@code Calls} of its client. */
+    private String call(OperationModel operation, String request, ClassName self, Imports imports) {
+        var client = names.client(operation.group());
+        return (client.equals(self) ? "" : imports.ref(client) + ".") + "Calls." + operation.method() + "(" + (operation.request().isPresent() ? request : "") + ")";
+    }
+
+    /**
+     * A method per Link Object of each response of {@code operation} whose target is generated and
+     * takes a request: it turns the response, with the request that got it, into that request.
+     */
+    private void links(OperationModel operation, Relations relations, ClassName self, Source out, Imports imports) {
+        for (var variant : operation.variants()) {
+            variant.response().links().forEach((linkName, link) -> relations.targets().apply(link).filter(target -> target.request().isPresent())
+                .ifPresent(target -> {
+                    var parameters = new ArrayList<String>();
+                    operation.request().ifPresent(request -> parameters.add(imports.ref(request) + " request"));
+                    parameters.add(imports.ref(operation.response()) + "." + variant.name() + " response");
+                    var description = link.description().map(text -> text + "\n\n").orElse("");
+                    var server = link.server().map(s -> " It is to be sent to {@code " + s.url() + "}.").orElse("");
+                    out.blank().javadoc(description + "The {@code " + target.method() + "} request the {@code " + linkName + "} link of a {@code "
+                        + variant.key() + "} response of {@code " + operation.method() + "} leads to, filled in from the request and the response."
+                        + server);
+                    out.open("public " + imports.ref(target.request().orElseThrow()) + " " + Names.camel(linkName) + "(" + String.join(", ", parameters) + ")");
+                    out.line("var values = http.values(" + exchange(operation, variant, "response", self, imports) + ");");
+                    var arguments = new ArrayList<String>();
+                    for (var parameter : target.parameters()) {
+                        var p = parameter.parameter();
+                        var value = Optional.ofNullable(link.parameters().get(p.in().value() + "." + p.name())).or(() -> Optional.ofNullable(link.parameters().get(p.name())));
+                        arguments.add(value.map(json -> linkValue(json, parameter.property().type(), imports)).orElse("null"));
+                    }
+                    target.body().ifPresent(body -> {
+                        arguments.add(link.requestBody().filter(json -> OperationModel.streamed(body.property().type()).isEmpty())
+                            .map(json -> linkValue(json, body.property().type(), imports)).orElse("null"));
+                        body.alternatives().forEach(alternative -> arguments.add("null"));
+                    });
+                    target.accept().ifPresent(accept -> arguments.add("null"));
+                    out.line("return new " + imports.ref(target.request().orElseThrow()) + "(");
+                    for (int i = 0; i < arguments.size(); i++) {
+                        out.line("    " + arguments.get(i) + (i + 1 < arguments.size() ? "," : ");"));
+                    }
+                    out.close();
+                }));
         }
-        operation.request().ifPresent(r -> parameters.add(imports.ref(r) + " request"));
-        out.open("public " + returned(operation, imports) + " " + operation.method() + "(" + String.join(", ", parameters) + ")");
+    }
+
+    private static String linkValue(dev.openapifn.json.JsonValue json, TypeRef type, Imports imports) {
+        return "values.value(" + Names.literal(json.toJson()) + ", " + token(type, imports) + ")";
+    }
+
+    /** The arguments of {@code http.values(...)} for the exchange of {@code operation} that got {@code variant} (named {@code response}). */
+    private String exchange(OperationModel operation, OperationModel.VariantModel variant, String response, ClassName self, Imports imports) {
+        var arguments = new ArrayList<String>();
+        arguments.add(call(operation, "request", self, imports));
+        arguments.add(variant.fixedStatus() ? variant.key() : response + ".status()");
+        arguments.add(variant.body().isPresent() ? response + ".body()" : "null");
+        variant.headers().forEach((header, property) -> {
+            arguments.add(Names.literal(header));
+            arguments.add(response + "." + property.javaName() + "()");
+        });
+        return String.join(", ", arguments);
+    }
+
+    /**
+     * The URL to send a callback to, from the request of the operation that subscribed to it (and
+     * its response, when the URL expression refers to it).
+     */
+    private void callbackUrl(OperationModel operation, OperationModel owner, ClassName self, Source out, Imports imports) {
+        var expression = operation.operation().path();
+        var withResponse = expression.contains("$response.") || expression.contains("$statusCode");
+        var parameters = new ArrayList<String>();
+        owner.request().ifPresent(request -> parameters.add(imports.ref(request) + " request"));
+        if (withResponse) {
+            parameters.add(imports.ref(owner.response()) + " response");
+        }
+        out.blank().javadoc("The URL to send {@code " + operation.method() + "} to: {@code " + expression + "} of the {@code " + owner.method()
+            + "} request" + (withResponse ? " and response" : "") + " that subscribed.");
+        out.open("public " + imports.ref(TypeRef.URI) + " " + operation.method() + "Url(" + String.join(", ", parameters) + ")");
+        if (withResponse) {
+            out.open("var values = switch (response)");
+            for (var variant : owner.variants()) {
+                out.line("case " + imports.ref(owner.response()) + "." + variant.name() + " variant -> http.values(" + exchange(owner, variant, "variant", self, imports)
+                    + ");");
+            }
+            out.close(";");
+        } else {
+            out.line("var values = http.values(" + call(owner, "request", self, imports) + ");");
+        }
+        out.line("return values.uri(" + Names.literal(expression) + ");");
+        out.close();
+    }
+
+    private void callMethod(OperationModel operation, Map<String, String> constants, Source out, Imports imports) {
+        out.open("static " + imports.ref(CLIENT_CALL) + " " + operation.method() + "(" + operation.request().map(r -> imports.ref(r) + " request").orElse("")
+            + ")");
         var chain = new ArrayList<String>();
         chain.add("var call = " + imports.ref(CLIENT_CALL) + ".of(" + Names.literal(operation.operation().method()) + ", "
             + Names.literal(operation.outbound() ? "" : operation.operation().path()) + ")");
@@ -456,8 +555,19 @@ public final class ApiRenderer {
             out.open("if (request." + accept.javaName() + "() != null)");
             out.line("call = call.accept(request." + accept.javaName() + "().ranges().toArray(String[]::new));").close();
         });
+        out.line("return call;");
+        out.close();
+    }
+
+    private void clientMethod(OperationModel operation, Source out, Imports imports) {
+        var parameters = new ArrayList<String>();
+        if (operation.outbound()) {
+            parameters.add(imports.ref(TypeRef.URI) + " target");
+        }
+        operation.request().ifPresent(r -> parameters.add(imports.ref(r) + " request"));
+        out.open("public " + returned(operation, imports) + " " + operation.method() + "(" + String.join(", ", parameters) + ")");
         out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + "." + (reactive ? "<" + imports.ref(operation.response()) + ">" : "")
-            + "exchange(call, response -> switch (response.status())");
+            + "exchange(Calls." + operation.method() + "(" + (operation.request().isPresent() ? "request" : "") + "), response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
         Optional<OperationModel.VariantModel> fallback = Optional.empty();
         for (var variant : operation.variants().stream().filter(v -> !v.alternative()).toList()) {

@@ -22,16 +22,25 @@ public final class EndToEnd {
         var defaults = new DefaultClient(http);
         var results = new ArrayList<String>();
 
-        var listed = pets.listPets(ListPetsRequest.builder().limit(2).tags(List.of("a", "b")).xRequestId(UUID.randomUUID()).session("s").build());
+        var listRequest = ListPetsRequest.builder().limit(2).tags(List.of("a", "b")).xRequestId(UUID.randomUUID()).session("s").build();
+        var listed = pets.listPets(listRequest);
         if (listed instanceof ListPetsResponse.Ok ok) {
             results.add("list:" + ok.xTotal() + ":" + ok.body().stream().map(p -> p.getClass().getSimpleName() + "/" + p.name()).toList());
+            var next = pets.next(listRequest, ok);
+            results.add("next:" + next.limit() + ":" + next.tags() + ":" + next.xRequestId().equals(listRequest.xRequestId()) + ":" + next.session());
         }
-        var created = pets.createPet(new CreatePetRequest(Dog.builder().name("Bello").kind(Kind.DOG).barks(false).build()));
+        var root = baseUrl.substring(0, baseUrl.indexOf("/api/v1"));
+        var createRequest = new CreatePetRequest(URI.create(root + "/callbacks/petCreated"), Dog.builder().name("Bello").kind(Kind.DOG).barks(false).build());
+        var created = pets.createPet(createRequest);
         results.add(switch (created) {
             case CreatePetResponse.Created c -> "created:" + c.location() + ":" + c.body().getClass().getSimpleName() + "/" + c.body().id();
             case CreatePetResponse.Status4XX problem -> "problem:" + problem.status();
         });
-        var rejected = pets.createPet(new CreatePetRequest(new Pet.Default(null, "error", Kind.BIRD, null, null)));
+        var createdPet = (CreatePetResponse.Created) created;
+        @SuppressWarnings("deprecation")
+        var deleteLinked = pets.deleteCreatedPet(createRequest, createdPet);
+        results.add("linked:" + pets.getCreatedPet(createRequest, createdPet).petId() + ":" + deleteLinked.petId());
+        var rejected = pets.createPet(new CreatePetRequest(null, new Pet.Default(null, "error", Kind.BIRD, null, null)));
         results.add(switch (rejected) {
             case CreatePetResponse.Created c -> "unexpected";
             case CreatePetResponse.Status4XX problem -> "problem:" + problem.status() + ":" + problem.body().detail();
@@ -51,6 +60,10 @@ public final class EndToEnd {
             "PNG".getBytes(StandardCharsets.UTF_8)), "caption", new UploadPhotoRequest.Body.Meta(10))));
         var file = ((UploadPhotoResponse.Ok) photo).body();
         results.add("photo:" + file.contentType() + ":" + file.text());
+        var orderRequest = new GetOrderRequest(EndToEndIds.ORDER, List.of(GetOrderRequest.ExpandItem.ITEMS));
+        var orderResponse = (GetOrderResponse.Status2XX) orders.getOrder(orderRequest);
+        var note = orders.addOrderNote(orders.note(orderRequest, orderResponse));
+        results.add("links:" + orders.receipt(orderRequest, orderResponse).orderId().equals(EndToEndIds.ORDER) + ":" + ((AddOrderNoteResponse.Ok) note).body());
         var order = ((GetOrderResponse.Status2XX) orders.getOrder(new GetOrderRequest(EndToEndIds.ORDER, List.of(GetOrderRequest.ExpandItem.ITEMS)))).body();
         results.add("order:" + order.status() + ":" + order.priority() + ":" + order.payment() + ":" + order.shipping().getClass().getSimpleName()
             + ":" + order.lines());
@@ -71,14 +84,13 @@ public final class EndToEnd {
         results.add("health:" + ((HealthResponse.Ok) defaults.health()).body());
 
         // Webhooks and callbacks are sent to receivers; here the same application receives them.
-        var root = baseUrl.substring(0, baseUrl.indexOf("/api/v1"));
         var webhooks = new WebhooksClient(http);
         var callbacks = new CallbacksClient(http);
         var tom = Cat.builder().name("Tom").kind(Kind.CAT).build();
         results.add("adopted:" + webhooks.petAdopted(URI.create(root + "/webhooks/petAdopted"), new PetAdoptedRequest("signed", tom)).status());
         results.add("stock:" + webhooks.postStockLow(URI.create(root + "/webhooks/postStockLow"),
             new PostStockLowRequest(new PostStockLowRequest.Body("sku-1"))).status());
-        results.add("callback:" + callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreated"), new PetCreatedCallbackRequest(tom))
+        results.add("callback:" + callbacks.petCreatedCallback(callbacks.petCreatedCallbackUrl(createRequest), new PetCreatedCallbackRequest(tom))
             .status());
         results.add("put:" + ((PetCreatedPutResponse.Ok) callbacks.petCreatedPut(URI.create(root + "/callbacks/petCreated"),
             new PetCreatedPutRequest("hi"))).body());

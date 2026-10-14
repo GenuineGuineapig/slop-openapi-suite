@@ -1,6 +1,7 @@
 package com.example.galaxy.mock;
 
 import com.example.galaxy.api.CallbacksClient;
+import com.example.galaxy.api.CreatePlanetRequest;
 import com.example.galaxy.api.PlanetCreatedRequest;
 import com.example.galaxy.api.PlanetCreationFailedRequest;
 import com.example.galaxy.api.PlanetExplodedRequest;
@@ -33,21 +34,23 @@ public class PlanetNotifier {
         subscribers.add(subscriber);
     }
 
-    void created(Planet planet) {
+    /** Calls back the URL the request named ({@code $request.body#/successCallbackUrl}). */
+    void created(CreatePlanetRequest request, Planet planet) {
         if (planet.successCallbackUrl() != null) {
-            callbacks.planetCreated(planet.successCallbackUrl(), new PlanetCreatedRequest(planet));
+            callbacks.planetCreated(callbacks.planetCreatedUrl(request), new PlanetCreatedRequest(planet));
         }
         subscribers.forEach(subscriber -> webhooks.postNewPlanet(subscriber, new PostNewPlanetRequest(planet)));
     }
 
     /** The payload is a planet as the API sends it, which always has an id; a rejected one gets 0. */
-    void creationFailed(Planet planet) {
-        callbacks.planetCreationFailed(planet.failureCallbackUrl(), new PlanetCreationFailedRequest(planet.withId(0L)));
+    void creationFailed(CreatePlanetRequest request) {
+        callbacks.planetCreationFailed(callbacks.planetCreationFailedUrl(request), new PlanetCreationFailedRequest(request.body().withId(0L)));
     }
 
+    /** The planet as stored is what its creation request (as updated since) described. */
     void exploded(Planet planet) {
         if (planet.successCallbackUrl() != null) {
-            callbacks.planetExploded(planet.successCallbackUrl(), new PlanetExplodedRequest(planet));
+            callbacks.planetExploded(callbacks.planetExplodedUrl(new CreatePlanetRequest(planet)), new PlanetExplodedRequest(planet));
         }
     }
 }

@@ -6,7 +6,10 @@ import dev.openapifn.http.Headers;
 import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.Multipart;
 import dev.openapifn.http.ParameterSerializer;
+import dev.openapifn.http.RuntimeExpressions;
 import dev.openapifn.http.SchemaShapes;
+import dev.openapifn.json.JsonObject;
+import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.schema.SchemaRegistry;
@@ -16,12 +19,15 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -136,6 +142,44 @@ public final class ClientCodec {
     public byte[] encodeItem(Object value, ContentType type) {
         return type.type().equals("multipart") ? BodyWriter.part(type.parameter("boundary").orElseThrow(), item(value))
             : BodyWriter.item(toJson(value), type);
+    }
+
+    /**
+     * What runtime expressions see of {@code call} sent to {@code baseUrl} ({@code $url},
+     * {@code $method}, its parameters and body) and, when {@code status} is given, of the response
+     * it got: its header values as name/value pairs and its body. Streams, files and bytes have no
+     * JSON for {@code body} expressions to select from.
+     */
+    public ExchangeValues values(String baseUrl, ClientCall call, @Nullable Integer status, @Nullable Object body, @Nullable Object... headers) {
+        var request = new LinkedHashMap<String, JsonValue>();
+        headers(call).values().forEach((name, values) -> request.put("header." + name.toLowerCase(Locale.ROOT), JsonString.of(String.join(", ", values))));
+        for (var param : call.parameters()) {
+            var name = param.spec().in() == ParameterLocation.HEADER ? param.spec().name().toLowerCase(Locale.ROOT) : param.spec().name();
+            request.put(param.spec().in().value() + "." + name, toJson(param.value()));
+        }
+        var responseHeaders = new LinkedHashMap<String, JsonValue>();
+        for (int i = 0; i + 1 < headers.length; i += 2) {
+            if (headers[i + 1] != null) {
+                responseHeaders.put(String.valueOf(headers[i]).toLowerCase(Locale.ROOT), toJson(headers[i + 1]));
+            }
+        }
+        var requestBody = Optional.ofNullable(call.body()).flatMap(sent -> sent.contentType().equals("multipart/form-data")
+            ? Optional.of(parts((List<?>) sent.value())) : bodyJson(sent.value()));
+        var context = new RuntimeExpressions.Context(uri(baseUrl, call).toString(), call.method(), Optional.ofNullable(status), request, requestBody,
+            responseHeaders, Optional.ofNullable(body).flatMap(this::bodyJson));
+        return new ExchangeValues(mapper, context);
+    }
+
+    /** Named form parts as an object of their values; files have no JSON. */
+    private JsonValue parts(List<?> parts) {
+        var members = new LinkedHashMap<String, JsonValue>();
+        parts.stream().map(ClientCall.Part.class::cast).forEach(part -> bodyJson(part.value()).ifPresent(value -> members.put(part.name(), value)));
+        return new JsonObject(members);
+    }
+
+    private Optional<JsonValue> bodyJson(Object value) {
+        return value instanceof Stream<?> || value instanceof FilePart || value instanceof byte[] ? Optional.empty()
+            : Optional.of(toJson(value));
     }
 
     private static ContentType contentType(ClientCall.Body body) {

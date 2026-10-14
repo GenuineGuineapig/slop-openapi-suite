@@ -454,6 +454,73 @@ class OpenApiParserTest {
     }
 
     @Test
+    void linkTargetsAreFound() {
+        var doc = ok(v31("""
+            paths:
+              /a:
+                get:
+                  operationId: getA
+                  responses:
+                    '200':
+                      description: ok
+                      links:
+                        byId: {operationId: getA}
+                        byRef: {operationRef: '#/paths/~1b/post'}
+                        absolute: {operationRef: 'mem:/api.yaml#/paths/~1b/post'}
+                        hook: {operationRef: '#/webhooks/hook/post'}
+                        callback: {operationId: onEvent}
+                        remote: {operationRef: 'https://example.com/api.yaml#/paths/~1b/post'}
+                        other: {operationRef: '#/other/b/post'}
+                        shallow: {operationRef: '#/paths/~1b'}
+                        wrongMethod: {operationRef: '#/paths/~1b/get'}
+                        unknownId: {operationId: nope}
+                        badPointer: {operationRef: '#paths'}
+                        badUri: {operationRef: 'http://[x'}
+              /b:
+                post:
+                  responses: {'200': {description: ok}}
+                  callbacks:
+                    cb:
+                      '{$request.body#/url}':
+                        post: {operationId: onEvent, responses: {'200': {description: ok}}}
+            webhooks:
+              hook:
+                post: {responses: {'200': {description: ok}}}
+            """));
+        var links = doc.operations().getFirst().operation().responses().forStatus(200).orElseThrow().links();
+        java.util.function.Function<String, String> target = name -> doc.target(links.get(name)).map(op -> op.kind() + " " + op.method() + " " + op.path())
+            .orElse("none");
+        assertThat(target.apply("byId")).isEqualTo("PATH GET /a");
+        assertThat(target.apply("byRef")).isEqualTo("PATH POST /b");
+        assertThat(target.apply("absolute")).isEqualTo("PATH POST /b");
+        assertThat(target.apply("hook")).isEqualTo("WEBHOOK POST hook");
+        assertThat(target.apply("callback")).isEqualTo("CALLBACK POST {$request.body#/url}");
+        assertThat(List.of("remote", "other", "shallow", "wrongMethod", "unknownId", "badPointer", "badUri")).allMatch(name -> target.apply(name).equals("none"));
+    }
+
+    @Test
+    void runtimeExpressionsAreChecked() {
+        assertThat(messages(v31("""
+            paths:
+              /a:
+                post:
+                  operationId: a
+                  responses:
+                    '200':
+                      description: ok
+                      links:
+                        good: {operationId: a, parameters: {id: '$response.body#/id', n: 3, q: 'x-{$request.query.q}'}, requestBody: '$request.body'}
+                        bad: {operationId: a, parameters: {id: '$response.bogus'}, requestBody: '{$nope}'}
+                  callbacks:
+                    cb:
+                      '{$request.body#/url}': {}
+                      'https://x.example/{$wrong}': {}
+            """))).containsExactlyInAnyOrder("Link parameter 'id': malformed runtime expression '$response.bogus'",
+            "Link requestBody: malformed runtime expression '$nope' in '{$nope}'",
+            "Callback URL: malformed runtime expression '$wrong' in 'https://x.example/{$wrong}'");
+    }
+
+    @Test
     void structuralRules() {
         assertThat(messages(v32("""
             paths:

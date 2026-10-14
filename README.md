@@ -117,7 +117,8 @@ running application through the generated clients.
 | `$dynamicRef` templates | Generic records: `PaginatedResource<T>`, used as `PaginatedResource<Planet>` where a description binds the dynamic anchor |
 | Operations | A request record per operation and a sealed response type with one record per status (or range, or `default`), including typed response headers |
 | Paths | A delegate interface (`PetsApi`) and a `@RestController` per tag. Custom methods (3.2 `additionalOperations`, `QUERY`) are dispatched too |
-| Webhooks, callbacks | Receiver interfaces and controllers (at `openapi-fn.specs.<api>.receivers.<method>.path`, default `/webhooks/<method>` or `/callbacks/<method>`), and senders that take the target URL |
+| Webhooks, callbacks | Receiver interfaces and controllers (at `openapi-fn.specs.<api>.receivers.<method>.path`, default `/webhooks/<method>` or `/callbacks/<method>`), senders that take the target URL, and a method per callback that computes that URL from the subscribing request (see below) |
+| Links | A client method per link that turns a response, with the request that got it, into the request of the linked operation (see below) |
 | Clients | `RestClient` clients (or `WebClient` clients returning `Mono`s, for WebFlux) per tag that serialize every parameter style and body type, and decode every described response |
 | Tests | A `@WebMvcTest` (or `@WebFluxTest` with `WebTestClient`) per controller: an exchange built from examples (validated against the description), plus a test that incomplete requests are rejected |
 | Bundle | The description (with remote documents) under `META-INF/openapi-fn/<api>/`, found by the runtime automatically |
@@ -152,6 +153,44 @@ stream: the filter checks the status, headers and content type first, then each 
 passes, and only passes on items that are valid. When responses fail on violations, an invalid
 response becomes a 500 problem while nothing has been sent yet; later, the stream ends before the
 invalid item. An invalid request item ends the request's stream with a 400 problem.
+
+## Links and callback URLs
+
+Link Objects and callback URLs are runtime expressions (`$url`, `$method`, `$statusCode`,
+`$request.path|query|header.<name>`, `$request.body#/pointer`, `$response.header.<name>`,
+`$response.body#/pointer`, and strings with `{…}` expressions in them). Malformed ones are
+reported when the description is loaded; generated clients evaluate them:
+
+```yaml
+responses:
+  '201':
+    links:
+      GetCreatedPet:
+        operationId: getPet
+        parameters: {petId: '$response.body#/id'}
+callbacks:
+  petCreated:
+    '{$request.header.X-Callback-Url}':
+      post: ...
+```
+
+```java
+var request = new CreatePetRequest(URI.create("https://me.example.com/hooks"), pet);
+if (pets.createPet(request) instanceof CreatePetResponse.Created created) {
+    GetPetRequest next = pets.getCreatedPet(request, created);   // petId taken from the response body
+    pets.getPet(next);
+}
+
+// On the server, sending the callback to the URL the request named:
+callbacks.petCreatedCallback(callbacks.petCreatedCallbackUrl(request), new PetCreatedCallbackRequest(pet));
+```
+
+Link methods take the response variant the link belongs to; a callback URL method also takes the
+response when its expression refers to it. Links lead to operations named by `operationId`, or by
+an `operationRef` to a path or webhook operation of the description. Expressions see the request
+as the client sends it: its declared parameters (typed), its body and the headers the client sets.
+`$url` is the request URL relative to the client's base URL. `RuntimeExpressions` in
+openapi-fn-core evaluates expressions without Spring.
 
 ## Several media types of different types
 
@@ -313,8 +352,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
   buffers request bodies for interceptors (generated clients validate without buffering).
 * **Remote references are fetched on every build.** The Gradle task fetches them to see whether
   they changed; it is up to date (or taken from the build cache) while they did not.
-* **Links are checked, not used.** Their target operations must exist, but links have no runtime
-  behaviour.
 * **Different callbacks on one URL with the same method cannot be told apart.** The operations of
   one webhook, or of one callback URL, share a receiver path and are told apart by method; two
   callbacks of different names whose URL expressions and methods coincide get a receiver each.

@@ -123,6 +123,20 @@ public final class OpenApiHttpClient {
         }, false);
     }
 
+    /**
+     * What runtime expressions select from {@code call}, sent by this client, and the response it
+     * got (its status, body and header values as name/value pairs): the values the Link Objects of
+     * that response give the request of the operation they lead to.
+     */
+    public ExchangeValues values(ClientCall call, int status, @Nullable Object body, @Nullable Object... headers) {
+        return codec.values(baseUrl, call, status, body, headers);
+    }
+
+    /** What runtime expressions select from {@code call} alone, such as the URLs of its callbacks. */
+    public ExchangeValues values(ClientCall call) {
+        return codec.values(baseUrl, call, null, null);
+    }
+
     /** The absolute URI of {@code call}, see {@link ClientCodec#uri}. */
     URI uri(ClientCall call) {
         return codec.uri(baseUrl, call);

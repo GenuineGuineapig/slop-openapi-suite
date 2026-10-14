@@ -57,14 +57,14 @@ public class MockPlanets implements PlanetsApi {
         var draft = request.body();
         if (draft == null || draft.name().isBlank()) {
             if (draft != null && draft.failureCallbackUrl() != null) {
-                notifier.creationFailed(draft);
+                notifier.creationFailed(request);
             }
             return CreatePlanetResponse.badRequest(new BadRequestError("https://galaxy.scalar.com/errors/bad-request", "Bad Request", 400L,
                 "A planet needs a name"), UUID.randomUUID());
         }
         var planet = draft.withId(ids.incrementAndGet()).withLastUpdated(OffsetDateTime.now());
         planets.put(planet.id(), planet);
-        notifier.created(planet);
+        notifier.created(request, planet);
         return CreatePlanetResponse.created(planet, UUID.randomUUID(), URI.create("https://galaxy.scalar.com/planets/" + planet.id()), 42);
     }
 

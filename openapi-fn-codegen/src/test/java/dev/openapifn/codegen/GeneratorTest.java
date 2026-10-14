@@ -72,13 +72,16 @@ class GeneratorTest {
                 .invoke(null, "http://localhost:" + port + "/api/v1");
             assertThat(results).containsExactly(
                 "list:3:[Cat/Tom, Dog/Rex]",
+                "next:3:[a, b]:true:status-200",
                 "created:/pets/11:Dog/11",
+                "linked:11:11",
                 "problem:422:name must not be 'error'",
                 "search:2",
                 "get:Rex",
                 "get404:true",
                 "delete:204",
                 "photo:image/png:PNG",
+                "links:true:json:noted",
                 "order:3-day:3:Card[method=card, last4=4242]:Address:[LinesItem[sku=sku-1, quantity=2]]",
                 "pickup:StringValue[value=pickup]",
                 "events:[placed, paid]",
@@ -133,13 +136,16 @@ class GeneratorTest {
                 .invoke(null, "http://localhost:" + port + "/api/v1");
             assertThat(results).containsExactly(
                 "list:3:[Cat/Tom, Dog/Rex]",
+                "next:3:[a, b]:true:status-200",
                 "created:/pets/11:Dog/11",
+                "linked:11:11",
                 "problem:422:name must not be 'error'",
                 "search:2",
                 "get:Rex",
                 "get404:true",
                 "delete:204",
                 "photo:image/png:PNG",
+                "links:true:json:noted",
                 "order:3-day:3:Card[method=card, last4=4242]:Address:[LinesItem[sku=sku-1, quantity=2]]",
                 "pickup:StringValue[value=pickup]",
                 "events:[placed, paid]",

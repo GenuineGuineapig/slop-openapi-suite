@@ -162,7 +162,20 @@ paths:
       operationId: empty
       security: []
       responses:
-        '204': {description: none}
+        '204':
+          description: none
+          links:
+            stream: {operationRef: '#/paths/~1events/post', requestBody: '$request.body'}
+            things: {operationId: getThing, parameters: {path.id: fixed, X-Opt: '$method'}}
+            nothing: {operationId: empty}
+            remote: {operationRef: 'https://example.com/other.yaml#/paths/~1x/get'}
+      callbacks:
+        onStatus:
+          'https://hooks.example.com/{$statusCode}':
+            post: {responses: {'204': {description: ok}}}
+        onHeader:
+          '{$response.header.X-Hook}':
+            post: {responses: {'204': {description: ok}}}
 components:
   schemas:
     GetThingResponse:

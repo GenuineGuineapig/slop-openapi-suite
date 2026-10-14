@@ -32,11 +32,21 @@ paths:
               schema: {type: array, items: {$ref: 'schemas/pets.yaml#/Pet'}}
             application/xml:
               schema: {type: array, xml: {name: pets, wrapped: true}, items: {$ref: 'schemas/pets.yaml#/Pet'}}
+          links:
+            Next:
+              operationId: listPets
+              parameters:
+                limit: '$response.header.X-Total'
+                X-Request-Id: '$request.header.X-Request-Id'
+                query.tags: '$request.query.tags'
+                session: 'status-{$statusCode}'
         default:
           $ref: '#/components/responses/Problem'
     post:
       operationId: createPet
       tags: [pets]
+      parameters:
+        - {name: X-Callback-Url, in: header, schema: {type: string, format: uri}}
       requestBody:
         required: true
         content:
@@ -49,6 +59,14 @@ paths:
             Location: {required: true, schema: {type: string}}
           content:
             application/json: {schema: {$ref: 'schemas/pets.yaml#/Pet'}}
+          links:
+            GetCreatedPet:
+              operationId: getPet
+              description: The pet just created.
+              parameters: {petId: '$response.body#/id'}
+            DeleteCreatedPet:
+              operationRef: '#/paths/~1pets~1{petId}/delete'
+              parameters: {path.petId: '$response.body#/id'}
         4XX:
           $ref: '#/components/responses/Problem'
       callbacks:
@@ -137,6 +155,15 @@ paths:
           description: The order
           content:
             application/json: {schema: {$ref: '#/components/schemas/Order'}}
+          links:
+            Receipt:
+              operationId: getReceipt
+              parameters: {orderId: '$response.body#/id'}
+              server: {url: 'https://receipts.shop.example.com'}
+            Note:
+              operationId: addOrderNote
+              parameters: {orderId: '$request.path.orderId'}
+              requestBody: {text: noted}
   /orders/events:
     get:
       operationId: orderEvents

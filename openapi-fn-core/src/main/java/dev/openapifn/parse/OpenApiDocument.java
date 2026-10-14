@@ -1,15 +1,19 @@
 package dev.openapifn.parse;
 
+import dev.openapifn.json.JsonPointer;
 import dev.openapifn.load.Diagnostic;
+import dev.openapifn.load.Uris;
 import dev.openapifn.model.ApiOperation;
 import dev.openapifn.model.ApiOperation.Kind;
 import dev.openapifn.model.CallbackOperation;
+import dev.openapifn.model.Link;
 import dev.openapifn.model.OpenApi;
 import dev.openapifn.model.PathItem;
 import dev.openapifn.schema.SchemaRegistry;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -70,6 +74,32 @@ public record OpenApiDocument(URI uri, OpenApi model, SchemaRegistry schemas, Li
         return all.stream().filter(op -> op.operationId().filter(id::equals).isPresent()).findFirst()
             .or(() -> all.stream().filter(op -> op.kind() != Kind.CALLBACK && op.displayName().equals(id)).findFirst())
             .or(() -> callbacks().stream().filter(callback -> callback.id().equals(id)).map(CallbackOperation::operation).findFirst());
+    }
+
+    /**
+     * The operation a Link Object leads to: the one its {@code operationId} names, or the path or
+     * webhook operation its {@code operationRef} points to in this description (such as
+     * {@code #/paths/~1pets~1{petId}/get}). Operations of other APIs are not known.
+     */
+    public Optional<ApiOperation> target(Link link) {
+        if (link.operationId().isPresent()) {
+            var id = link.operationId().get();
+            return allOperations().stream().filter(op -> op.operationId().filter(id::equals).isPresent()).findFirst();
+        }
+        return link.operationRef().flatMap(ref -> Uris.resolve(uri, ref).toOptional())
+            .filter(ref -> Uris.withoutFragment(ref).equals(Uris.withoutFragment(uri)))
+            .flatMap(ref -> JsonPointer.parse(Uris.fragment(ref)).toOptional())
+            .filter(pointer -> pointer.tokens().size() == 3)
+            .flatMap(pointer -> {
+                var tokens = pointer.tokens();
+                var candidates = switch (tokens.getFirst()) {
+                    case "paths" -> operations();
+                    case "webhooks" -> webhooks();
+                    default -> List.<ApiOperation>of();
+                };
+                return candidates.stream().filter(op -> op.path().equals(tokens.get(1)) && op.method().equals(tokens.get(2).toUpperCase(Locale.ROOT)))
+                    .findFirst();
+            });
     }
 
     private List<ApiOperation> flatten(Map<String, PathItem> items, Kind kind) {

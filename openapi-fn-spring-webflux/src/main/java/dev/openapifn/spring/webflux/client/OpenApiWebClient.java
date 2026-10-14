@@ -15,6 +15,7 @@ import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.spring.client.ClientCall;
 import dev.openapifn.spring.client.ClientCodec;
 import dev.openapifn.spring.client.ClientValidationException;
+import dev.openapifn.spring.client.ExchangeValues;
 import dev.openapifn.spring.client.OpenApiHttpClient;
 import dev.openapifn.spring.webflux.ReactiveMessages;
 import dev.openapifn.validation.OpenApiValidator;
@@ -103,6 +104,26 @@ public final class OpenApiWebClient {
     /** A client sending to {@code baseUrl} instead, e.g. the URL a webhook subscriber or callback registered. */
     public OpenApiWebClient to(String baseUrl) {
         return new OpenApiWebClient(this, baseUrl);
+    }
+
+    /**
+     * What runtime expressions select from {@code call}, sent by this client, and the response it
+     * got (its status, body and header values as name/value pairs): the values the Link Objects of
+     * that response give the request of the operation they lead to. Streamed bodies have no JSON to
+     * select from.
+     */
+    public ExchangeValues values(ClientCall call, int status, @Nullable Object body, @Nullable Object... headers) {
+        return codec.values(baseUrl, withoutStream(call), status, body instanceof Publisher<?> ? null : body, headers);
+    }
+
+    /** What runtime expressions select from {@code call} alone, such as the URLs of its callbacks. */
+    public ExchangeValues values(ClientCall call) {
+        return codec.values(baseUrl, withoutStream(call), null, null);
+    }
+
+    private static ClientCall withoutStream(ClientCall call) {
+        var body = call.body();
+        return body != null && body.value() instanceof Publisher<?> ? call.body(body.contentType(), null) : call;
     }
 
     /** Sends {@code call} and decodes the response. */

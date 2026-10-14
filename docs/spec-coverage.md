@@ -45,8 +45,9 @@ usually because the specification gives it none (descriptions, documentation lin
 | `operationId` (unique; duplicates are errors) | Names Java methods. Synthesized as `METHOD path` when missing |
 | `deprecated` | Codegen: `@Deprecated` on operations, models and properties |
 | `security` (operation, global, empty) | Validation: credentials present for one alternative (API key header/query/cookie, HTTP schemes, OAuth 2 and OpenID Connect bearer tokens; `mutualTLS` counts as satisfied). Generated tests send credentials |
-| `callbacks` | Validation (by operation); codegen generates receivers and senders. Callback ids are unique (`<owner> <name> METHOD`) |
-| `links` | Load-time check that targets exist (`operationId`, local `operationRef`); no runtime behaviour |
+| `callbacks` | Validation (by operation); codegen generates receivers, senders, and methods computing the callback URL from the subscribing request (and response). Callback ids are unique (`<owner> <name> METHOD`) |
+| `links` | Load-time checks (targets exist, runtime expressions are well-formed). Codegen: a client method per link builds the linked operation's request from a request and its response (`operationId`, or `operationRef` to a path or webhook operation); `server` is noted in its Javadoc |
+| Runtime expressions | `RuntimeExpressions` (core) parses and evaluates every form of the ABNF, including `{…}` templates; generated callback URL methods use them |
 
 ## Parameters
 

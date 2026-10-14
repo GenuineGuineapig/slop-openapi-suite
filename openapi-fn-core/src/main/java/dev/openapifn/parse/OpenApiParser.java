@@ -1,5 +1,6 @@
 package dev.openapifn.parse;
 
+import dev.openapifn.http.RuntimeExpressions;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonObject;
@@ -567,6 +568,7 @@ final class OpenApiParser {
         var expressions = new LinkedHashMap<String, PathItem>();
         obj.json.members().forEach((expression, value) -> {
             if (!expression.startsWith("x-")) {
+                RuntimeExpressions.check(JsonString.of(expression)).ifPresent(problem -> warning(cursor.child(expression, value), "Callback URL: " + problem));
                 pathItem(cursor.child(expression, value)).ifPresent(item -> expressions.put(expression, item));
             }
         });
@@ -600,6 +602,8 @@ final class OpenApiParser {
             }
         });
         var parameters = obj.json.object("parameters").map(JsonObject::members).orElse(Map.of());
+        parameters.forEach((name, value) -> RuntimeExpressions.check(value).ifPresent(problem -> warning(cursor, "Link parameter '" + name + "': " + problem)));
+        obj.value("requestBody").flatMap(RuntimeExpressions::check).ifPresent(problem -> warning(cursor, "Link requestBody: " + problem));
         return Optional.of(new Link(obj.string("operationRef"), obj.string("operationId"), parameters, obj.value("requestBody"),
             obj.string("description"), obj.get("server").flatMap(this::server), obj.extensions()));
     }
