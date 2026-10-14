@@ -39,10 +39,28 @@ public sealed interface ModelDef {
      * @param schema the schema
      * @param properties properties in declaration order
      * @param additionalProperties type of additional property values, if they are captured
+     * @param typeParameters type variables of a generic schema (one whose dynamic anchors it refers to with {@code $dynamicRef})
      */
-    record RecordDef(ClassName name, Schema schema, List<Property> properties, Optional<TypeRef> additionalProperties) implements ModelDef {
+    record RecordDef(ClassName name, Schema schema, List<Property> properties, Optional<TypeRef> additionalProperties, List<String> typeParameters)
+        implements ModelDef {
+
         public RecordDef {
             properties = List.copyOf(properties);
+            typeParameters = List.copyOf(typeParameters);
+        }
+
+        public RecordDef(ClassName name, Schema schema, List<Property> properties, Optional<TypeRef> additionalProperties) {
+            this(name, schema, properties, additionalProperties, List.of());
+        }
+
+        /** The type parameters as declared, e.g. {@code <T>}, or nothing. */
+        public String generics() {
+            return typeParameters.isEmpty() ? "" : "<" + String.join(", ", typeParameters) + ">";
+        }
+
+        /** The diamond for instance creation, or nothing. */
+        public String diamond() {
+            return typeParameters.isEmpty() ? "" : "<>";
         }
     }
 
@@ -53,10 +71,14 @@ public sealed interface ModelDef {
      * @param schema the schema
      * @param valueType {@code String}, {@code Integer} or {@code Long}
      * @param constants constant names to JSON values
+     * @param descriptions documentation of constants (from {@code x-enum-descriptions})
      */
-    record EnumDef(ClassName name, Schema schema, TypeRef valueType, Map<String, JsonValue> constants) implements ModelDef {
+    record EnumDef(ClassName name, Schema schema, TypeRef valueType, Map<String, JsonValue> constants, Map<String, String> descriptions)
+        implements ModelDef {
+
         public EnumDef {
             constants = dev.openapifn.fn.Immutable.map(constants);
+            descriptions = Map.copyOf(descriptions);
         }
     }
 

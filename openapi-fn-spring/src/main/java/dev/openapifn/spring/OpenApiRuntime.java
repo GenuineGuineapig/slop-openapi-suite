@@ -69,12 +69,9 @@ public final class OpenApiRuntime {
         return mapper;
     }
 
-    /**
-     * The operation (path, webhook or callback) identified by its {@code operationId}, or by
-     * {@code METHOD path} when it has none.
-     */
+    /** The operation (path, webhook or callback) an identifier names, see {@link OpenApiDocument#operation(String)}. */
     public ApiOperation operation(String id) {
-        return api.allOperations().stream().filter(operation -> operation.displayName().equals(id)).findFirst()
+        return api.operation(id)
             .orElseThrow(() -> new IllegalArgumentException("API '" + name + "' has no operation '" + id + "'"));
     }
 

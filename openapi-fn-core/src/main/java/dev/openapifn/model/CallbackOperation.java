@@ -9,4 +9,12 @@ package dev.openapifn.model;
  *     {@code {$request.body#/callbackUrl}}
  */
 public record CallbackOperation(ApiOperation owner, String name, ApiOperation operation) {
+
+    /**
+     * Identifies the callback operation: its {@code operationId}, else {@code <owner> <name> METHOD}
+     * (the URL expression alone is not unique: several callbacks may use the same one).
+     */
+    public String id() {
+        return operation.operationId().orElse(owner.displayName() + " " + name + " " + operation.method());
+    }
 }

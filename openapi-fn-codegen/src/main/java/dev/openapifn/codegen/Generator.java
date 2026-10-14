@@ -41,15 +41,16 @@ public final class Generator {
         var groupNames = new HashSet<>(groups.keySet());
         var webhooks = Names.unique("Webhooks", groupNames);
         for (var operation : api.webhooks()) {
-            var model = OperationModel.of(operation, webhooks, operation.method().toLowerCase(Locale.ROOT) + " " + operation.path(), names.apiPackage(),
-                mapper, taken);
+            var model = OperationModel.of(operation, operation.displayName(), webhooks, operation.method().toLowerCase(Locale.ROOT) + " "
+                + operation.path(), names.apiPackage(), mapper, taken);
             groups.computeIfAbsent(webhooks, group -> new ArrayList<>()).add(model);
         }
         var callbacks = Names.unique("Callbacks", groupNames);
         for (var callback : api.callbacks()) {
-            var owner = callback.owner().operationId().orElse(callback.owner().method().toLowerCase(Locale.ROOT) + " " + callback.owner().path());
-            var model = OperationModel.of(callback.operation(), callbacks, owner + " " + callback.name() + " " + callback.operation().method()
-                .toLowerCase(Locale.ROOT), names.apiPackage(), mapper, taken);
+            // Named after the callback, plus the method when the callback has several operations.
+            var single = api.callbacks().stream().filter(other -> other.owner().equals(callback.owner()) && other.name().equals(callback.name())).count() == 1;
+            var model = OperationModel.of(callback.operation(), callback.id(), callbacks, callback.name() + (single ? "" : " "
+                + callback.operation().method().toLowerCase(Locale.ROOT)), names.apiPackage(), mapper, taken);
             groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
         }
         var models = new ModelRenderer(mapper);

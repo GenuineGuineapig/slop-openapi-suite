@@ -9,7 +9,9 @@ import dev.openapifn.codegen.model.ModelDef.Property;
 import dev.openapifn.codegen.model.ModelDef.RecordDef;
 import dev.openapifn.codegen.model.ModelDef.UnionDef;
 import dev.openapifn.codegen.model.ModelDef.WrapperDef;
+import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonNumber;
+import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.parse.OpenApiDocument;
@@ -149,9 +151,23 @@ public final class TypeMapper {
      * schemas that need a class get one nested in {@code owner}, named after {@code hint}.
      */
     public TypeRef type(Schema schema, ClassName owner, String hint) {
+        var variable = schema.dynamicRef().flatMap(ref -> typeVariable(owner, ref));
+        if (variable.isPresent()) {
+            return variable.get();
+        }
         if (schema.ref().isPresent() || schema.dynamicRef().isPresent()) {
             var target = registry.deref(schema);
-            return target == schema ? TypeRef.OBJECT : namedType(target);
+            if (target == schema) {
+                return TypeRef.OBJECT;
+            }
+            var type = namedType(target);
+            var parameters = typeParameters(target);
+            if (parameters.isEmpty() || !(type instanceof ClassName generic)) {
+                return type;
+            }
+            // A reference to a generic schema: the referencing schema binds its dynamic anchors, else their defaults apply.
+            return generic.of(parameters.keySet().stream().map(anchor -> type(dynamicAnchor(schema, anchor).or(() -> dynamicAnchor(target, anchor))
+                .orElseThrow(), owner, hint + Names.pascal(anchor))).toArray(TypeRef[]::new));
         }
         var nullFree = nonNullMember(schema);
         if (nullFree.isPresent()) {
@@ -170,6 +186,40 @@ public final class TypeMapper {
             }
             default -> structural(schema, kind, owner, hint);
         };
+    }
+
+    /**
+     * The type parameters of a generic schema: the dynamic anchors in its {@code $defs} that it
+     * refers to with {@code $dynamicRef} (JSON Schema's way to express {@code Paginated<T>}), by
+     * anchor name.
+     */
+    private Map<String, String> typeParameters(Schema schema) {
+        var anchors = schema.subschemaMap("$defs").values().stream().flatMap(definition -> definition.object().string("$dynamicAnchor").stream())
+            .filter(anchor -> refersTo(schema.object(), "#" + anchor)).toList();
+        var parameters = new LinkedHashMap<String, String>();
+        anchors.forEach(anchor -> parameters.put(anchor, anchors.size() == 1 ? "T" : "T" + Names.pascal(anchor)));
+        return parameters;
+    }
+
+    private static boolean refersTo(JsonValue json, String dynamicRef) {
+        return switch (json) {
+            case JsonObject object -> object.string("$dynamicRef").filter(dynamicRef::equals).isPresent()
+                || object.members().values().stream().anyMatch(member -> refersTo(member, dynamicRef));
+            case JsonArray array -> array.values().stream().anyMatch(item -> refersTo(item, dynamicRef));
+            default -> false;
+        };
+    }
+
+    /** The {@code $defs} entry of {@code schema} declaring the dynamic anchor {@code name}. */
+    private static Optional<Schema> dynamicAnchor(Schema schema, String name) {
+        return schema.subschemaMap("$defs").values().stream().filter(definition -> definition.object().string("$dynamicAnchor").filter(name::equals)
+            .isPresent()).findFirst();
+    }
+
+    /** The type variable a {@code $dynamicRef} stands for inside the generic class {@code owner}. */
+    private Optional<TypeRef> typeVariable(ClassName owner, String dynamicRef) {
+        return Optional.ofNullable(definitions.get(owner)).map(definition -> typeParameters(definition.schema()))
+            .flatMap(parameters -> Optional.ofNullable(parameters.get(dynamicRef.replaceFirst("^#", "")))).map(TypeRef.Variable::new);
     }
 
     /** Whether {@code schema} (resolved) admits {@code null}. */
@@ -409,19 +459,32 @@ public final class TypeMapper {
             : values.stream().allMatch(value -> ((JsonNumber) value).value().compareTo(INT_MIN) >= 0 && ((JsonNumber) value).value().compareTo(INT_MAX) <= 0)
                 ? TypeRef.INTEGER : TypeRef.LONG;
         var constants = new LinkedHashMap<String, JsonValue>();
+        var descriptions = new HashMap<String, String>();
         var taken = new HashSet<String>();
+        // Constant names and documentation may come from the x-enum-varnames and x-enum-descriptions extensions.
+        var all = schema.enumValues();
+        var varnames = schema.object().array("x-enum-varnames").map(JsonArray::values).orElse(List.of());
+        var documented = schema.object().get("x-enum-descriptions");
         for (var value : values) {
+            var index = all.indexOf(value);
             var text = value.asString().orElse(value.toJson());
-            var constant = Names.constant(text);
-            constants.put(Names.unique(constant.startsWith("_") ? "VALUE" + constant : constant, taken), value);
+            var label = index < varnames.size() ? varnames.get(index).asString().orElse(text) : text;
+            var constant = Names.constant(label);
+            var javaName = Names.unique(constant.startsWith("_") ? "VALUE" + constant : constant, taken);
+            constants.put(javaName, value);
+            documented.flatMap(docs -> switch (docs) {
+                case JsonArray array -> index < array.values().size() ? array.values().get(index).asString() : Optional.<String>empty();
+                case JsonObject object -> object.string(text);
+                default -> Optional.<String>empty();
+            }).ifPresent(description -> descriptions.put(javaName, description));
         }
-        return new EnumDef(name, schema, valueType, constants);
+        return new EnumDef(name, schema, valueType, constants, descriptions);
     }
 
     private RecordDef recordDef(Schema schema, ClassName name) {
         return new RecordDef(name, schema, properties(schema, name), additional(schema).map(value -> type(value, name, "AdditionalProperty"))
             .or(() -> closure(schema).stream().anyMatch(s -> s.keyword("additionalProperties").filter(v -> v.equals(dev.openapifn.json.JsonBoolean.TRUE)).isPresent())
-                ? Optional.of(TypeRef.OBJECT) : Optional.empty()));
+                ? Optional.of(TypeRef.OBJECT) : Optional.empty()), List.copyOf(typeParameters(schema).values()));
     }
 
     private List<Property> properties(Schema schema, ClassName owner) {
@@ -498,7 +561,8 @@ public final class TypeMapper {
             if (!typed(member)) {
                 continue;
             }
-            var type = type(member, name, "Option" + index++);
+            var hint = "Option" + index++;
+            var type = type(member, name, member.title().map(Names::pascal).orElse(hint));
             var memberClass = type instanceof ClassName className && definitions.containsKey(className) ? className : wrapper(name, member, type);
             if (!members.contains(memberClass)) {
                 members.add(memberClass);

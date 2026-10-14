@@ -45,6 +45,7 @@ public final class Imports {
             case Parameterized parameterized -> qualify(parameterized.raw(), prefix) + parameterized.arguments().stream()
                 .map(this::ref).collect(Collectors.joining(", ", "<", ">"));
             case Primitive primitive -> primitive.keyword();
+            case TypeRef.Variable variable -> prefix + variable.name();
             case ArrayOf array -> ref(array.component()) + (annotation == null ? "" : " " + prefix.trim() + " ") + "[]";
         };
     }

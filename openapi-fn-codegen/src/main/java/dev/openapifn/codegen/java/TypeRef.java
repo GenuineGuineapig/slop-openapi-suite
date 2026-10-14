@@ -65,6 +65,14 @@ public sealed interface TypeRef {
         }
     }
 
+    /**
+     * A type variable such as {@code T}.
+     *
+     * @param name the variable name
+     */
+    record Variable(String name) implements TypeRef {
+    }
+
     /** A primitive type such as {@code int}. */
     record Primitive(String keyword) implements TypeRef {
     }

@@ -105,17 +105,16 @@ public record OperationModel(ApiOperation operation, String id, String method, S
 
     /** Builds the model of a path operation, grouped by its first tag; types are registered with {@code mapper}. */
     public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods) {
-        return of(operation, operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default"),
+        return of(operation, operation.displayName(), operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default"),
             operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods);
     }
 
     /**
-     * Builds the model of an operation in {@code group}; {@code fallbackName} names its Java method
-     * when it has no {@code operationId}.
+     * Builds the model of an operation in {@code group}; {@code id} identifies it at runtime and
+     * {@code fallbackName} names its Java method when it has no {@code operationId}.
      */
-    public static OperationModel of(ApiOperation operation, String group, String fallbackName, String apiPackage, TypeMapper mapper,
+    public static OperationModel of(ApiOperation operation, String id, String group, String fallbackName, String apiPackage, TypeMapper mapper,
                                     Set<String> takenMethods) {
-        var id = operation.displayName();
         var method = Names.unique(Names.camel(operation.operationId().orElse(fallbackName)), takenMethods);
         var pascal = Character.toUpperCase(method.charAt(0)) + method.substring(1);
         var requestName = ClassName.of(apiPackage, pascal + "Request");

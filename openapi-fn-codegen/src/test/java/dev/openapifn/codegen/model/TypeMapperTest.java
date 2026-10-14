@@ -142,6 +142,66 @@ class TypeMapperTest {
     }
 
     @Test
+    void dynamicAnchorsBecomeTypeParameters() {
+        var mapper = mapper("3.1.0", """
+            Address: {type: object, properties: {street: {type: string}}}
+            Page:
+              $id: 'https://example.com/Page'
+              $defs:
+                item: {$dynamicAnchor: item, not: {}}
+              type: object
+              properties:
+                items: {type: array, items: {$dynamicRef: '#item'}}
+                first: {$dynamicRef: '#item'}
+                meta: {type: object, properties: {inner: {$dynamicRef: '#item'}}}
+            Pair:
+              $id: 'https://example.com/Pair'
+              $defs:
+                left: {$dynamicAnchor: left, not: {}}
+                right: {$dynamicAnchor: right, type: string}
+                unrelated: {type: integer}
+              type: object
+              properties:
+                l: {$dynamicRef: '#left'}
+                r: {$dynamicRef: '#right'}
+            GenericList:
+              $id: 'https://example.com/GenericList'
+              $defs: {item: {$dynamicAnchor: item, not: {}}}
+              type: array
+              items: {$dynamicRef: '#item'}
+            Holder:
+              type: object
+              properties:
+                bound:
+                  $id: 'https://example.com/AddressPage'
+                  $defs: {item: {$dynamicAnchor: item, $ref: 'mem:/api.yaml#/components/schemas/Address'}}
+                  $ref: 'https://example.com/Page'
+                unbound: {$ref: 'https://example.com/Page'}
+                pair:
+                  $id: 'https://example.com/IntegerPair'
+                  $defs: {right: {$dynamicAnchor: right, type: integer}}
+                  $ref: 'https://example.com/Pair'
+                list: {$ref: 'https://example.com/GenericList'}
+            """);
+        var page = definition(mapper, model("Page"), RecordDef.class);
+        assertThat(page.typeParameters()).containsExactly("T");
+        assertThat(page.generics()).isEqualTo("<T>");
+        assertThat(page.diamond()).isEqualTo("<>");
+        assertThat(properties(mapper, "Page")).containsExactly(Map.entry("items", "@Nullable List<T>"), Map.entry("first", "@Nullable T"),
+            Map.entry("meta", "@Nullable Page.Meta"));
+        assertThat(definition(mapper, model("Page").nested("Meta"), RecordDef.class).properties().getFirst().type()).isEqualTo(TypeRef.OBJECT);
+        assertThat(definition(mapper, model("Pair"), RecordDef.class).typeParameters()).containsExactly("TLeft", "TRight");
+        assertThat(properties(mapper, "Holder")).containsExactly(
+            Map.entry("bound", "@Nullable Page<Address>"),
+            Map.entry("unbound", "@Nullable Page<Object>"),
+            Map.entry("pair", "@Nullable Pair<Object, Integer>"),
+            Map.entry("list", "@Nullable List<Object>"));
+        assertThat(new ModelRenderer(mapper).file(page)).contains("public record Page<T>(", "public static <T> Builder<T> builder()",
+            "return new Builder<>();", "public Page<T> withFirst(@Nullable T first)", "return new Page<>(items, first, meta);",
+            "public static final class Builder<T>", "public Builder<T> first(@Nullable T first)", "public Page<T> build()");
+    }
+
+    @Test
     void honoursNullableNextToReferencesInOpenApi30() {
         var mapper = mapper("3.0.3", """
             Address: {type: object, properties: {street: {type: string}}}

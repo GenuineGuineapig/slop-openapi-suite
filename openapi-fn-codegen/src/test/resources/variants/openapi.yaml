@@ -173,7 +173,65 @@ paths:
         - {name: q, in: query, required: true, schema: {type: string}}
       responses:
         '204': {description: ok}
+  /pages:
+    get:
+      operationId: getPage
+      responses:
+        '200':
+          description: A page of points, binding the generic Page to Point
+          content:
+            application/json:
+              schema:
+                $id: 'https://example.com/schemas/PointPage'
+                $defs:
+                  item: {$dynamicAnchor: item, $ref: '#/components/schemas/Point'}
+                $ref: '#/components/schemas/Page'
+  /subscriptions:
+    post:
+      operationId: subscribe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [url], properties: {url: {type: string, format: uri}}}
+      callbacks:
+        ping:
+          '{$request.body#/url}':
+            post:
+              requestBody:
+                required: true
+                content:
+                  text/plain: {schema: {type: string}}
+              responses:
+                '204': {description: received}
+        pong:
+          '{$request.body#/url}':
+            post:
+              responses:
+                '204': {description: received}
+      responses:
+        '201': {description: subscribed}
+    delete:
+      operationId: unsubscribe
+      callbacks:
+        ping:
+          '{$request.header.X-Url}':
+            post:
+              responses:
+                '204': {description: received}
+      responses:
+        '204': {description: unsubscribed}
 components:
   schemas:
     Point: {type: object, required: [x], properties: {x: {type: integer}, y: {type: integer}}}
+    Page:
+      $id: 'https://example.com/schemas/Page'
+      description: A page of any items (a generic schema)
+      $defs:
+        item: {$dynamicAnchor: item, not: {}}
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$dynamicRef: '#item'}}
+        total: {type: integer}
     Color: {type: string, enum: [red, green]}

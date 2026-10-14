@@ -86,9 +86,20 @@ public final class SchemaRegistry {
         return cache.computeIfAbsent(reference, this::lookup);
     }
 
-    /** Resolves {@code reference} relative to the base URI of {@code from}. */
+    /** Resolves {@code reference} relative to the base URI of {@code from} (see {@link #documentFallback}). */
     public Optional<Schema> resolve(Schema from, String reference) {
-        return Uris.resolve(from.baseUri(), reference).toOptional().flatMap(this::resolve);
+        return Uris.resolve(from.baseUri(), reference).toOptional().flatMap(this::resolve)
+            .or(() -> documentFallback(from, reference).flatMap(this::resolve));
+    }
+
+    /**
+     * Where a JSON Pointer reference such as {@code #/components/schemas/Pet} points when read
+     * relative to the containing document. JSON Schema resolves it against the embedded resource
+     * ({@code $id}) it occurs in, but many API descriptions mean the document; this is the fallback
+     * when the resource has no such location.
+     */
+    static Optional<URI> documentFallback(Schema from, String reference) {
+        return reference.startsWith("#/") ? Optional.of(URI.create(Uris.withoutFragment(from.document()) + reference)) : Optional.empty();
     }
 
     /** The target of {@code schema}'s {@code $ref}, if it has one. */
@@ -277,14 +288,26 @@ public final class SchemaRegistry {
                     visitDocument(document.toOptional().orElseThrow());
                     resolved = live.lookup(uri);
                 }
+                if (resolved.isEmpty()) {
+                    resolved = documentFallback(from, ref).flatMap(live::lookup);
+                    resolved.ifPresent(fallback -> warn(from, "'" + ref + "' does not exist in the schema resource " + Uris.withoutFragment(uri)
+                        + "; resolved against the document instead"));
+                }
                 resolved.ifPresentOrElse(this::visit, () -> report(from, "Cannot resolve '" + ref + "': target not found"));
             }
         }
 
         private void report(Schema from, String message) {
+            add(Diagnostic.error(message, from.document(), from.pointer()), from);
+        }
+
+        private void warn(Schema from, String message) {
+            add(Diagnostic.warning(message, from.document(), from.pointer()), from);
+        }
+
+        private void add(Diagnostic diagnostic, Schema from) {
             var document = loader.load(from.document()).toOptional();
-            diagnostics.add(Diagnostic.error(message, from.document(), from.pointer())
-                .withPosition(document.flatMap(d -> d.position(from.pointer()))));
+            diagnostics.add(diagnostic.withPosition(document.flatMap(d -> d.position(from.pointer()))));
         }
 
         SchemaRegistry registry() {

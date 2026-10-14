@@ -9,8 +9,9 @@ public record ValidationReport(List<ValidationIssue> issues) {
 
     public static final ValidationReport EMPTY = new ValidationReport(List.of());
 
+    /** Identical issues (for instance from several {@code allOf} members declaring the same constraint) are reported once. */
     public ValidationReport {
-        issues = List.copyOf(issues);
+        issues = issues.stream().distinct().toList();
     }
 
     /** Whether any issue has level {@link Level#ERROR}. */

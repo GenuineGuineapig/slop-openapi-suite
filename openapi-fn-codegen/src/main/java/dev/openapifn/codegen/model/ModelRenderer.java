@@ -170,7 +170,7 @@ public final class ModelRenderer {
         record.additionalProperties().ifPresent(value -> components.add("@" + imports.ref(JSON_ANY_SETTER) + " @" + imports.ref(JSON_ANY_GETTER) + " "
             + imports.ref(TypeRef.MAP.of(TypeRef.STRING, value), NULLABLE) + " additionalProperties"));
         out.line("@" + imports.ref(JSON_INCLUDE) + "(" + imports.ref(JSON_INCLUDE) + ".Include.NON_NULL)");
-        var header = "public record " + name.simpleName() + "(" + (components.isEmpty() ? "" : "\n        " + String.join(",\n        ", components)) + ")"
+        var header = "public record " + name.simpleName() + record.generics() + "(" + (components.isEmpty() ? "" : "\n        " + String.join(",\n        ", components)) + ")"
             + implementsClause(name, imports, "implements");
         out.open(header);
         compactConstructor(record, out, imports);
@@ -180,12 +180,13 @@ public final class ModelRenderer {
         var arguments = String.join(", ", parameters);
         if (!record.properties().isEmpty()) {
             out.blank().line("/** A builder for {@code " + name.simpleName() + "}. */");
-            out.open("public static Builder builder()").line("return new Builder();").close();
+            out.open("public static " + (record.generics().isEmpty() ? "" : record.generics() + " ") + "Builder" + record.generics() + " builder()")
+                .line("return new Builder" + record.diamond() + "();").close();
             for (var property : record.properties()) {
                 out.blank().line("/** A copy with a different {@code " + property.javaName() + "}. */");
-                out.open("public " + name.simpleName() + " with" + Character.toUpperCase(property.javaName().charAt(0)) + property.javaName().substring(1)
-                    + "(" + type(property, imports) + " " + property.javaName() + ")");
-                out.line("return new " + name.simpleName() + "(" + arguments + ");").close();
+                out.open("public " + name.simpleName() + record.generics() + " with" + Character.toUpperCase(property.javaName().charAt(0))
+                    + property.javaName().substring(1) + "(" + type(property, imports) + " " + property.javaName() + ")");
+                out.line("return new " + name.simpleName() + record.diamond() + "(" + arguments + ");").close();
             }
             builder(record, out, imports, arguments);
         }
@@ -227,11 +228,10 @@ public final class ModelRenderer {
     }
 
     /** A Java literal for a property's {@code default}, when it has a simple type. */
+    /** A Java literal a {@code null} component is replaced with: its {@code const}, else (when optional) its {@code default}. */
     private Optional<String> defaultLiteral(Property property, Imports imports) {
-        if (property.required()) {
-            return Optional.empty();
-        }
-        return property.defaultValue().flatMap(value -> literal(value, property.type(), imports));
+        return property.schema().constValue().or(() -> property.required() ? Optional.empty() : property.defaultValue())
+            .flatMap(value -> literal(value, property.type(), imports));
     }
 
     Optional<String> literal(JsonValue value, TypeRef type, Imports imports) {
@@ -269,7 +269,7 @@ public final class ModelRenderer {
     private void builder(RecordDef record, Source out, Imports imports, String arguments) {
         var name = record.name().simpleName();
         out.blank().line("/** Builds {@code " + name + "} instances; not thread-safe. */");
-        out.open("public static final class Builder");
+        out.open("public static final class Builder" + record.generics());
         for (var property : record.properties()) {
             out.line("private " + imports.ref(property.type(), NULLABLE) + " " + property.javaName() + ";");
         }
@@ -277,14 +277,16 @@ public final class ModelRenderer {
             + " additionalProperties;"));
         out.blank().open("private Builder()").close();
         for (var property : record.properties()) {
-            out.blank().open("public Builder " + property.javaName() + "(" + imports.ref(property.type(), NULLABLE) + " " + property.javaName() + ")");
+            out.blank().open("public Builder" + record.generics() + " " + property.javaName() + "(" + imports.ref(property.type(), NULLABLE) + " "
+                + property.javaName() + ")");
             out.line("this." + property.javaName() + " = " + property.javaName() + ";").line("return this;").close();
         }
         record.additionalProperties().ifPresent(value -> {
-            out.blank().open("public Builder additionalProperties(" + imports.ref(TypeRef.MAP.of(TypeRef.STRING, value), NULLABLE) + " additionalProperties)");
+            out.blank().open("public Builder" + record.generics() + " additionalProperties(" + imports.ref(TypeRef.MAP.of(TypeRef.STRING, value), NULLABLE)
+                + " additionalProperties)");
             out.line("this.additionalProperties = additionalProperties;").line("return this;").close();
         });
-        out.blank().open("public " + name + " build()").line("return new " + name + "(" + arguments + ");").close();
+        out.blank().open("public " + name + record.generics() + " build()").line("return new " + name + record.diamond() + "(" + arguments + ");").close();
         out.close();
     }
 
@@ -301,7 +303,11 @@ public final class ModelRenderer {
         out.open("public enum " + name + implementsClause(enumDef.name(), imports, "implements"));
         var constants = new ArrayList<String>();
         enumDef.constants().forEach((constant, value) -> constants.add(constant + "(" + literal(value, enumDef.valueType(), imports).orElseThrow() + ")"));
-        out.line(String.join(",\n    ", constants) + ";");
+        var names = List.copyOf(enumDef.constants().keySet());
+        for (int i = 0; i < constants.size(); i++) {
+            Optional.ofNullable(enumDef.descriptions().get(names.get(i))).ifPresent(out::javadoc);
+            out.line(constants.get(i) + (i < constants.size() - 1 ? "," : ";"));
+        }
         out.blank().line("private final " + valueType + " value;");
         out.blank().open(name + "(" + valueType + " value)").line("this.value = value;").close();
         out.blank().line("/** The JSON value. */").line("@" + imports.ref(JSON_VALUE));

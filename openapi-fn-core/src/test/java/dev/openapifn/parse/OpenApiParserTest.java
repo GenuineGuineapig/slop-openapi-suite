@@ -397,6 +397,36 @@ class OpenApiParserTest {
     }
 
     @Test
+    void pointerReferencesInEmbeddedResourcesFallBackToTheDocument() {
+        var doc = ok(v31("""
+            paths:
+              /a:
+                get:
+                  responses:
+                    '200':
+                      description: ok
+                      content:
+                        application/json:
+                          schema:
+                            $id: 'https://example.com/schemas/Wrapper'
+                            $defs:
+                              item: {$ref: '#/components/schemas/Pet'}
+                            $ref: '#/components/schemas/Pet'
+            components:
+              schemas:
+                Pet: {type: object, required: [name]}
+            """));
+        assertThat(doc.warnings()).extracting(Diagnostic::message).containsOnly("'#/components/schemas/Pet' does not exist in the schema resource "
+            + "https://example.com/schemas/Wrapper; resolved against the document instead");
+        var schema = doc.operations().getFirst().operation().responses().forStatus(200).orElseThrow().content().get("application/json").schema()
+            .orElseThrow();
+        assertThat(doc.schemas().deref(schema).required()).containsExactly("name");
+        var validator = new dev.openapifn.schema.SchemaValidator(doc.schemas());
+        assertThat(validator.validate(schema, dev.openapifn.json.JsonObject.EMPTY, dev.openapifn.schema.Direction.RESPONSE)).isNotEmpty();
+        assertThat(doc.schemas().resolve(schema, "#nowhere")).isEmpty();
+    }
+
+    @Test
     void callbacksExamplesLinksAndTags() {
         var doc = ok(v31("""
             security: [{key: []}]
@@ -443,6 +473,18 @@ class OpenApiParserTest {
         assertThat(doc.allOperations()).extracting(dev.openapifn.model.ApiOperation::kind).containsExactly(dev.openapifn.model.ApiOperation.Kind.PATH,
             dev.openapifn.model.ApiOperation.Kind.WEBHOOK, dev.openapifn.model.ApiOperation.Kind.CALLBACK, dev.openapifn.model.ApiOperation.Kind.CALLBACK);
         assertThat(doc.operation("eventHappened")).contains(doc.callbacks().getFirst().operation());
+        var ack = doc.callbacks().get(1);
+        assertThat(doc.callbacks().getFirst().id()).isEqualTo("eventHappened");
+        assertThat(ack.id()).isEqualTo("POST hook onAck PUT");
+        assertThat(doc.operation("POST hook onAck PUT")).contains(ack.operation());
+        assertThat(doc.operation("POST /a")).contains(doc.operations().getFirst());
+        assertThat(doc.operation("POST hook")).contains(doc.webhooks().getFirst());
+        assertThat(doc.operation("PUT {$request.header.X-Ack}")).isEmpty();
+        var path = doc.operations().getFirst();
+        assertThat(List.of(path.requestDirection(), path.responseDirection()))
+            .containsExactly(dev.openapifn.schema.Direction.REQUEST, dev.openapifn.schema.Direction.RESPONSE);
+        assertThat(List.of(ack.operation().requestDirection(), ack.operation().responseDirection()))
+            .containsExactly(dev.openapifn.schema.Direction.RESPONSE, dev.openapifn.schema.Direction.REQUEST);
         var callback = doc.operations().getFirst().operation().callbacks().get("onEvent");
         assertThat(callback.expressions()).containsOnlyKeys("{$request.body#/url}");
         assertThat(callback.extensions()).containsKey("x-ext");

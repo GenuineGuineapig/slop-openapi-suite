@@ -65,6 +65,28 @@ class ExampleGeneratorTest {
             ZeroMultiple: {type: integer, multipleOf: 0}
             Optional: {type: object, properties: {nothing: {type: 'null'}, something: {type: integer}}}
             PrimitiveUnion: {oneOf: [{type: string}], discriminator: {propertyName: kind}}
+            Page:
+              $id: 'https://example.com/schemas/Page'
+              $defs:
+                item: {$dynamicAnchor: item, not: {}}
+                unused: {type: string}
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$dynamicRef: '#item'}}
+            CirclePage:
+              $id: 'https://example.com/schemas/CirclePage'
+              $defs:
+                item: {$dynamicAnchor: item, $ref: 'mem:/api.yaml#/components/schemas/Circle'}
+              $ref: 'https://example.com/schemas/Page'
+            BadExample: {type: string, format: uuid, examples: [not-a-uuid, 3fa85f64-5717-4562-b3fc-2c963f66afa6]}
+            WorseExample: {type: string, format: uuid, examples: [not-a-uuid]}
+            Refined:
+              allOf:
+                - {type: object, required: [data], properties: {data: {type: array, items: {type: object}}, id: {type: integer}}}
+                - {properties: {data: {type: array, items: {$ref: '#/components/schemas/Circle'}}}}
+              properties:
+                id: {type: integer, minimum: 5}
             Deep: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: object, required: [a], properties: {a: {type: string}}}}}}}}}}}}}}}}}}}}}
         """).orElseThrow(d -> new AssertionError(d.toString()));
     private static final ExampleGenerator GENERATOR = new ExampleGenerator(API.schemas());
@@ -75,6 +97,23 @@ class ExampleGeneratorTest {
 
     private static JsonValue json(String text) {
         return Json.parse(text).orElseThrow(e -> new AssertionError(e.toString()));
+    }
+
+    @Test
+    void dynamicReferencesUseTheOutermostBinding() {
+        assertThat(example("CirclePage", Direction.RESPONSE)).contains(json("{\"items\":[{\"type\":\"example\",\"r\":1}]}"));
+        assertThat(example("Page", Direction.RESPONSE)).isEmpty();
+    }
+
+    @Test
+    void invalidDeclaredExamplesAreSkipped() {
+        assertThat(example("BadExample", Direction.NONE)).contains(json("\"3fa85f64-5717-4562-b3fc-2c963f66afa6\""));
+        assertThat(example("WorseExample", Direction.NONE)).contains(json("\"3fa85f64-5717-4562-b3fc-2c963f66afa6\""));
+    }
+
+    @Test
+    void laterDeclarationsOfAPropertyWin() {
+        assertThat(example("Refined", Direction.RESPONSE)).contains(json("{\"data\":[{\"type\":\"example\",\"r\":1}],\"id\":5}"));
     }
 
     @Test

@@ -187,6 +187,24 @@ components:
         w: {type: string, writeOnly: true}
     Color: {type: string, enum: [red, green, '']}
     Big: {enum: [1, 5000000000]}
+    Priority:
+      type: integer
+      enum: [1, 2, 3]
+      x-enum-varnames: [Low, Medium, High]
+      x-enum-descriptions: [Whenever, Soon, '*/ Now']
+    Level:
+      type: string
+      enum: [a, b, c]
+      x-enum-varnames: [alpha]
+      x-enum-descriptions: {a: First, c: Third}
+    Tier:
+      type: string
+      enum: [x, y]
+      x-enum-descriptions: [Only x]
+    Flavour:
+      type: string
+      enum: [sweet]
+      x-enum-descriptions: sweet things
     Small: {enum: [1, 2, null]}
     Mixed: {enum: [a, 1]}
     WriteOnly: {type: object, required: [secret, id], properties: {secret: {type: string, writeOnly: true}, id: {type: integer}}}

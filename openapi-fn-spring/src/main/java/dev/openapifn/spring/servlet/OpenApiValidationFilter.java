@@ -110,11 +110,12 @@ public final class OpenApiValidationFilter extends OncePerRequestFilter {
         var wrapper = new ContentCachingResponseWrapper(response);
         chain.doFilter(cached, wrapper);
         var report = runtime.get().validator().validateResponse(validation.match().get(), ServletMessages.response(wrapper));
+        if (!report.isEmpty()) {
+            LOG.warn("Response of " + request.getMethod() + " " + request.getRequestURI() + " violates the API description:\n" + report);
+        }
         if (report.hasErrors() && settings.responseMode() == ResponseMode.FAIL) {
             wrapper.resetBuffer();
             problem(wrapper, 500, "Response validation failed", request.getRequestURI(), report);
-        } else if (!report.isEmpty()) {
-            LOG.warn("Response of " + request.getMethod() + " " + request.getRequestURI() + " violates the API description:\n" + report);
         }
         wrapper.copyBodyToResponse();
     }

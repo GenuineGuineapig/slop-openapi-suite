@@ -259,10 +259,13 @@ class OpenApiValidatorTest {
 
     @Test
     void webhooksAndCombinedValidation() {
-        var adopted = HttpRequest.of("POST", "/anything").withBody("application/json", "{\"name\": \"Rex\"}");
+        // Webhook requests are written by the API provider: read-only properties belong in them, write-only ones do not.
+        var adopted = HttpRequest.of("POST", "/anything").withBody("application/json", "{\"id\": 1, \"name\": \"Rex\"}");
         assertThat(issues(VALIDATOR.validateWebhookRequest("petAdopted", adopted).report())).isEmpty();
-        assertThat(issues(VALIDATOR.validateWebhookRequest("petAdopted", adopted.withBody("application/json", "{}")).report()))
+        assertThat(issues(VALIDATOR.validateWebhookRequest("petAdopted", adopted.withBody("application/json", "{\"name\": \"Rex\"}")).report()))
             .containsExactly("request.body.schema.required@body");
+        assertThat(issues(VALIDATOR.validateWebhookRequest("petAdopted", adopted.withBody("application/json", "{\"id\": 1, \"name\": \"Rex\", "
+            + "\"secret\": \"s\"}")).report())).containsExactly("request.body.schema.writeOnly@body/secret");
         assertThat(issues(VALIDATOR.validateWebhookRequest("unknown", adopted).report())).containsExactly("request.path.missing@webhook");
         var list = listPets("?limit=0");
         assertThat(issues(VALIDATOR.validate(list, HttpResponse.of(200).withBody("application/json", "[]"))))

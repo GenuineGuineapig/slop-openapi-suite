@@ -1,5 +1,6 @@
 package dev.openapifn.model;
 
+import dev.openapifn.schema.Direction;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,6 +37,19 @@ public record ApiOperation(String path, String method, PathItem pathItem, Operat
 
     public Optional<String> operationId() {
         return operation.operationId();
+    }
+
+    /**
+     * How {@code readOnly} and {@code writeOnly} apply to the request: webhook and callback requests
+     * are written by the API provider, like responses.
+     */
+    public Direction requestDirection() {
+        return kind == Kind.PATH ? Direction.REQUEST : Direction.RESPONSE;
+    }
+
+    /** How {@code readOnly} and {@code writeOnly} apply to responses: webhook and callback responses come from the receiver. */
+    public Direction responseDirection() {
+        return kind == Kind.PATH ? Direction.RESPONSE : Direction.REQUEST;
     }
 
     /** A human readable identifier: the operation id, else {@code METHOD path}. */

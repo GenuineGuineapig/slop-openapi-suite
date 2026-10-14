@@ -274,7 +274,7 @@ public final class OpenApiValidator {
             }
             return Optional.empty();
         }
-        return body(content.get(), request.contentType(), declared.get().content(), Direction.REQUEST, "request", issues);
+        return body(content.get(), request.contentType(), declared.get().content(), operation.requestDirection(), "request", issues);
     }
 
     private void accept(ApiOperation operation, HttpRequest request, Issues issues) {
@@ -331,7 +331,7 @@ public final class OpenApiValidator {
         } else if (content.isEmpty()) {
             issues.add(IssueKeys.RESPONSE_BODY_MISSING, "the response " + response.status() + " requires a body", "body");
         } else {
-            body(content.get(), response.contentType(), mediaTypes, Direction.RESPONSE, "response", issues);
+            body(content.get(), response.contentType(), mediaTypes, match.operation().responseDirection(), "response", issues);
         }
         return issues.report();
     }

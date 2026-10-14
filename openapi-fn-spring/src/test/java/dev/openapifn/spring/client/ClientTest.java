@@ -15,7 +15,6 @@ import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.spring.FilePart;
-import dev.openapifn.spring.OpenApiValidationException;
 import dev.openapifn.validation.OpenApiValidator;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -209,10 +208,12 @@ class ClientTest {
         setup.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         var valid = ClientCall.of("POST", "/pets").body("application/json", Map.of("name", "Rex"));
         assertThat(setup.client().<Map<String, Integer>>exchange(valid, r -> r.body(new TypeReference<Map<String, Integer>>() { }))).containsEntry("id", 1);
-        assertThatThrownBy(() -> setup.client().exchange(valid, r -> null)).isInstanceOf(OpenApiValidationException.class)
+        assertThatThrownBy(() -> setup.client().exchange(valid, r -> null)).isInstanceOf(ClientValidationException.class)
             .hasMessageContaining("response.body.schema.required");
         assertThatThrownBy(() -> setup.client().exchange(ClientCall.of("POST", "/pets").body("application/json", Map.of()), r -> null))
-            .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("request.body.schema.required");
+            .isInstanceOf(ClientValidationException.class).hasMessageContaining("request.body.schema.required")
+            .hasMessageStartingWith("Request POST https://api.example.com/v1/pets violates the API description")
+            .satisfies(e -> assertThat(((ClientValidationException) e).report().hasErrors()).isTrue());
         var lenient = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, false)));
         lenient.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         lenient.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess());
@@ -224,9 +225,9 @@ class ClientTest {
         assertThat(subscriber.baseUrl()).isEqualTo("https://subscriber.example.com/hooks");
         var created = ClientCall.of("POST", "").operation("petCreated").param(ParameterSerializer.Spec.of("x", ParameterLocation.QUERY), 1);
         assertThatThrownBy(() -> subscriber.exchange(created.body("application/json", Map.of()), r -> null))
-            .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("request.body.schema.required");
+            .isInstanceOf(ClientValidationException.class).hasMessageContaining("request.body.schema.required");
         assertThatThrownBy(() -> subscriber.exchange(created.body("application/json", Map.of("id", 1)), r -> null))
-            .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("response.status.unknown");
+            .isInstanceOf(ClientValidationException.class).hasMessageContaining("response.status.unknown");
         var named = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
         named.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
         named.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
@@ -234,7 +235,7 @@ class ClientTest {
         assertThat(named.client().<Integer>exchange(valid.operation("createPet"), ClientResponse::status)).isEqualTo(200);
         var unknown = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
         unknown.server().expect(requestTo("https://api.example.com/v1/other")).andRespond(withSuccess());
-        assertThatThrownBy(() -> unknown.client().exchange(ClientCall.of("GET", "/other"), r -> null)).isInstanceOf(OpenApiValidationException.class);
+        assertThatThrownBy(() -> unknown.client().exchange(ClientCall.of("GET", "/other"), r -> null)).isInstanceOf(ClientValidationException.class);
     }
 
     @Test

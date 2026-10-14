@@ -29,6 +29,7 @@ class ValidationModelTest {
         var warning = new ValidationIssue("c", Level.WARN, "hmm", "");
         assertThat(error).hasToString("ERROR a.b [body/x]: broken");
         assertThat(warning).hasToString("WARN c: hmm");
+        assertThat(new ValidationReport(List.of(warning, warning, error)).issues()).containsExactly(warning, error);
         var report = new ValidationReport(List.of(warning)).merge(new ValidationReport(List.of(error)));
         assertThat(report.hasErrors()).isTrue();
         assertThat(report.errors()).containsExactly(error);

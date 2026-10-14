@@ -68,8 +68,8 @@ public final class EndToEnd {
             new PostStockLowRequest(new PostStockLowRequest.Body("sku-1"))).status());
         results.add("callback:" + callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(tom))
             .status());
-        results.add("put:" + ((CreatePetPetCreatedPutResponse.Ok) callbacks.createPetPetCreatedPut(URI.create(root + "/callbacks/createPetPetCreatedPut"),
-            new CreatePetPetCreatedPutRequest("hi"))).body());
+        results.add("put:" + ((PetCreatedPutResponse.Ok) callbacks.petCreatedPut(URI.create(root + "/callbacks/petCreatedPut"),
+            new PetCreatedPutRequest("hi"))).body());
         try {
             callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(new Pet.Default(null, "", Kind.BIRD,
                 null, null)));

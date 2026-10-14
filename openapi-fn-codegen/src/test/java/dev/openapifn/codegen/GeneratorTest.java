@@ -122,7 +122,10 @@ class GeneratorTest {
                 """));
         assertThat(compilation.success).as(compilation.diagnostics).isTrue();
         assertThat(compilation.diagnostics).as("warnings").isEmpty();
-        var summary = Launch.tests(compilation, "org.example.variants.api.DefaultControllerTest");
+        var summary = Launch.tests(compilation, "org.example.variants.api.DefaultControllerTest", "org.example.variants.api.CallbacksControllerTest");
+        assertThat(compilation.file("org/example/variants/api/GetPageResponse.java")).contains("Page<Point> body");
+        assertThat(compilation.file("org/example/variants/api/CallbacksApi.java")).contains("PingResponse ping(PingRequest request);",
+            "PongResponse pong();", "Ping2Response ping2();");
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
     }
 }

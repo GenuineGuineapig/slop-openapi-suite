@@ -109,7 +109,7 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi,
     }
 
     @Override
-    public CreatePetPetCreatedPutResponse createPetPetCreatedPut(CreatePetPetCreatedPutRequest request) {
-        return CreatePetPetCreatedPutResponse.ok("ack:" + request.body());
+    public PetCreatedPutResponse petCreatedPut(PetCreatedPutRequest request) {
+        return PetCreatedPutResponse.ok("ack:" + request.body());
     }
 }

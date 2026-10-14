@@ -61,9 +61,15 @@ public record OpenApiDocument(URI uri, OpenApi model, SchemaRegistry schemas, Li
         return all;
     }
 
-    /** The operation (path, webhook or callback) with the given {@code operationId}. */
-    public Optional<ApiOperation> operation(String operationId) {
-        return allOperations().stream().filter(op -> op.operationId().filter(operationId::equals).isPresent()).findFirst();
+    /**
+     * The operation (path, webhook or callback) an identifier names: its {@code operationId}, else
+     * {@code METHOD path} for path and webhook operations and {@link CallbackOperation#id()} for callbacks.
+     */
+    public Optional<ApiOperation> operation(String id) {
+        var all = allOperations();
+        return all.stream().filter(op -> op.operationId().filter(id::equals).isPresent()).findFirst()
+            .or(() -> all.stream().filter(op -> op.kind() != Kind.CALLBACK && op.displayName().equals(id)).findFirst())
+            .or(() -> callbacks().stream().filter(callback -> callback.id().equals(id)).map(CallbackOperation::operation).findFirst());
     }
 
     private List<ApiOperation> flatten(Map<String, PathItem> items, Kind kind) {

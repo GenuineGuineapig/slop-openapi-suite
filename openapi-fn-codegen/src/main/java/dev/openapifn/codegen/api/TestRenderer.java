@@ -130,7 +130,8 @@ public final class TestRenderer {
         if (variant.body().isPresent()) {
             var body = variant.body().get();
             var mediaType = OperationModel.primary(variant.response().content()).orElseThrow();
-            var value = value(body, variant.response().content().get(mediaType).itemSchema(), Direction.RESPONSE, imports, concrete(mediaType));
+            var value = value(body, variant.response().content().get(mediaType).itemSchema(), operation.operation().responseDirection(), imports,
+                concrete(mediaType));
             if (value.isEmpty()) {
                 return Optional.empty();
             }
@@ -138,7 +139,7 @@ public final class TestRenderer {
         }
         for (var header : variant.headers().values()) {
             if (header.required()) {
-                var value = value(header, Optional.empty(), Direction.RESPONSE, imports, "text/plain");
+                var value = value(header, Optional.empty(), operation.operation().responseDirection(), imports, "text/plain");
                 if (value.isEmpty()) {
                     return Optional.empty();
                 }
@@ -182,7 +183,7 @@ public final class TestRenderer {
                 continue;
             }
             var example = parameter.example().or(() -> parameter.examples().values().stream().flatMap(e -> e.data().stream()).findFirst())
-                .or(() -> parameter.effectiveSchema().flatMap(schema -> examples.example(schema, Direction.REQUEST)));
+                .or(() -> parameter.effectiveSchema().flatMap(schema -> examples.example(schema, op.requestDirection())));
             if (example.isEmpty()) {
                 return Optional.empty();
             }
@@ -218,7 +219,7 @@ public final class TestRenderer {
         cookies.forEach(cookie -> expression.append("\n            .cookie(new ").append(imports.ref(COOKIE)).append("(")
             .append(Names.literal(cookie.getKey())).append(", ").append(Names.literal(cookie.getValue())).append("))"));
         if (body.isPresent()) {
-            var content = content(body.get(), imports);
+            var content = content(body.get(), op.requestDirection(), imports);
             if (content.isEmpty()) {
                 return Optional.empty();
             }
@@ -227,15 +228,15 @@ public final class TestRenderer {
         return Optional.of(expression.toString());
     }
 
-    private Optional<String> content(OperationModel.BodyModel body, Imports imports) {
+    private Optional<String> content(OperationModel.BodyModel body, Direction direction, Imports imports) {
         var mediaType = concrete(body.contentType());
         var schema = body.mediaType().schema();
         if (body.property().type().equals(ApiRenderer.FILE_PART)) {
             return Optional.of("\n            .contentType(" + Names.literal(mediaType) + ")\n            .content(\"example\".getBytes("
                 + imports.ref(STANDARD_CHARSETS) + ".UTF_8))");
         }
-        var example = schema.flatMap(s -> examples.example(s, Direction.REQUEST)).or(() -> body.mediaType().example())
-            .or(() -> body.mediaType().itemSchema().map(item -> examples.example(item, Direction.REQUEST)).flatMap(e -> e.map(JsonArray::of)));
+        var example = schema.flatMap(s -> examples.example(s, direction)).or(() -> body.mediaType().example())
+            .or(() -> body.mediaType().itemSchema().map(item -> examples.example(item, direction)).flatMap(e -> e.map(JsonArray::of)));
         if (example.isEmpty()) {
             return Optional.empty();
         }

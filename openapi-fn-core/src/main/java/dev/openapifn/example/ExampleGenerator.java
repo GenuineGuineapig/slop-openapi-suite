@@ -14,17 +14,21 @@ import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.schema.SchemaValidator;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * Derives example values from schemas: declared examples, defaults, constants and enums first,
- * otherwise a synthesized value that respects types, formats, bounds, lengths, required
- * properties, discriminators and {@code readOnly}/{@code writeOnly} for the direction. Results
- * are validated; values that do not conform (for instance because of a {@code pattern}) are not
+ * Derives example values from schemas: the first declared example, constant, default or enum
+ * value that is valid, otherwise a synthesized value that respects types, formats, bounds,
+ * lengths, required properties, discriminators, dynamic references and
+ * {@code readOnly}/{@code writeOnly} for the direction. When several {@code allOf} members declare
+ * a property, later ones refine earlier ones and the schema's own declaration wins. Results are
+ * validated; values that do not conform (for instance because of a {@code pattern}) are not
  * returned.
  */
 public final class ExampleGenerator {
@@ -66,16 +70,26 @@ public final class ExampleGenerator {
 
     /** An example for {@code schema} that is valid in {@code direction}, if one can be derived. */
     public Optional<JsonValue> example(Schema schema, Direction direction) {
-        var value = generate(schema, direction, 0, new HashSet<>());
+        var value = generate(schema, direction, 0, new HashSet<>(), List.of());
         return validator.validate(schema, value, direction).isEmpty() ? Optional.of(value) : Optional.empty();
     }
 
-    private JsonValue generate(Schema schema, Direction direction, int depth, Set<String> active) {
+    /**
+     * {@code scope} lists the schemas entered so far that declare dynamic anchors, outermost first:
+     * a {@code $dynamicRef} uses the outermost binding, as validation does.
+     */
+    private JsonValue generate(Schema schema, Direction direction, int depth, Set<String> active, List<Schema> scope) {
+        var bound = schema.dynamicRef().flatMap(ref -> scope.stream().flatMap(s -> dynamicAnchor(s, ref.replaceFirst("^#", "")).stream()).findFirst());
+        if (bound.isPresent()) {
+            return generate(bound.get(), direction, depth, active, scope);
+        }
         var resolved = registry.deref(schema);
-        var declared = resolved.examples().stream().findFirst()
-            .or(resolved::constValue)
-            .or(resolved::defaultValue)
-            .or(() -> resolved.enumValues().stream().filter(v -> !v.isNull()).findFirst());
+        var inner = scoped(scoped(scope, schema), resolved);
+        var declared = java.util.stream.Stream.of(resolved.examples().stream(), resolved.constValue().stream(), resolved.defaultValue().stream(),
+                resolved.enumValues().stream().filter(v -> !v.isNull()))
+            .flatMap(values -> values)
+            .filter(value -> validator.validate(resolved, value, direction).isEmpty())
+            .findFirst();
         if (declared.isPresent()) {
             return declared.get();
         }
@@ -86,16 +100,32 @@ public final class ExampleGenerator {
         try {
             var choice = resolved.subschemaList("oneOf").stream().findFirst().or(() -> resolved.subschemaList("anyOf").stream().findFirst());
             if (choice.isPresent()) {
-                return withDiscriminator(resolved, choice.get(), generate(choice.get(), direction, depth, active));
+                return withDiscriminator(resolved, choice.get(), generate(choice.get(), direction, depth, active, inner));
             }
             return switch (shapes.shape(resolved)) {
-                case OBJECT -> object(resolved, direction, depth, active);
-                case ARRAY -> array(resolved, direction, depth, active);
+                case OBJECT -> object(resolved, direction, depth, active, inner);
+                case ARRAY -> array(resolved, direction, depth, active, inner);
                 case PRIMITIVE -> primitive(resolved);
             };
         } finally {
             active.remove(key);
         }
+    }
+
+    /** {@code scope} extended by {@code schema} if it declares dynamic anchors (and is not in it yet). */
+    private static List<Schema> scoped(List<Schema> scope, Schema schema) {
+        if (schema.subschemaMap("$defs").values().stream().noneMatch(definition -> definition.object().has("$dynamicAnchor")) || scope.contains(schema)) {
+            return scope;
+        }
+        var extended = new ArrayList<>(scope);
+        extended.add(schema);
+        return List.copyOf(extended);
+    }
+
+    /** The {@code $defs} entry of {@code schema} declaring the dynamic anchor {@code name}. */
+    private static Optional<Schema> dynamicAnchor(Schema schema, String name) {
+        return schema.subschemaMap("$defs").values().stream().filter(definition -> definition.object().string("$dynamicAnchor").filter(name::equals)
+            .isPresent()).findFirst();
     }
 
     private JsonValue withDiscriminator(Schema owner, Schema choice, JsonValue value) {
@@ -111,16 +141,20 @@ public final class ExampleGenerator {
         return object.with(discriminator.get().propertyName(), JsonString.of(name));
     }
 
-    private JsonValue object(Schema schema, Direction direction, int depth, Set<String> active) {
+    private JsonValue object(Schema schema, Direction direction, int depth, Set<String> active, List<Schema> scope) {
         var members = new LinkedHashMap<String, JsonValue>();
         var required = new HashSet<String>();
-        shapes.closure(schema).forEach(s -> required.addAll(s.required()));
+        var closure = shapes.closure(schema);
+        closure.forEach(s -> required.addAll(s.required()));
+        var precedence = new ArrayList<>(closure.subList(1, closure.size()));
+        precedence.add(closure.getFirst());
         for (var name : shapes.propertyNames(schema)) {
-            var property = shapes.property(schema, name).orElseThrow();
-            var resolved = registry.deref(property);
-            var excluded = (direction == Direction.REQUEST && resolved.readOnly()) || (direction == Direction.RESPONSE && resolved.writeOnly());
+            var declarations = precedence.stream().flatMap(s -> Optional.ofNullable(s.subschemaMap("properties").get(name)).stream()).toList();
+            var property = declarations.getLast();
+            var excluded = declarations.stream().map(registry::deref).anyMatch(declaration -> (direction == Direction.REQUEST && declaration.readOnly())
+                || (direction == Direction.RESPONSE && declaration.writeOnly()));
             if (!excluded && (required.contains(name) || depth == 0)) {
-                var value = generate(property, direction, depth + 1, active);
+                var value = generate(property, direction, depth + 1, active, scope);
                 if (!value.isNull() || required.contains(name)) {
                     members.put(name, value);
                 }
@@ -129,9 +163,9 @@ public final class ExampleGenerator {
         return new JsonObject(members);
     }
 
-    private JsonValue array(Schema schema, Direction direction, int depth, Set<String> active) {
+    private JsonValue array(Schema schema, Direction direction, int depth, Set<String> active, List<Schema> scope) {
         var count = Math.max(1, number(schema, "minItems").map(BigDecimal::intValue).orElse(1));
-        var item = shapes.items(schema).map(items -> generate(items, direction, depth + 1, active)).orElse(JsonString.of("item"));
+        var item = shapes.items(schema).map(items -> generate(items, direction, depth + 1, active, scope)).orElse(JsonString.of("item"));
         if (count == 1 || !shapes.closure(schema).stream().anyMatch(s -> s.object().bool("uniqueItems").orElse(false))) {
             return new JsonArray(java.util.Collections.nCopies(count, item));
         }

@@ -4,7 +4,6 @@ import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
 import dev.openapifn.model.ApiOperation;
-import dev.openapifn.spring.OpenApiValidationException;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import java.io.ByteArrayInputStream;
@@ -45,7 +44,7 @@ public final class OpenApiClientValidationInterceptor implements ClientHttpReque
         var validation = operation(request).map(operation -> validator.validateRequest(new OperationMatch(operation, Map.of()), message))
             .orElseGet(() -> validator.validateRequest(message));
         if (validation.report().hasErrors()) {
-            throw new OpenApiValidationException(validation.report());
+            throw new ClientValidationException("Request " + request.getMethod() + " " + uri + " violates the API description", validation.report());
         }
         var response = execution.execute(request, body);
         var content = response.getBody().readAllBytes();
@@ -55,7 +54,7 @@ public final class OpenApiClientValidationInterceptor implements ClientHttpReque
             var report = validator.validateResponse(match, new HttpResponse(status, headers(response.getHeaders()),
                 content.length == 0 ? Optional.empty() : Optional.of(content)));
             if (report.hasErrors() && failOnInvalidResponse) {
-                throw new OpenApiValidationException(report);
+                throw new ClientValidationException("Response of " + request.getMethod() + " " + uri + " violates the API description", report);
             }
             if (!report.isEmpty()) {
                 LOG.warn("Response of " + request.getMethod() + " " + uri + " violates the API description:\n" + report);

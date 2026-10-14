@@ -8,7 +8,6 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import dev.openapifn.http.Headers;
 import dev.openapifn.spring.OpenApiRuntimes;
-import dev.openapifn.spring.OpenApiValidationException;
 import dev.openapifn.spring.autoconfigure.OpenApiFnAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -36,7 +35,7 @@ class OpenApiClientsTest {
                 assertThat(http.baseUrl()).isEqualTo("https://pets.test/api");
                 server.expect(requestTo("https://pets.test/api/pets/1")).andRespond(withSuccess("{\"name\":1}", MediaType.APPLICATION_JSON));
                 var call = ClientCall.of("GET", "/pets/1");
-                assertThatThrownBy(() -> http.exchange(call, response -> null)).isInstanceOf(OpenApiValidationException.class);
+                assertThatThrownBy(() -> http.exchange(call, response -> null)).isInstanceOf(ClientValidationException.class);
                 assertThat(clients.http("other", "https://default.test").baseUrl()).isEqualTo("https://default.test");
                 assertThat(context.getBean(OpenApiRuntimes.class).all()).containsKey("pets");
             });
