@@ -27,8 +27,7 @@ import java.util.Set;
  *   <li>in schemas, a string {@code discriminator} becomes a Discriminator Object, {@code x-nullable}
  *       becomes {@code nullable} and {@code type: file} a binary string</li>
  * </ul>
- * Only the root document is converted: referenced documents are expected to hold schemas (or other
- * objects valid in both versions).
+ * Descriptions spanning several documents are made self-contained first (see {@link Swagger2Bundler}).
  */
 final class Swagger2Converter {
 

@@ -23,7 +23,7 @@ usually because the specification gives it none (descriptions, documentation lin
 | Path Item `$ref` (with sibling merging) | Validation, runtime, codegen |
 | `components` of every kind, including `pathItems` and `mediaTypes` (3.2) | Validation, runtime, codegen (by reference) |
 | `jsonSchemaDialect` | Selects the dialect (draft 4 to 2020-12, OAS 3.0); unknown dialects fall back to 2020-12 with a warning |
-| Swagger / OpenAPI 2.0 | Converted to 3.0 (see `Swagger2Converter`); referenced documents must be valid in both versions |
+| Swagger / OpenAPI 2.0 | Bundled into one document (external schemas copied into `definitions`, external parameters, responses and path items inlined; see `Swagger2Bundler`) and converted to 3.0 (`Swagger2Converter`) |
 
 ## OpenAPI, Info, Servers, Tags
 

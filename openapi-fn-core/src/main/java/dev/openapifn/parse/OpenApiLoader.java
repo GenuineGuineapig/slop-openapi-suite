@@ -74,7 +74,9 @@ public record OpenApiLoader(ResourceLoader resources) {
         var diagnostics = new ArrayList<Diagnostic>();
         if (Swagger2Converter.applies(document.root())) {
             // Swagger / OpenAPI 2.0 is converted to 3.0 first; everything else then works on 3.x.
-            var conversion = Swagger2Converter.convert((JsonObject) document.root());
+            var bundled = Swagger2Bundler.bundle((JsonObject) document.root(), document.uri(),
+                location -> loader.load(location).toOptional().map(Document::root));
+            var conversion = Swagger2Converter.convert(bundled);
             document = new Document(document.uri(), conversion.root(), document.sourceMap());
             loader.register(document);
             var converted = document;

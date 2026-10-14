@@ -1,0 +1,31 @@
+swagger: '2.0'
+info: {title: Multi-document petstore, version: 1.0.0}
+basePath: /v1
+paths:
+  /pets:
+    $ref: 'paths/pets.yaml'
+    x-note: kept
+  /pets/{id}:
+    get:
+      operationId: getPet
+      parameters:
+        - $ref: 'parameters.yaml#/id'
+        - $ref: '#/parameters/trace'
+      responses:
+        '200': {description: The pet, schema: {$ref: 'schemas/pet.yaml'}}
+        '404': {$ref: 'responses.yaml#/NotFound'}
+        default: {$ref: '#/responses/Problem'}
+  /owners:
+    post:
+      operationId: createOwner
+      parameters:
+        - $ref: 'parameters.yaml#/ownerBody'
+        - $ref: 'parameters.yaml#/traceAlias'
+      responses:
+        '201': {description: Created, schema: {$ref: 'common.yaml#/definitions/Owner'}}
+parameters:
+  trace: {name: X-Trace, in: header, type: string}
+responses:
+  Problem: {description: Problem, schema: {$ref: 'common.yaml#/definitions/Error'}}
+definitions:
+  Owner: {type: object, properties: {name: {type: string}}}

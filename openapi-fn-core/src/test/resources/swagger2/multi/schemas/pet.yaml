@@ -1,0 +1,10 @@
+type: object
+required: [name]
+properties:
+  name: {type: string}
+  tag: {type: string, x-nullable: true}
+  owner: {$ref: '../api.yaml#/definitions/Owner'}
+  children: {type: array, items: {$ref: 'pet.yaml'}}
+  kind: {$ref: '#/definitions/Kind'}
+definitions:
+  Kind: {type: string, enum: [cat, dog]}

@@ -1,0 +1,10 @@
+swagger: '2.0'
+info: {title: Shared definitions, version: 1.0.0}
+paths: {}
+definitions:
+  Owner:
+    type: object
+    discriminator: kind
+    required: [kind]
+    properties: {kind: {type: string}, email: {type: string}}
+  Error: {type: object, properties: {message: {type: string}}}

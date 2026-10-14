@@ -1,0 +1,8 @@
+get:
+  operationId: listPets
+  parameters:
+    - $ref: '../parameters.yaml#/limit'
+  responses:
+    '200':
+      description: Pets
+      schema: {type: array, items: {$ref: '../schemas/pet.yaml'}}

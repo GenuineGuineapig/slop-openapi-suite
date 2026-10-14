@@ -195,4 +195,22 @@ class GeneratorTest {
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
         assertThat(summary.succeeded()).isGreaterThanOrEqualTo(10);
     }
+
+    @Test
+    void multiDocumentSwagger2DescriptionsAreBundledAndGenerated() {
+        var api = Compilation.load("classpath:swagger2/multi/api.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("multi", "org.example.multi"), dir, Map.of("org/example/multi/MultiApplication.java", """
+            package org.example.multi;
+
+            @org.springframework.boot.autoconfigure.SpringBootApplication
+            public class MultiApplication {
+            }
+            """));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        assertThat(compilation.file("org/example/multi/model/Pet.java")).contains("List<Pet> children", "Owner owner", "Kind kind");
+        var summary = Launch.tests(compilation, "org.example.multi.api.DefaultControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+        assertThat(summary.succeeded()).isGreaterThanOrEqualTo(3);
+    }
 }

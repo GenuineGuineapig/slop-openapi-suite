@@ -1,0 +1,5 @@
+id: {name: id, in: path, required: true, type: integer}
+limit: {$ref: '#/limitDefinition'}
+limitDefinition: {name: limit, in: query, type: integer, maximum: 100}
+ownerBody: {name: owner, in: body, required: true, schema: {$ref: 'common.yaml#/definitions/Owner'}}
+traceAlias: {$ref: 'api.yaml#/parameters/trace'}

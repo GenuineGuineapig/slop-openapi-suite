@@ -239,9 +239,8 @@ Every module is built with 100% line, branch, instruction and method coverage, e
   `mutualTLS` requirements count as satisfied.
 * **Sequential media types are not streamed.** JSON Lines, SSE and positional multipart bodies are
   read and written whole (a `List`).
-* **Swagger 2.0:** only the root document is converted, so documents it references must be valid
-  in both versions (plain schemas are). `collectionFormat: tsv`, and non-`csv` formats of header
-  and path parameters, have no 3.0 equivalent and become `csv` with a warning.
+* **Swagger 2.0:** `collectionFormat: tsv`, and non-`csv` formats of header and path parameters,
+  have no 3.0 equivalent and become `csv` with a warning.
 * **Generic records from `$dynamicRef`:** type variables are used for the template's own
   properties. Inline objects nested in the template fall back to the anchor's default.
 * **Remote references are fetched while generating.** A Gradle task whose description uses them is
