@@ -106,9 +106,9 @@ public record OperationModel(ApiOperation operation, String id, String method, S
         Map.entry(507, "InsufficientStorage"), Map.entry(511, "NetworkAuthenticationRequired"));
 
     /** Builds the model of a path operation, grouped by its first tag; types are registered with {@code mapper}. */
-    public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods) {
+    public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods, ClassName stream) {
         return of(operation, operation.displayName(), operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default"),
-            operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods);
+            operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods, stream);
     }
 
     /**
@@ -116,7 +116,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
      * {@code fallbackName} names its Java method when it has no {@code operationId}.
      */
     public static OperationModel of(ApiOperation operation, String id, String group, String fallbackName, String apiPackage, TypeMapper mapper,
-                                    Set<String> takenMethods) {
+                                    Set<String> takenMethods, ClassName stream) {
         var method = Names.unique(Names.camel(operation.operationId().orElse(fallbackName)), takenMethods);
         var pascal = Character.toUpperCase(method.charAt(0)) + method.substring(1);
         var requestName = ClassName.of(apiPackage, pascal + "Request");
@@ -135,15 +135,15 @@ public record OperationModel(ApiOperation operation, String id, String method, S
         var body = operation.operation().requestBody().flatMap(requestBody -> primary(requestBody.content()).map(contentType -> {
             var mediaType = requestBody.content().get(contentType);
             var schema = mediaType.schema().orElse(empty());
-            var type = bodyType(contentType, mediaType, mapper, requestName, "Body");
+            var type = bodyType(contentType, mediaType, mapper, requestName, "Body", stream);
             return new BodyModel(contentType, mediaType, new Property("body", "body", type, requestBody.required(),
                 !requestBody.required() || mapper.nullable(schema), schema), List.copyOf(requestBody.content().keySet()));
         }));
         var request = parameters.isEmpty() && body.isEmpty() ? Optional.<ClassName>empty() : Optional.of(requestName);
-        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants(operation, mapper, responseName));
+        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants(operation, mapper, responseName, stream));
     }
 
-    private static List<VariantModel> variants(ApiOperation operation, TypeMapper mapper, ClassName responseName) {
+    private static List<VariantModel> variants(ApiOperation operation, TypeMapper mapper, ClassName responseName, ClassName stream) {
         var responses = operation.operation().responses();
         var entries = new ArrayList<Map.Entry<String, Response>>(responses.byStatus().entrySet());
         responses.defaultResponse().ifPresent(response -> entries.add(Map.entry("default", response)));
@@ -155,7 +155,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             var response = entry.getValue();
             var body = primary(response.content()).map(contentType -> {
                 var mediaType = response.content().get(contentType);
-                var type = bodyType(contentType, mediaType, mapper, responseName, name + "Body");
+                var type = bodyType(contentType, mediaType, mapper, responseName, name + "Body", stream);
                 return new Property("body", "body", type, true, mapper.nullable(mediaType.schema().orElse(empty())), mediaType.schema().orElse(empty()));
             });
             var headers = new java.util.LinkedHashMap<String, Property>();
@@ -190,16 +190,16 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     }
 
     /**
-     * The Java type of a body of {@code contentType}: sequential media types are streams of their
+     * The Java type of a body of {@code contentType}: sequential media types are streams ({@code stream}) of their
      * items (described by the {@code itemSchema}, or by the {@code items} of an array {@code schema}),
      * structured and text content follow the schema, other text is a {@code String} and everything
      * else (and {@code format: binary}) a {@code FilePart}.
      */
-    static TypeRef bodyType(String contentType, MediaType mediaType, TypeMapper mapper, ClassName owner, String hint) {
+    static TypeRef bodyType(String contentType, MediaType mediaType, TypeMapper mapper, ClassName owner, String hint, ClassName stream) {
         var type = ContentType.parse(contentType);
         var item = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(schema -> new SchemaShapes(mapper.registry()).items(schema)));
         if (type.filter(ItemFramer::isSequentialMediaType).isPresent() && item.isPresent()) {
-            return TypeRef.STREAM.of(mapper.type(item.get(), owner, hint + "Item"));
+            return stream.of(mapper.type(item.get(), owner, hint + "Item"));
         }
         var text = type.filter(t -> t.type().equals("text") && !t.isXml()).isPresent();
         var structured = type.filter(t -> t.isJson() || t.isXml() || t.type().equals("multipart")
@@ -217,9 +217,9 @@ public record OperationModel(ApiOperation operation, String id, String method, S
         return Schema.at(JsonObject.EMPTY, uri, JsonPointer.ROOT, uri, Dialect.DRAFT_2020_12);
     }
 
-    /** The item type of a streamed body type ({@code Stream<T>}), if it is one. */
+    /** The item type of a streamed body type ({@code Stream<T>}, or {@code Flux<T>} for WebFlux), if it is one. */
     public static Optional<TypeRef> streamed(TypeRef type) {
-        return type instanceof TypeRef.Parameterized parameterized && parameterized.raw().equals(TypeRef.STREAM)
+        return type instanceof TypeRef.Parameterized parameterized && (parameterized.raw().equals(TypeRef.STREAM) || parameterized.raw().equals(TypeRef.FLUX))
             ? Optional.of(parameterized.arguments().getFirst()) : Optional.empty();
     }
 

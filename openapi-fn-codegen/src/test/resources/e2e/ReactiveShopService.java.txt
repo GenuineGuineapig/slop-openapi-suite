@@ -1,0 +1,122 @@
+package com.example.shop;
+
+import com.example.shop.api.*;
+import com.example.shop.model.*;
+import dev.openapifn.spring.FilePart;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+@Component
+public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi, CallbacksApi {
+
+    static final UUID ORDER = UUID.fromString("3fa85f64-5717-4562-b3fc-2c963f66afa6");
+
+    private static List<Pet> pets() {
+        return List.of(
+            Cat.builder().id(1L).name("Tom").kind(Kind.CAT).birthday(LocalDate.of(2020, 1, 2)).indoor(true).build(),
+            Dog.builder().id(2L).name("Rex").kind(Kind.DOG).barks(true).owner(new Pet.Owner("Ann", "ann@example.com")).build(),
+            new Pet.Default(3L, "Tweety", Kind.BIRD, null, null));
+    }
+
+    @Override
+    public Mono<ListPetsResponse> listPets(ListPetsRequest request) {
+        var all = pets();
+        var limit = request.limit() == null ? 20 : request.limit();
+        return Mono.just(ListPetsResponse.ok(all.subList(0, Math.min(limit, all.size())), (long) all.size(), null));
+    }
+
+    @Override
+    public Mono<CreatePetResponse> createPet(CreatePetRequest request) {
+        var pet = request.body();
+        if (pet.name().equals("error")) {
+            return Mono.just(CreatePetResponse.status4XX(422, new Problem("Invalid pet", 422, "name must not be 'error'")));
+        }
+        var created = switch (pet) {
+            case Cat cat -> cat.withId(10L);
+            case Dog dog -> dog.withId(11L);
+            case Pet.Default other -> other.withId(12L);
+        };
+        return Mono.just(CreatePetResponse.created(created, "/pets/" + created.id()));
+    }
+
+    @Override
+    public Mono<SearchPetsResponse> searchPets(SearchPetsRequest request) {
+        return Mono.just(SearchPetsResponse.ok(pets().stream().filter(p -> p.name().contains(request.body().text())).toList()));
+    }
+
+    @Override
+    public Mono<GetPetResponse> getPet(GetPetRequest request) {
+        return Mono.just(pets().stream().filter(p -> p.id() == request.petId()).findFirst()
+            .<GetPetResponse>map(GetPetResponse::ok)
+            .orElseGet(GetPetResponse::notFound));
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public Mono<DeletePetResponse> deletePet(DeletePetRequest request) {
+        return Mono.just(DeletePetResponse.noContent());
+    }
+
+    @Override
+    public Mono<UploadPhotoResponse> uploadPhoto(UploadPhotoRequest request) {
+        var file = request.body().file();
+        return Mono.just(UploadPhotoResponse.ok(FilePart.of("photo.png", "image/png", file.content())));
+    }
+
+    @Override
+    public Mono<GetOrderResponse> getOrder(GetOrderRequest request) {
+        var order = Order.builder()
+            .id(request.orderId())
+            .status(OrderStatus.VALUE_3_DAY)
+            .priority(Priority.VALUE_3)
+            .lines(List.of(new Order.LinesItem("sku-1", 2)))
+            .total(new BigDecimal("12.50"))
+            .attributes(Map.of("gift", "yes"))
+            .payment(new Card("card", "4242"))
+            .shipping(request.expand() != null && request.expand().contains(GetOrderRequest.ExpandItem.CUSTOMER) ? new Shipping.StringValue("pickup")
+                : new Address("Main St 1", "Springfield", Map.of("zip", "12345")))
+            .build();
+        return Mono.just(GetOrderResponse.status2XX(200, order));
+    }
+
+    @Override
+    public Mono<OrderEventsResponse> orderEvents() {
+        return Mono.just(OrderEventsResponse.ok(Flux.just(new OrderEvent("placed", ORDER), new OrderEvent("paid", ORDER))));
+    }
+
+    @Override
+    public Mono<ImportEventsResponse> importEvents(ImportEventsRequest request) {
+        return request.body().filter(event -> event.orderId().equals(ORDER)).count().map(count -> ImportEventsResponse.ok(count.intValue()));
+    }
+
+    @Override
+    public Mono<HealthResponse> health() {
+        return Mono.just(HealthResponse.ok("UP"));
+    }
+
+    @Override
+    public Mono<PetAdoptedResponse> petAdopted(PetAdoptedRequest request) {
+        return request.xSignature().equals("signed") ? Mono.just(PetAdoptedResponse.accepted()) : Mono.empty();
+    }
+
+    @Override
+    public Mono<PostStockLowResponse> postStockLow(PostStockLowRequest request) {
+        return Mono.just(PostStockLowResponse.noContent());
+    }
+
+    @Override
+    public Mono<PetCreatedCallbackResponse> petCreatedCallback(PetCreatedCallbackRequest request) {
+        return Mono.just(PetCreatedCallbackResponse.noContent());
+    }
+
+    @Override
+    public Mono<PetCreatedPutResponse> petCreatedPut(PetCreatedPutRequest request) {
+        return Mono.just(PetCreatedPutResponse.ok("ack:" + request.body()));
+    }
+}

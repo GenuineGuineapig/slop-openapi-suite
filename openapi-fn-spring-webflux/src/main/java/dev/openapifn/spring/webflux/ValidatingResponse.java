@@ -6,7 +6,9 @@ import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.ValidationReport;
 import java.io.ByteArrayOutputStream;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.reactivestreams.Publisher;
@@ -113,17 +115,38 @@ final class ValidatingResponse extends ServerHttpResponseDecorator {
         }
         var framer = items.framer();
         var passing = new Passing(items);
-        Flux<Passed> passed = chunks.concatMap(chunk -> Flux.from(chunk).map(ReactiveMessages::bytes).collectList()
+        var sent = new AtomicBoolean();
+        Flux<Mono<DataBuffer>> passed = chunks.concatMap(chunk -> Flux.from(chunk).map(ReactiveMessages::bytes).collectList()
                 .map(buffers -> passing.pass(buffers.stream().flatMap(bytes -> framer.feed(bytes).stream()).toList())))
-            .concatWith(Mono.fromSupplier(() -> passing.pass(java.util.List.of(framer.finish()))));
-        return passed.switchOnFirst((first, all) -> {
-            var initial = first.get();
-            if (initial != null && initial.failure() != null && initial.bytes().length == 0) {
-                return failed(initial.failure());
-            }
-            return super.writeAndFlushWith(all.takeUntil(chunk -> chunk.failure() != null).filter(chunk -> chunk.bytes().length > 0)
-                .map(chunk -> Mono.just(bufferFactory().wrap(chunk.bytes()))));
-        }).then();
+            .concatWith(Mono.fromSupplier(() -> passing.pass(List.of(framer.finish()))))
+            .handle((chunk, sink) -> {
+                if (chunk.failure() != null && chunk.bytes().length == 0 && !sent.get()) {
+                    // Nothing is committed before the first chunk: the error lets the response become a problem.
+                    sink.error(new Rejected(chunk.failure()));
+                    return;
+                }
+                if (chunk.bytes().length > 0) {
+                    sent.set(true);
+                    sink.next(Mono.just(bufferFactory().wrap(chunk.bytes())));
+                }
+                if (chunk.failure() != null) {
+                    sink.complete();
+                }
+            });
+        return super.writeAndFlushWith(passed).onErrorResume(Rejected.class, rejected -> failed(rejected.report));
+    }
+
+    /** Signals that the first item of a stream is invalid, before anything was sent. */
+    private static final class Rejected extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        private final transient ValidationReport report;
+
+        Rejected(ValidationReport report) {
+            super("the first item of the stream is invalid", null, false, false);
+            this.report = report;
+        }
     }
 
     /** Validates frames until one fails (when failing). */
@@ -136,7 +159,7 @@ final class ValidatingResponse extends ServerHttpResponseDecorator {
             this.items = items;
         }
 
-        Passed pass(java.util.List<ItemFramer.Frame> frames) {
+        Passed pass(List<ItemFramer.Frame> frames) {
             var out = new ByteArrayOutputStream();
             for (var frame : frames) {
                 if (failure == null) {

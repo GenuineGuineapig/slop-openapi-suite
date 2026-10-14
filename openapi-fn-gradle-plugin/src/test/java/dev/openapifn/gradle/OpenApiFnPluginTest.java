@@ -75,6 +75,7 @@ class OpenApiFnPluginTest {
         assertThat(task.getServer().get()).isTrue();
         assertThat(task.getClient().get()).isTrue();
         assertThat(task.getTests().get()).isTrue();
+        assertThat(task.getReactive().get()).isFalse();
         assertThat(task.getBasePath().isPresent()).isFalse();
         assertThat(task.getReferences().getFiles()).containsExactly(dir.resolve("src/main/openapi").toFile());
         var output = project.getLayout().getBuildDirectory().dir("generated/openapi-fn/pets").get().getAsFile().toPath();
@@ -96,6 +97,23 @@ class OpenApiFnPluginTest {
         assertThat(coordinates(project, "testImplementation")).containsExactly("dev.openapifn:openapi-fn-spring-test:" + OpenApiFnPlugin.version(),
             "org.springframework.boot:spring-boot-starter-webmvc-test:null");
         assertThat(OpenApiFnPlugin.version()).matches("\\d+\\.\\d+\\.\\d+.*");
+    }
+
+    @Test
+    void reactiveApplicationsGetWebFluxCode() throws Exception {
+        write("api.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object"));
+        var project = project(true);
+        extension(project).getReactive().set(true);
+        var task = register(project, "pets", "api.yaml");
+        assertThat(task.getReactive().get()).isTrue();
+        assertThat(coordinates(project, "implementation")).containsExactly("dev.openapifn:openapi-fn-spring-webflux:" + OpenApiFnPlugin.version());
+        assertThat(coordinates(project, "testImplementation")).containsExactly("dev.openapifn:openapi-fn-spring-test:" + OpenApiFnPlugin.version(),
+            "org.springframework.boot:spring-boot-starter-webflux-test:null");
+        task.generate();
+        assertThat(task.getSourcesDir().get().getAsFile().toPath().resolve("com/example/pets/api/DefaultClient.java")).content()
+            .contains("OpenApiWebClient");
+        extension(project).getSpecs().getByName("pets").getReactive().set(false);
+        assertThat(task.getReactive().get()).isFalse();
     }
 
     @Test

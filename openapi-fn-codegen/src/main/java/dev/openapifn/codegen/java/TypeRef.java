@@ -94,6 +94,8 @@ public sealed interface TypeRef {
     ClassName SET = ClassName.of("java.util", "Set");
     ClassName MAP = ClassName.of("java.util", "Map");
     ClassName STREAM = ClassName.of("java.util.stream", "Stream");
+    ClassName FLUX = ClassName.of("reactor.core.publisher", "Flux");
+    ClassName MONO = ClassName.of("reactor.core.publisher", "Mono");
     ClassName LOCAL_DATE = ClassName.of("java.time", "LocalDate");
     ClassName OFFSET_DATE_TIME = ClassName.of("java.time", "OffsetDateTime");
     ClassName OFFSET_TIME = ClassName.of("java.time", "OffsetTime");

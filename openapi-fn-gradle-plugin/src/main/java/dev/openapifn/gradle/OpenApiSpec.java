@@ -52,4 +52,11 @@ public abstract class OpenApiSpec implements Named {
 
     /** Whether to generate controller tests (default {@code true}; requires {@link #getServer() server}). */
     public abstract Property<Boolean> getTests();
+
+    /**
+     * Whether to generate for Spring WebFlux: {@code Mono} and {@code Flux} in interfaces, reactive
+     * controllers, {@code WebClient} clients and {@code WebTestClient} tests (default: the extension's
+     * {@link OpenApiFnExtension#getReactive() reactive}).
+     */
+    public abstract Property<Boolean> getReactive();
 }

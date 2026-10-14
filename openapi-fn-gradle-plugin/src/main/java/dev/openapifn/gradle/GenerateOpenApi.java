@@ -66,6 +66,9 @@ public abstract class GenerateOpenApi extends DefaultTask {
     @Input
     public abstract Property<Boolean> getTests();
 
+    @Input
+    public abstract Property<Boolean> getReactive();
+
     @OutputDirectory
     public abstract DirectoryProperty getSourcesDir();
 
@@ -93,7 +96,8 @@ public abstract class GenerateOpenApi extends DefaultTask {
         var config = GeneratorConfig.of(getApiName().get(), getPackageName().get())
             .withServer(getServer().get())
             .withClient(getClient().get())
-            .withTests(getTests().get());
+            .withTests(getTests().get())
+            .withReactive(getReactive().get());
         var files = Generator.generate(api, getBasePath().map(config::withBasePath).getOrElse(config));
         var sources = getSourcesDir().get().getAsFile().toPath();
         var tests = getTestSourcesDir().get().getAsFile().toPath();

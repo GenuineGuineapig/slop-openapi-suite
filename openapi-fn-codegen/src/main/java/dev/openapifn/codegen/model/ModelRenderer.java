@@ -49,6 +49,8 @@ public final class ModelRenderer {
     private static final ClassName OBJECTS = ClassName.of("java.util", "Objects");
     private static final ClassName COLLECTIONS = ClassName.of("java.util", "Collections");
     private static final ClassName ARRAY_LIST = ClassName.of("java.util", "ArrayList");
+    /** The collection types whose components records copy. */
+    private static final java.util.Set<ClassName> COPIED = java.util.Set.of(TypeRef.LIST, TypeRef.SET, TypeRef.MAP);
     private static final ClassName LINKED_HASH_SET = ClassName.of("java.util", "LinkedHashSet");
     private static final ClassName LINKED_HASH_MAP = ClassName.of("java.util", "LinkedHashMap");
     private static final ClassName NULLABLE = TypeMapper.NULLABLE;
@@ -216,7 +218,7 @@ public final class ModelRenderer {
 
     /** An immutable copy of a collection-valued property (tolerating {@code null} elements); streams are not copied. */
     private static Optional<String> copy(TypeRef type, String name, boolean nullable, Imports imports) {
-        if (!(type instanceof TypeRef.Parameterized parameterized) || parameterized.raw().equals(TypeRef.STREAM)) {
+        if (!(type instanceof TypeRef.Parameterized parameterized) || !COPIED.contains(parameterized.raw())) {
             return Optional.empty();
         }
         var raw = parameterized.raw();

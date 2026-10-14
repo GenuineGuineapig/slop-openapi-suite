@@ -27,6 +27,7 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
     public void apply(Project project) {
         var extension = project.getExtensions().create(EXTENSION, OpenApiFnExtension.class);
         extension.getAddDependencies().convention(true);
+        extension.getReactive().convention(false);
         var all = project.getTasks().register(GENERATE_ALL, task -> {
             task.setGroup(GROUP);
             task.setDescription("Generates code from all OpenAPI descriptions");
@@ -35,6 +36,7 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
             spec.getServer().convention(true);
             spec.getClient().convention(true);
             spec.getTests().convention(true);
+            spec.getReactive().convention(extension.getReactive());
             var task = project.getTasks().register(taskName(spec), GenerateOpenApi.class, generate -> configure(project, generate, spec));
             all.configure(generateAll -> generateAll.dependsOn(task));
             project.getPluginManager().withPlugin("java", java -> addToSourceSets(project, task));
@@ -58,6 +60,7 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
         task.getServer().set(spec.getServer());
         task.getClient().set(spec.getClient());
         task.getTests().set(spec.getTests());
+        task.getReactive().set(spec.getReactive());
         var output = project.getLayout().getBuildDirectory().dir("generated/openapi-fn/" + spec.getName());
         task.getSourcesDir().convention(output.map(directory -> directory.dir("java")));
         task.getTestSourcesDir().convention(output.map(directory -> directory.dir("test-java")));
@@ -83,12 +86,13 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
     private static void addDependencies(Project project, OpenApiFnExtension extension) {
         var dependencies = project.getDependencies();
         var version = version();
+        var stack = extension.getReactive().map(reactive -> reactive ? "webflux" : "webmvc");
         project.getConfigurations().named("implementation", configuration -> configuration.getDependencies().addAllLater(
-            extension.getAddDependencies().map(add -> add ? List.<Dependency>of(dependencies.create("dev.openapifn:openapi-fn-spring:" + version))
-                : List.<Dependency>of())));
+            extension.getAddDependencies().zip(stack, (add, web) -> add ? List.<Dependency>of(dependencies.create("dev.openapifn:openapi-fn-spring"
+                + (web.equals("webflux") ? "-webflux" : "") + ":" + version)) : List.<Dependency>of())));
         project.getConfigurations().named("testImplementation", configuration -> configuration.getDependencies().addAllLater(
-            extension.getAddDependencies().map(add -> add ? List.<Dependency>of(dependencies.create("dev.openapifn:openapi-fn-spring-test:" + version),
-                dependencies.create("org.springframework.boot:spring-boot-starter-webmvc-test")) : List.<Dependency>of())));
+            extension.getAddDependencies().zip(stack, (add, web) -> add ? List.<Dependency>of(dependencies.create("dev.openapifn:openapi-fn-spring-test:"
+                + version), dependencies.create("org.springframework.boot:spring-boot-starter-" + web + "-test")) : List.<Dependency>of())));
     }
 
     /** The version of openapi-fn this plugin belongs to. */

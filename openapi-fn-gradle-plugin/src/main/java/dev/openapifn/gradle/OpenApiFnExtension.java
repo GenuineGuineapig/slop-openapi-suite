@@ -25,8 +25,16 @@ public abstract class OpenApiFnExtension {
     }
 
     /**
-     * Whether to add the runtime ({@code openapi-fn-spring}) and test ({@code openapi-fn-spring-test},
-     * {@code spring-boot-starter-webmvc-test}) dependencies the generated code needs (default {@code true}).
+     * Whether to add the runtime ({@code openapi-fn-spring}, or {@code openapi-fn-spring-webflux} when
+     * {@link #getReactive() reactive}) and test ({@code openapi-fn-spring-test} and the Spring Boot
+     * MVC or WebFlux test starter) dependencies the generated code needs (default {@code true}).
      */
     public abstract Property<Boolean> getAddDependencies();
+
+    /**
+     * Whether the application uses Spring WebFlux rather than Spring MVC (default {@code false}): the
+     * default of each spec's {@link OpenApiSpec#getReactive() reactive} setting, and which
+     * dependencies are added.
+     */
+    public abstract Property<Boolean> getReactive();
 }

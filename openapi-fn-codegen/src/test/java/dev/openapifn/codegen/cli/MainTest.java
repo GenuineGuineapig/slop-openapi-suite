@@ -45,6 +45,14 @@ class MainTest {
     }
 
     @Test
+    void generatesForWebFlux() throws Exception {
+        var code = run("--spec", shop().toString(), "--reactive", "--name", "shop", "--package", "com.example.shop", "--output", dir.toString());
+        assertThat(code).as(err()).isZero();
+        assertThat(dir.resolve("com/example/shop/api/PetsController.java")).content().contains("ReactiveRuntime");
+        assertThat(dir.resolve("com/example/shop/api/PetsControllerTest.java")).content().contains("@WebFluxTest");
+    }
+
+    @Test
     void writesEverythingToTheOutputByDefault() throws Exception {
         var spec = Files.writeString(dir.resolve("api.yaml"), """
             openapi: 3.1.0

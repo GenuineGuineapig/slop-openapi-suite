@@ -31,6 +31,10 @@ public final class ApiRenderer {
     static final ClassName API_RESPONSE = ClassName.of(SPRING, "ApiResponse");
     static final ClassName FILE_PART = ClassName.of(SPRING, "FilePart");
     static final ClassName SERVLET_RUNTIME = ClassName.of(SPRING + ".servlet", "ServletRuntime");
+    static final ClassName REACTIVE_RUNTIME = ClassName.of(SPRING + ".webflux", "ReactiveRuntime");
+    static final ClassName WEB_CLIENT = ClassName.of(SPRING + ".webflux.client", "OpenApiWebClient");
+    static final ClassName WEB_CLIENTS = ClassName.of(SPRING + ".webflux.client", "OpenApiWebClients");
+    static final ClassName SERVER_WEB_EXCHANGE = ClassName.of("org.springframework.web.server", "ServerWebExchange");
     static final ClassName OPENAPI_RUNTIMES = ClassName.of(SPRING, "OpenApiRuntimes");
     static final ClassName HTTP_CLIENT = ClassName.of(SPRING + ".client", "OpenApiHttpClient");
     static final ClassName CLIENT_CALL = ClassName.of(SPRING + ".client", "ClientCall");
@@ -60,11 +64,19 @@ public final class ApiRenderer {
     private final TypeMapper mapper;
     private final ModelRenderer models;
     private final GeneratorNames names;
+    private final boolean reactive;
 
-    public ApiRenderer(TypeMapper mapper, ModelRenderer models, GeneratorNames names) {
+    /** @param reactive whether to render for Spring WebFlux rather than Spring MVC */
+    public ApiRenderer(TypeMapper mapper, ModelRenderer models, GeneratorNames names, boolean reactive) {
         this.mapper = mapper;
         this.models = models;
         this.names = names;
+        this.reactive = reactive;
+    }
+
+    /** The type operations of a delegate interface or client return: the response, or a {@code Mono} of it for WebFlux. */
+    private String returned(OperationModel operation, Imports imports) {
+        return reactive ? imports.ref(TypeRef.MONO) + "<" + imports.ref(operation.response()) + ">" : imports.ref(operation.response());
     }
 
     private static Imports imports(ClassName name, Set<String> declared) {
@@ -186,7 +198,7 @@ public final class ApiRenderer {
             if (operation.operation().operation().deprecated()) {
                 out.line("@Deprecated");
             }
-            out.line(imports.ref(operation.response()) + " " + operation.method() + "(" + operation.request().map(r -> imports.ref(r) + " request").orElse("") + ");");
+            out.line(returned(operation, imports) + " " + operation.method() + "(" + operation.request().map(r -> imports.ref(r) + " request").orElse("") + ");");
         }
         out.close();
         return unit(name, imports, out);
@@ -219,11 +231,12 @@ public final class ApiRenderer {
             out.line("@" + imports.ref(REQUEST_MAPPING) + "(\"${openapi-fn.specs." + names.apiName() + ".base-path:" + names.basePath() + "}\")");
         }
         out.open("public class " + name.simpleName());
-        out.line("private final " + imports.ref(SERVLET_RUNTIME) + " runtime;");
+        var runtime = reactive ? REACTIVE_RUNTIME : SERVLET_RUNTIME;
+        out.line("private final " + imports.ref(runtime) + " runtime;");
         out.line("private final " + imports.ref(OBJECT_PROVIDER) + "<" + imports.ref(apiName) + "> api;");
         out.blank().open("public " + name.simpleName() + "(" + imports.ref(OPENAPI_RUNTIMES) + " runtimes, " + imports.ref(OBJECT_PROVIDER) + "<"
             + imports.ref(apiName) + "> api)");
-        out.line("this.runtime = new " + imports.ref(SERVLET_RUNTIME) + "(runtimes.get(" + imports.ref(names.spec()) + ".NAME));").line("this.api = api;").close();
+        out.line("this.runtime = new " + imports.ref(runtime) + "(runtimes.get(" + imports.ref(names.spec()) + ".NAME));").line("this.api = api;").close();
         var custom = new LinkedHashMap<String, List<OperationModel>>();
         for (var operation : operations) {
             var method = operation.operation().method();
@@ -238,10 +251,10 @@ public final class ApiRenderer {
         custom.forEach((path, pathOperations) -> {
             out.blank().javadoc("Dispatches the methods Spring cannot map by annotation.");
             out.line("@" + imports.ref(REQUEST_MAPPING) + "(path = " + Names.literal(mappingPath(pathOperations.getFirst(), names)) + ")");
-            out.open("public " + imports.ref(RESPONSE_ENTITY) + "<Object> " + pathOperations.getFirst().method() + "Dispatch(" + imports.ref(SERVLET_REQUEST)
-                + " request)");
-            out.open("return switch (request.getMethod())");
-            pathOperations.forEach(op -> out.line("case " + Names.literal(op.operation().method()) + " -> " + op.method() + "(request);"));
+            var argument = reactive ? "exchange" : "request";
+            out.open("public " + handlerType(imports) + " " + pathOperations.getFirst().method() + "Dispatch(" + handlerParameter(imports) + ")");
+            out.open("return switch (" + (reactive ? "exchange.getRequest().getMethod().name()" : "request.getMethod()") + ")");
+            pathOperations.forEach(op -> out.line("case " + Names.literal(op.operation().method()) + " -> " + op.method() + "(" + argument + ");"));
             out.line("default -> throw new " + imports.ref(RESPONSE_STATUS_EXCEPTION) + "(" + imports.ref(HTTP_STATUS) + ".METHOD_NOT_ALLOWED);");
             out.close(";").close();
             pathOperations.forEach(op -> {
@@ -277,21 +290,54 @@ public final class ApiRenderer {
         return path;
     }
 
+    /** The return type of handler methods: a response entity, or {@code Mono<Void>} for WebFlux (the runtime writes the response). */
+    private String handlerType(Imports imports) {
+        return reactive ? imports.ref(TypeRef.MONO) + "<Void>" : imports.ref(RESPONSE_ENTITY) + "<Object>";
+    }
+
+    private String handlerParameter(Imports imports) {
+        return reactive ? imports.ref(SERVER_WEB_EXCHANGE) + " exchange" : imports.ref(SERVLET_REQUEST) + " request";
+    }
+
     private void handler(OperationModel operation, String visibility, Source out, Imports imports) {
+        if (reactive) {
+            reactiveHandler(operation, visibility, out, imports);
+            return;
+        }
         out.open(visibility + " " + imports.ref(RESPONSE_ENTITY) + "<Object> " + operation.method() + "(" + imports.ref(SERVLET_REQUEST) + " request)");
         if (operation.request().isPresent()) {
             out.line("var binding = runtime.bind(request, " + Names.literal(operation.id()) + ");");
-            var arguments = new ArrayList<String>();
-            operation.parameters().forEach(p -> arguments.add("binding.parameter(" + Names.literal(p.parameter().in().value()) + ", "
-                + Names.literal(p.parameter().name()) + ", " + token(p.property().type(), imports) + ")"));
-            operation.body().ifPresent(b -> arguments.add(read("binding", b.property().type(), imports)));
-            out.line("var input = new " + imports.ref(operation.request().get()) + "(\n        " + String.join(",\n        ", arguments) + ");");
+            out.line("var input = new " + imports.ref(operation.request().get()) + "(\n        " + String.join(",\n        ", arguments(operation, imports)) + ");");
             out.line("return runtime.respond(request, " + Names.literal(operation.id()) + ", api()." + operation.method() + "(input));");
         } else {
             out.line("runtime.bind(request, " + Names.literal(operation.id()) + ");");
             out.line("return runtime.respond(request, " + Names.literal(operation.id()) + ", api()." + operation.method() + "());");
         }
         out.close();
+    }
+
+    private void reactiveHandler(OperationModel operation, String visibility, Source out, Imports imports) {
+        var id = Names.literal(operation.id());
+        out.open(visibility + " " + handlerType(imports) + " " + operation.method() + "(" + handlerParameter(imports) + ")");
+        if (operation.request().isPresent()) {
+            out.open("return runtime.bind(exchange, " + id + ").flatMap(binding ->");
+            out.line("var input = new " + imports.ref(operation.request().get()) + "(\n        " + String.join(",\n        ", arguments(operation, imports)) + ");");
+            out.line("return api()." + operation.method() + "(input);");
+            out.close(").flatMap(response -> runtime.respond(exchange, " + id + ", response));");
+        } else {
+            out.line("return runtime.bind(exchange, " + id + ").flatMap(binding -> api()." + operation.method() + "())");
+            out.line("    .flatMap(response -> runtime.respond(exchange, " + id + ", response));");
+        }
+        out.close();
+    }
+
+    /** The arguments of an operation's request record, bound from {@code binding}. */
+    private static List<String> arguments(OperationModel operation, Imports imports) {
+        var arguments = new ArrayList<String>();
+        operation.parameters().forEach(p -> arguments.add("binding.parameter(" + Names.literal(p.parameter().in().value()) + ", "
+            + Names.literal(p.parameter().name()) + ", " + token(p.property().type(), imports) + ")"));
+        operation.body().ifPresent(b -> arguments.add(read("binding", b.property().type(), imports)));
+        return arguments;
     }
 
     /** Reads a body of {@code type} from a request binding or a client response: streamed bodies item by item. */
@@ -332,8 +378,9 @@ public final class ApiRenderer {
                     + p.style().name() + ", " + p.explode() + ", " + p.allowReserved() + ");");
             }
         }
-        out.blank().line("private final " + imports.ref(HTTP_CLIENT) + " http;");
-        out.blank().open("public " + name.simpleName() + "(" + imports.ref(HTTP_CLIENT) + " http)").line("this.http = http;").close();
+        var http = reactive ? WEB_CLIENT : HTTP_CLIENT;
+        out.blank().line("private final " + imports.ref(http) + " http;");
+        out.blank().open("public " + name.simpleName() + "(" + imports.ref(http) + " http)").line("this.http = http;").close();
         for (var operation : operations) {
             out.blank().javadoc(javadoc(operation));
             if (operation.operation().operation().deprecated()) {
@@ -351,7 +398,7 @@ public final class ApiRenderer {
             parameters.add(imports.ref(TypeRef.URI) + " target");
         }
         operation.request().ifPresent(r -> parameters.add(imports.ref(r) + " request"));
-        out.open("public " + imports.ref(operation.response()) + " " + operation.method() + "(" + String.join(", ", parameters) + ")");
+        out.open("public " + returned(operation, imports) + " " + operation.method() + "(" + String.join(", ", parameters) + ")");
         var chain = new ArrayList<String>();
         chain.add("var call = " + imports.ref(CLIENT_CALL) + ".of(" + Names.literal(operation.operation().method()) + ", "
             + Names.literal(operation.outbound() ? "" : operation.operation().path()) + ")");
@@ -374,12 +421,13 @@ public final class ApiRenderer {
             out.line("call = call.multipart(" + imports.ref(ARRAYS) + ".asList(" + parts(body, record, imports) + "));");
             out.close();
         }, () -> out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());")));
-        out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + ".exchange(call, response -> switch (response.status())");
+        out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + "." + (reactive ? "<" + imports.ref(operation.response()) + ">" : "")
+            + "exchange(call, response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
         Optional<OperationModel.VariantModel> fallback = Optional.empty();
         for (var variant : operation.variants()) {
             if (variant.fixedStatus()) {
-                out.line("case " + variant.key() + " -> " + construct(operation, variant, "", imports) + ";");
+                out.line("case " + variant.key() + " -> " + decode(operation, variant, false, imports) + ";");
             } else if (variant.key().equals("default")) {
                 fallback = Optional.of(variant);
             } else {
@@ -389,10 +437,12 @@ public final class ApiRenderer {
         out.open("default ->");
         for (var range : ranges) {
             out.open("if (response.status() / 100 == " + range.key().charAt(0) + ")");
-            out.line("yield " + construct(operation, range, "response.status()", imports) + ";").close();
+            out.line("yield " + decode(operation, range, true, imports) + ";").close();
         }
         if (fallback.isPresent()) {
-            out.line("yield " + construct(operation, fallback.get(), "response.status()", imports) + ";");
+            out.line("yield " + decode(operation, fallback.get(), true, imports) + ";");
+        } else if (reactive) {
+            out.line("yield response.buffered().flatMap(buffered -> " + imports.ref(TypeRef.MONO) + ".error(new " + imports.ref(UNEXPECTED) + "(buffered)));");
         } else {
             out.line("throw new " + imports.ref(UNEXPECTED) + "(response);");
         }
@@ -401,13 +451,27 @@ public final class ApiRenderer {
         out.close();
     }
 
-    private String construct(OperationModel operation, OperationModel.VariantModel variant, String status, Imports imports) {
-        var arguments = new ArrayList<String>();
-        if (!status.isEmpty()) {
-            arguments.add(status);
+    /**
+     * Decodes a variant from {@code response}. WebFlux clients buffer the body first, unless it is
+     * streamed: then the variant holds the items as they arrive.
+     */
+    private String decode(OperationModel operation, OperationModel.VariantModel variant, boolean withStatus, Imports imports) {
+        if (!reactive) {
+            return construct(operation, variant, withStatus, "response", imports);
         }
-        variant.body().ifPresent(body -> arguments.add(read("response", body.type(), imports)));
-        variant.headers().forEach((header, property) -> arguments.add("response.header(" + Names.literal(header) + ", " + token(property.type(), imports) + ")"));
+        if (variant.body().flatMap(body -> OperationModel.streamed(body.type())).isPresent()) {
+            return imports.ref(TypeRef.MONO) + ".just(" + construct(operation, variant, withStatus, "response", imports) + ")";
+        }
+        return "response.buffered().map(buffered -> " + construct(operation, variant, withStatus, "buffered", imports) + ")";
+    }
+
+    private String construct(OperationModel operation, OperationModel.VariantModel variant, boolean withStatus, String source, Imports imports) {
+        var arguments = new ArrayList<String>();
+        if (withStatus) {
+            arguments.add(source + ".status()");
+        }
+        variant.body().ifPresent(body -> arguments.add(read(source, body.type(), imports)));
+        variant.headers().forEach((header, property) -> arguments.add(source + ".header(" + Names.literal(header) + ", " + token(property.type(), imports) + ")"));
         return "new " + imports.ref(operation.response()) + "." + variant.name() + "(" + String.join(", ", arguments) + ")";
     }
 
@@ -483,7 +547,7 @@ public final class ApiRenderer {
             var client = names.client(group);
             out.blank().line("@" + imports.ref(BEAN)).line("@" + imports.ref(CONDITIONAL_ON_MISSING_BEAN));
             out.open("public " + imports.ref(client) + " " + Character.toLowerCase(client.simpleName().charAt(0)) + client.simpleName().substring(1) + "("
-                + imports.ref(CLIENTS) + " clients)");
+                + imports.ref(reactive ? WEB_CLIENTS : CLIENTS) + " clients)");
             out.line("return new " + imports.ref(client) + "(clients.http(" + imports.ref(names.spec()) + ".NAME, " + imports.ref(names.spec())
                 + ".SERVER_URL));").close();
         }

@@ -95,6 +95,65 @@ class GeneratorTest {
     }
 
     @Test
+    void reactiveControllerTestsPass() {
+        var api = Compilation.load("classpath:shop/openapi.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("shop", "com.example.shop").withReactive(true), dir,
+            Map.of("com/example/shop/ShopApplication.java", APPLICATION));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        assertThat(compilation.file("com/example/shop/api/PetsApi.java")).contains("Mono<GetPetResponse> getPet(GetPetRequest request);");
+        assertThat(compilation.file("com/example/shop/api/OrderEventsResponse.java")).contains("Flux<OrderEvent> body");
+        var summary = Launch.tests(compilation, "com.example.shop.api.PetsControllerTest", "com.example.shop.api.OrdersControllerTest",
+            "com.example.shop.api.DefaultControllerTest", "com.example.shop.api.WebhooksControllerTest", "com.example.shop.api.CallbacksControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+        assertThat(summary.succeeded()).isGreaterThanOrEqualTo(10);
+    }
+
+    @Test
+    void reactiveClientsTalkToReactiveControllers() throws Exception {
+        var api = Compilation.load("classpath:shop/openapi.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("shop", "com.example.shop").withTests(false).withReactive(true), dir, Map.of(
+            "com/example/shop/ShopApplication.java", APPLICATION,
+            "com/example/shop/ShopService.java", resource("ReactiveShopService.java.txt"),
+            "com/example/shop/ReactiveEndToEnd.java", resource("ReactiveEndToEnd.java.txt"),
+            "com/example/shop/EndToEndIds.java", resource("EndToEndIds.java.txt")));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        var thread = Thread.currentThread();
+        var previous = thread.getContextClassLoader();
+        thread.setContextClassLoader(compilation.classLoader);
+        try (var context = new org.springframework.boot.builder.SpringApplicationBuilder(compilation.loadClass("com.example.shop.ShopApplication"))
+            .web(org.springframework.boot.WebApplicationType.REACTIVE)
+            .properties("server.port=0", "openapi-fn.validation.response.mode=FAIL")
+            .run()) {
+            var port = context.getEnvironment().getProperty("local.server.port");
+            @SuppressWarnings("unchecked")
+            var results = (java.util.List<String>) compilation.loadClass("com.example.shop.ReactiveEndToEnd").getMethod("run", String.class)
+                .invoke(null, "http://localhost:" + port + "/api/v1");
+            assertThat(results).containsExactly(
+                "list:3:[Cat/Tom, Dog/Rex]",
+                "created:/pets/11:Dog/11",
+                "problem:422:name must not be 'error'",
+                "search:2",
+                "get:Rex",
+                "get404:true",
+                "delete:204",
+                "photo:image/png:PNG",
+                "order:3-day:3:Card[method=card, last4=4242]:Address:[LinesItem[sku=sku-1, quantity=2]]",
+                "pickup:StringValue[value=pickup]",
+                "events:[placed, paid]",
+                "imported:2",
+                "health:UP",
+                "adopted:202",
+                "stock:204",
+                "callback:204",
+                "put:ack:hi",
+                "invalid:400");
+        } finally {
+            thread.setContextClassLoader(previous);
+        }
+    }
+
+    @Test
     void edgeCasesCompileAndTheirTestsPass() {
         var api = Compilation.load("classpath:edge/openapi.yaml");
         var compilation = Compilation.of(api, GeneratorConfig.of("edge", "org.example.edge"), dir, Map.of("org/example/edge/EdgeApplication.java", """
@@ -128,6 +187,28 @@ class GeneratorTest {
         assertThat(compilation.file("org/example/variants/api/CallbacksApi.java")).contains("PingResponse ping(PingRequest request);",
             "PongResponse pong();", "Ping2Response ping2();");
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "edge, org.example.edge, EdgeApplication, org.example.edge.api.DefaultControllerTest",
+        "variants, org.example.variants, VariantsApplication, org.example.variants.api.DefaultControllerTest org.example.variants.api.CallbacksControllerTest"})
+    void reactiveVariantsCompileAndTheirTestsPass(String spec, String packageName, String applicationName, String tests) {
+        // Spring's test bootstrapper caches the application class per package: the names match the Spring MVC runs.
+        var api = Compilation.load("classpath:" + spec + "/openapi.yaml");
+        var application = packageName.replace('.', '/') + "/" + applicationName + ".java";
+        var compilation = Compilation.of(api, GeneratorConfig.of(spec, packageName).withReactive(true), dir, Map.of(application, """
+            package %s;
+
+            @org.springframework.boot.autoconfigure.SpringBootApplication
+            public class %s {
+            }
+            """.formatted(packageName, applicationName)));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        var summary = Launch.tests(compilation, tests.split(" "));
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+        assertThat(summary.succeeded()).isPositive();
     }
 
     @Test

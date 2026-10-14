@@ -19,13 +19,13 @@ import java.util.function.IntConsumer;
  * <pre>
  * java -jar openapi-fn-codegen.jar --spec api.yaml --name petstore --package com.example.petstore \
  *     --output build/generated/sources --test-output build/generated/test-sources --resources-output build/generated/resources \
- *     [--base-path /api] [--no-server] [--no-client] [--no-tests]
+ *     [--base-path /api] [--no-server] [--no-client] [--no-tests] [--reactive]
  * </pre>
  */
 public final class Main {
 
     private static final String USAGE = "Usage: --spec <file> --name <name> --package <package> --output <dir> [--test-output <dir>] "
-        + "[--resources-output <dir>] [--base-path <path>] [--no-server] [--no-client] [--no-tests]";
+        + "[--resources-output <dir>] [--base-path <path>] [--no-server] [--no-client] [--no-tests] [--reactive]";
 
     /** Ends the process with an exit code; replaced in tests, which must not end the test JVM. */
     static IntConsumer exit = System::exit;
@@ -42,7 +42,7 @@ public final class Main {
         var options = new HashMap<String, String>();
         for (int i = 0; i < args.length; i++) {
             var arg = args[i];
-            if (arg.startsWith("--no-")) {
+            if (arg.startsWith("--no-") || arg.equals("--reactive")) {
                 options.put(arg, "true");
             } else if (arg.startsWith("--") && i + 1 < args.length) {
                 options.put(arg, args[++i]);
@@ -81,7 +81,8 @@ public final class Main {
         var config = GeneratorConfig.of(options.get("--name"), options.get("--package"))
             .withServer(!options.containsKey("--no-server"))
             .withClient(!options.containsKey("--no-client"))
-            .withTests(!options.containsKey("--no-tests"));
+            .withTests(!options.containsKey("--no-tests"))
+            .withReactive(options.containsKey("--reactive"));
         return options.containsKey("--base-path") ? config.withBasePath(options.get("--base-path")) : config;
     }
 }

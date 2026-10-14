@@ -5,6 +5,7 @@ import dev.openapifn.codegen.api.GeneratorNames;
 import dev.openapifn.codegen.api.OperationModel;
 import dev.openapifn.codegen.api.TestRenderer;
 import dev.openapifn.codegen.java.Names;
+import dev.openapifn.codegen.java.TypeRef;
 import dev.openapifn.codegen.java.TypeRef.ClassName;
 import dev.openapifn.codegen.model.ModelRenderer;
 import dev.openapifn.codegen.model.TypeMapper;
@@ -32,9 +33,10 @@ public final class Generator {
         var mapper = new TypeMapper(api, names.modelPackage());
         mapper.defineComponents();
         var taken = new HashSet<String>();
+        var stream = config.reactive() ? TypeRef.FLUX : TypeRef.STREAM;
         var groups = new LinkedHashMap<String, List<OperationModel>>();
         for (var operation : api.operations()) {
-            var model = OperationModel.of(operation, names.apiPackage(), mapper, taken);
+            var model = OperationModel.of(operation, names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(model.group(), group -> new ArrayList<>()).add(model);
         }
         // Webhooks and callbacks are sent by the API provider: they get receiving controllers and sending clients of their own.
@@ -42,7 +44,7 @@ public final class Generator {
         var webhooks = Names.unique("Webhooks", groupNames);
         for (var operation : api.webhooks()) {
             var model = OperationModel.of(operation, operation.displayName(), webhooks, operation.method().toLowerCase(Locale.ROOT) + " "
-                + operation.path(), names.apiPackage(), mapper, taken);
+                + operation.path(), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(webhooks, group -> new ArrayList<>()).add(model);
         }
         var callbacks = Names.unique("Callbacks", groupNames);
@@ -50,11 +52,11 @@ public final class Generator {
             // Named after the callback, plus the method when the callback has several operations.
             var single = api.callbacks().stream().filter(other -> other.owner().equals(callback.owner()) && other.name().equals(callback.name())).count() == 1;
             var model = OperationModel.of(callback.operation(), callback.id(), callbacks, callback.name() + (single ? "" : " "
-                + callback.operation().method().toLowerCase(Locale.ROOT)), names.apiPackage(), mapper, taken);
+                + callback.operation().method().toLowerCase(Locale.ROOT)), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
         }
         var models = new ModelRenderer(mapper);
-        var renderer = new ApiRenderer(mapper, models, names);
+        var renderer = new ApiRenderer(mapper, models, names, config.reactive());
         var files = new ArrayList<GeneratedFile>();
         mapper.definitions().stream().filter(definition -> !definition.name().isNested())
             .forEach(definition -> files.add(source(definition.name(), models.file(definition))));
@@ -75,7 +77,7 @@ public final class Generator {
                 files.add(source(names.controller(group), renderer.controller(group, operations)));
             });
             if (config.tests()) {
-                var tests = new TestRenderer(api, names);
+                var tests = new TestRenderer(api, names, config.reactive());
                 groups.forEach((group, operations) -> files.add(new GeneratedFile(GeneratedFile.Kind.TEST_SOURCE, path(names.controllerTest(group)),
                     tests.test(group, operations))));
             }

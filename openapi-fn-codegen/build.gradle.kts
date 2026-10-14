@@ -9,10 +9,13 @@ dependencies {
 
     testImplementation(project(":openapi-fn-spring"))
     testImplementation(project(":openapi-fn-spring-test"))
+    testImplementation(project(":openapi-fn-spring-webflux"))
     testImplementation(platform(libs.spring.boot.bom))
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc")
     testImplementation("org.springframework.boot:spring-boot-starter-restclient")
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux")
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux-test")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testImplementation("org.junit.platform:junit-platform-launcher")
     testImplementation("org.apiguardian:apiguardian-api:1.1.2")

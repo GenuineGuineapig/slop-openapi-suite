@@ -107,6 +107,7 @@ paths:
                 size: {type: integer}
             encoding:
               notes: {contentType: text/csv}
+              files: {contentType: 'image/*'}
       responses:
         '204': {description: ok}
   /events:
