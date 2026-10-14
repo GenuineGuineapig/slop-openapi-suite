@@ -185,34 +185,87 @@ public final class OpenApiValidator {
         return new RequestValidation(issues.report(), Optional.of(match), values, body);
     }
 
+    /** Whether a request carries a credential for a security scheme, and whether it is well formed. */
+    private enum Credential {
+        PRESENT,
+        MALFORMED,
+        MISSING
+    }
+
+    /** RFC 6750 bearer tokens (token68). */
+    private static final java.util.regex.Pattern TOKEN68 = java.util.regex.Pattern.compile("[A-Za-z0-9._~+/-]+=*");
+
+    /**
+     * Checks that one of the security requirements is met by well-formed credentials. Verifying
+     * them (passwords, token signatures, scopes, client certificates) is left to authentication.
+     */
     private void security(ApiOperation operation, HttpRequest request, Issues issues) {
         var requirements = operation.security();
-        if (requirements.isEmpty() || requirements.stream().anyMatch(requirement -> satisfied(requirement, request))) {
+        if (requirements.isEmpty()) {
+            return;
+        }
+        var results = requirements.stream().map(requirement -> credentials(requirement, request)).toList();
+        if (results.contains(Credential.PRESENT)) {
             return;
         }
         var alternatives = requirements.stream().map(r -> String.join(" + ", r.schemes().keySet())).collect(Collectors.joining(" or "));
-        issues.add(IssueKeys.REQUEST_SECURITY_MISSING, "missing credentials; requires " + alternatives, "security");
+        if (results.contains(Credential.MALFORMED)) {
+            issues.add(IssueKeys.REQUEST_SECURITY_INVALID, "malformed credentials; requires " + alternatives, "security");
+        } else {
+            issues.add(IssueKeys.REQUEST_SECURITY_MISSING, "missing credentials; requires " + alternatives, "security");
+        }
     }
 
-    private boolean satisfied(SecurityRequirement requirement, HttpRequest request) {
+    /** All schemes of a requirement: missing if one is missing, else malformed if one is malformed. */
+    private Credential credentials(SecurityRequirement requirement, HttpRequest request) {
         var schemes = api.model().components().securitySchemes();
-        return requirement.schemes().keySet().stream().allMatch(name -> Optional.ofNullable(schemes.get(name))
-            .map(scheme -> present(scheme, request)).orElse(true));
+        var results = requirement.schemes().keySet().stream()
+            .map(name -> Optional.ofNullable(schemes.get(name)).map(scheme -> credential(scheme, request)).orElse(Credential.PRESENT)).toList();
+        return results.contains(Credential.MISSING) ? Credential.MISSING : results.contains(Credential.MALFORMED) ? Credential.MALFORMED : Credential.PRESENT;
     }
 
-    private static boolean present(SecurityScheme scheme, HttpRequest request) {
-        var authorization = request.headers().first("Authorization").orElse("").toLowerCase(Locale.ROOT);
+    private static Credential credential(SecurityScheme scheme, HttpRequest request) {
         return switch (scheme) {
-            case SecurityScheme.ApiKey key -> switch (key.in()) {
-                case HEADER -> request.headers().has(key.name());
-                case COOKIE -> UrlCodec.parseCookies(request.headers().all("Cookie")).stream().anyMatch(c -> c.getKey().equals(key.name()));
-                default -> UrlCodec.parseQuery(request.query()).stream().anyMatch(q -> q.getKey().equals(key.name()));
-            };
-            case SecurityScheme.Http http -> authorization.startsWith(http.scheme().toLowerCase(Locale.ROOT) + " ");
-            case SecurityScheme.OAuth2 ignored -> authorization.startsWith("bearer ");
-            case SecurityScheme.OpenIdConnect ignored -> authorization.startsWith("bearer ");
-            case SecurityScheme.MutualTls ignored -> true;
+            case SecurityScheme.ApiKey key -> {
+                var value = switch (key.in()) {
+                    case HEADER -> request.headers().first(key.name());
+                    case COOKIE -> UrlCodec.parseCookies(request.headers().all("Cookie")).stream().filter(c -> c.getKey().equals(key.name()))
+                        .map(Map.Entry::getValue).findFirst();
+                    default -> UrlCodec.parseQuery(request.query()).stream().filter(q -> q.getKey().equals(key.name())).map(Map.Entry::getValue).findFirst();
+                };
+                yield value.map(v -> v.isBlank() ? Credential.MALFORMED : Credential.PRESENT).orElse(Credential.MISSING);
+            }
+            case SecurityScheme.Http http -> authorization(request, http.scheme());
+            case SecurityScheme.OAuth2 ignored -> authorization(request, "bearer");
+            case SecurityScheme.OpenIdConnect ignored -> authorization(request, "bearer");
+            case SecurityScheme.MutualTls ignored -> Credential.PRESENT;
         };
+    }
+
+    /** An {@code Authorization} header of {@code scheme} with well-formed credentials (RFC 7617 basic, RFC 6750 bearer, others non-empty). */
+    private static Credential authorization(HttpRequest request, String scheme) {
+        var header = request.headers().first("Authorization").map(String::strip).orElse("");
+        var space = header.indexOf(' ');
+        var name = space < 0 ? header : header.substring(0, space);
+        if (!name.equalsIgnoreCase(scheme)) {
+            return Credential.MISSING;
+        }
+        var credentials = space < 0 ? "" : header.substring(space + 1).strip();
+        var wellFormed = switch (scheme.toLowerCase(Locale.ROOT)) {
+            case "basic" -> basicCredentials(credentials);
+            case "bearer" -> TOKEN68.matcher(credentials).matches();
+            default -> !credentials.isEmpty();
+        };
+        return wellFormed ? Credential.PRESENT : Credential.MALFORMED;
+    }
+
+    /** RFC 7617: base64 of {@code user-id ":" password}. */
+    private static boolean basicCredentials(String credentials) {
+        try {
+            return new String(java.util.Base64.getDecoder().decode(credentials), java.nio.charset.StandardCharsets.UTF_8).contains(":");
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private Map<String, JsonValue> parameters(OperationMatch match, HttpRequest request, Issues issues) {

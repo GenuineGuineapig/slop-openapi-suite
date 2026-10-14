@@ -9,6 +9,7 @@ public final class IssueKeys {
     public static final String REQUEST_PATH_MISSING = "request.path.missing";
     public static final String REQUEST_OPERATION_NOT_ALLOWED = "request.operation.notAllowed";
     public static final String REQUEST_SECURITY_MISSING = "request.security.missing";
+    public static final String REQUEST_SECURITY_INVALID = "request.security.invalid";
     /** Followed by the parameter location, e.g. {@code request.parameter.query}. */
     public static final String REQUEST_PARAMETER = "request.parameter";
     public static final String REQUEST_QUERY_UNKNOWN = "request.parameter.query.unknown";
@@ -42,7 +43,7 @@ public final class IssueKeys {
         return switch (key) {
             case REQUEST_PATH_MISSING -> 404;
             case REQUEST_OPERATION_NOT_ALLOWED -> 405;
-            case REQUEST_SECURITY_MISSING -> 401;
+            case REQUEST_SECURITY_MISSING, REQUEST_SECURITY_INVALID -> 401;
             case REQUEST_CONTENT_TYPE_NOT_ALLOWED -> 415;
             case REQUEST_ACCEPT_NOT_ACCEPTABLE -> 406;
             default -> 400;

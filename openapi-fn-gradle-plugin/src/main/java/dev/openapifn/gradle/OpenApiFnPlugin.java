@@ -62,6 +62,13 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
         task.getSourcesDir().convention(output.map(directory -> directory.dir("java")));
         task.getTestSourcesDir().convention(output.map(directory -> directory.dir("test-java")));
         task.getResourcesDir().convention(output.map(directory -> directory.dir("resources")));
+        // Remote documents are not tracked inputs: fetch them again on every build.
+        task.getOutputs().upToDateWhen(OpenApiFnPlugin::withoutRemoteDocuments);
+        task.getOutputs().cacheIf("the bundle has no remote documents", OpenApiFnPlugin::withoutRemoteDocuments);
+    }
+
+    private static boolean withoutRemoteDocuments(org.gradle.api.Task task) {
+        return !((GenerateOpenApi) task).bundlesRemoteDocuments();
     }
 
     private static void addToSourceSets(Project project, TaskProvider<GenerateOpenApi> task) {

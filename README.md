@@ -234,7 +234,8 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 ## Limitations
 
 * **Spring MVC only.** WebFlux has no runtime (generated clients use `RestClient`).
-* **Credentials are checked for presence, not verified.** Authentication is Spring Security's job.
+* **Credentials are checked for presence and syntax, not verified.** Basic credentials must be
+  base64 `user:password`, bearer tokens RFC 6750 tokens; verifying them is Spring Security's job.
   `mutualTLS` requirements count as satisfied.
 * **Sequential media types are not streamed.** JSON Lines, SSE and positional multipart bodies are
   read and written whole (a `List`).
@@ -243,8 +244,8 @@ Every module is built with 100% line, branch, instruction and method coverage, e
   and path parameters, have no 3.0 equivalent and become `csv` with a warning.
 * **Generic records from `$dynamicRef`:** type variables are used for the template's own
   properties. Inline objects nested in the template fall back to the anchor's default.
-* **Remote references are fetched while generating.** The Gradle task does not track their content,
-  so re-run it (`--rerun-tasks`) when a remote document changes.
+* **Remote references are fetched while generating.** A Gradle task whose description uses them is
+  never up to date or cached, so every build fetches them again.
 * **Links are checked, not used.** Their target operations must exist, but links have no runtime
   behaviour.
 * **Callbacks sharing a URL expression get one receiver each.** Point the expressions at the

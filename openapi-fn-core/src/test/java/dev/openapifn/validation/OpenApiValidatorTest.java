@@ -97,6 +97,54 @@ class OpenApiValidatorTest {
     }
 
     @Test
+    void credentialsMustBeWellFormed() {
+        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(java.util.Map.of())).parse(java.net.URI.create("mem:/a.yaml"), """
+            openapi: 3.1.0
+            info: {title: t, version: v}
+            paths:
+              /basic: {get: {security: [{basic: []}], responses: {'204': {description: ok}}}}
+              /bearer: {get: {security: [{bearer: []}], responses: {'204': {description: ok}}}}
+              /digest: {get: {security: [{digest: []}], responses: {'204': {description: ok}}}}
+              /keys: {get: {security: [{header: [], query: [], cookie: []}], responses: {'204': {description: ok}}}}
+              /either: {get: {security: [{basic: []}, {header: []}], responses: {'204': {description: ok}}}}
+              /mtls: {get: {security: [{mtls: []}], responses: {'204': {description: ok}}}}
+            components:
+              securitySchemes:
+                basic: {type: http, scheme: basic}
+                bearer: {type: http, scheme: bearer}
+                digest: {type: http, scheme: digest}
+                header: {type: apiKey, name: X-Key, in: header}
+                query: {type: apiKey, name: key, in: query}
+                cookie: {type: apiKey, name: key, in: cookie}
+                mtls: {type: mutualTLS}
+            """).orElseThrow(d -> new AssertionError(d.toString()));
+        var validator = OpenApiValidator.of(api);
+        java.util.function.BiFunction<String, String, List<String>> issues = (path, authorization) -> issues(validator.validateRequest(
+            HttpRequest.of("GET", path).withHeader("Authorization", authorization)).report());
+        assertThat(issues.apply("/basic", "Basic dXNlcjpwdw==")).isEmpty();
+        assertThat(issues.apply("/basic", "basic   dXNlcjpwdw==  ")).isEmpty();
+        assertThat(issues.apply("/basic", "Basic bm8tY29sb24=")).containsExactly("request.security.invalid@security");
+        assertThat(issues.apply("/basic", "Basic !!!")).containsExactly("request.security.invalid@security");
+        assertThat(issues.apply("/basic", "Basic")).containsExactly("request.security.invalid@security");
+        assertThat(issues.apply("/basic", "Bearer t")).containsExactly("request.security.missing@security");
+        assertThat(issues.apply("/bearer", "Bearer eyJhbGciOiJub25lIn0.e30.")).isEmpty();
+        assertThat(issues.apply("/bearer", "Bearer not a token")).containsExactly("request.security.invalid@security");
+        assertThat(issues.apply("/digest", "Digest username=\"u\", realm=\"r\"")).isEmpty();
+        assertThat(issues.apply("/digest", "Digest")).containsExactly("request.security.invalid@security");
+        var keys = HttpRequest.of("GET", "/keys?key=q").withHeader("X-Key", "h").withHeader("Cookie", "key=c");
+        assertThat(issues(validator.validateRequest(keys).report())).isEmpty();
+        assertThat(issues(validator.validateRequest(HttpRequest.of("GET", "/keys?key=q").withHeader("X-Key", " ").withHeader("Cookie", "key=c")).report()))
+            .containsExactly("request.security.invalid@security");
+        assertThat(issues(validator.validateRequest(HttpRequest.of("GET", "/keys?key=").withHeader("X-Key", "h")).report()))
+            .containsExactly("request.security.missing@security");
+        assertThat(issues.apply("/either", "Basic !!!")).containsExactly("request.security.invalid@security");
+        assertThat(validator.validateRequest(HttpRequest.of("GET", "/either")).report().issues().getFirst().message())
+            .isEqualTo("missing credentials; requires basic or header");
+        assertThat(issues(validator.validateRequest(HttpRequest.of("GET", "/mtls")).report())).isEmpty();
+        assertThat(IssueKeys.status(IssueKeys.REQUEST_SECURITY_INVALID)).isEqualTo(401);
+    }
+
+    @Test
     void parameters() {
         assertThat(request(listPets("?limit=500"))).containsExactly("request.parameter.query.schema.maximum@query.limit");
         assertThat(request(listPets("?limit=abc"))).containsExactly("request.parameter.query.schema.type@query.limit");

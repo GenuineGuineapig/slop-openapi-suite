@@ -31,8 +31,8 @@ import org.gradle.api.tasks.TaskAction;
 
 /**
  * Generates sources, test sources and resources from one API description. Remote references are
- * fetched and bundled; their content is not a tracked input, so re-run the task (or build with
- * {@code --rerun-tasks}) when a remote document changes.
+ * fetched and bundled. Gradle cannot track their content, so a task whose bundle contains remote
+ * documents is never up to date and never cached: every build fetches them again.
  */
 @CacheableTask
 public abstract class GenerateOpenApi extends DefaultTask {
@@ -77,6 +77,11 @@ public abstract class GenerateOpenApi extends DefaultTask {
 
     @Inject
     protected abstract FileSystemOperations getFileSystemOperations();
+
+    /** Whether the last generation bundled remote documents (under {@code META-INF/openapi-fn/<api>/remote/}). */
+    public boolean bundlesRemoteDocuments() {
+        return !getResourcesDir().getAsFileTree().matching(files -> files.include("META-INF/openapi-fn/*/remote/**")).isEmpty();
+    }
 
     @TaskAction
     public void generate() throws IOException {

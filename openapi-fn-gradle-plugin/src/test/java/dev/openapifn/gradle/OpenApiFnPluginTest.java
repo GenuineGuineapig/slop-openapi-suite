@@ -158,6 +158,33 @@ class OpenApiFnPluginTest {
     }
 
     @Test
+    void remoteDocumentsAreFetchedOnEveryBuild() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/pet.yaml", exchange -> {
+            var body = "{type: object, properties: {name: {type: string}}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var remote = "http://127.0.0.1:" + server.getAddress().getPort() + "/pet.yaml";
+            write("remote.yaml", API.replace("schemas/pet.yaml", remote));
+            var project = project(true);
+            var task = register(project, "pets", "remote.yaml");
+            assertThat(task.bundlesRemoteDocuments()).isFalse();
+            assertThat(task.getOutputs().getUpToDateSpec().isSatisfiedBy(task)).isTrue();
+            task.generate();
+            assertThat(task.bundlesRemoteDocuments()).isTrue();
+            assertThat(task.getOutputs().getUpToDateSpec().isSatisfiedBy(task)).isFalse();
+            assertThat(task.getResourcesDir().get().getAsFile().toPath().resolve("META-INF/openapi-fn/pets/remote/127.0.0.1_"
+                + server.getAddress().getPort() + "/pet.yaml")).exists();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void reportsInvalidDescriptions() throws Exception {
         write("api.yaml", "openapi: 3.1.0\npaths: {}\n");
         var project = project(true);
