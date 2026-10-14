@@ -188,8 +188,11 @@ class TypeMapperTest {
         assertThat(page.generics()).isEqualTo("<T>");
         assertThat(page.diamond()).isEqualTo("<>");
         assertThat(properties(mapper, "Page")).containsExactly(Map.entry("items", "@Nullable List<T>"), Map.entry("first", "@Nullable T"),
-            Map.entry("meta", "@Nullable Page.Meta"));
-        assertThat(definition(mapper, model("Page").nested("Meta"), RecordDef.class).properties().getFirst().type()).isEqualTo(TypeRef.OBJECT);
+            Map.entry("meta", "@Nullable Page.Meta<T>"));
+        // An inline record of the template that uses its type variable is generic too.
+        var meta = definition(mapper, model("Page").nested("Meta"), RecordDef.class);
+        assertThat(meta.typeParameters()).containsExactly("T");
+        assertThat(meta.properties().getFirst().type()).isEqualTo(new TypeRef.Variable("T"));
         assertThat(definition(mapper, model("Pair"), RecordDef.class).typeParameters()).containsExactly("TLeft", "TRight");
         assertThat(properties(mapper, "Holder")).containsExactly(
             Map.entry("bound", "@Nullable Page<Address>"),
@@ -198,7 +201,8 @@ class TypeMapperTest {
             Map.entry("list", "@Nullable List<Object>"));
         assertThat(new ModelRenderer(mapper).file(page)).contains("public record Page<T>(", "public static <T> Builder<T> builder()",
             "return new Builder<>();", "public Page<T> withFirst(@Nullable T first)", "return new Page<>(items, first, meta);",
-            "public static final class Builder<T>", "public Builder<T> first(@Nullable T first)", "public Page<T> build()");
+            "public static final class Builder<T>", "public Builder<T> first(@Nullable T first)", "public Page<T> build()",
+            "public record Meta<T>(", "@JsonProperty(\"inner\") @Nullable T inner)", "Page.@Nullable Meta<T> meta", "public Meta<T> build()");
     }
 
     @Test

@@ -290,8 +290,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
   buffers request bodies for interceptors (generated clients validate without buffering).
 * **One Java type per body.** A response that may be JSON Lines or SSE is typed by its first
   media type (JSON first); the other is still accepted and validated, but not typed separately.
-* **Generic records from `$dynamicRef`:** type variables are used for the template's own
-  properties. Inline objects nested in the template fall back to the anchor's default.
 * **Remote references are fetched on every build.** The Gradle task fetches them to see whether
   they changed; it is up to date (or taken from the build cache) while they did not.
 * **Links are checked, not used.** Their target operations must exist, but links have no runtime

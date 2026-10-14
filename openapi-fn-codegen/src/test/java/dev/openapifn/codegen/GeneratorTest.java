@@ -184,6 +184,9 @@ class GeneratorTest {
         assertThat(compilation.diagnostics).as("warnings").isEmpty();
         var summary = Launch.tests(compilation, "org.example.variants.api.DefaultControllerTest", "org.example.variants.api.CallbacksControllerTest");
         assertThat(compilation.file("org/example/variants/api/GetPageResponse.java")).contains("Page<Point> body");
+        // Inline records of a generic template share its type variable.
+        assertThat(compilation.file("org/example/variants/model/Page.java")).contains("@Nullable Meta<T> meta", "record Meta<T>(", "@Nullable T first",
+            "@Nullable Pages<T> pages", "record Pages<T>(", "@Nullable T last");
         assertThat(compilation.file("org/example/variants/api/CallbacksApi.java")).contains("PingResponse ping(PingRequest request);",
             "PongResponse pong();", "Ping2Response ping2();");
         assertThat(summary.failures()).as(summary.describe()).isEmpty();

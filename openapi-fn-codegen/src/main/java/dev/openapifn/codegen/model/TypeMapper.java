@@ -189,7 +189,12 @@ public final class TypeMapper {
             case ENUM, UNION, OBJECT, PARENT -> {
                 var name = uniqueNested(owner, Names.pascal(hint));
                 inline.put(schema.location(), name);
-                yield define(schema, kind, name);
+                define(schema, kind, name);
+                // An inline record of a generic template that uses its type variables is generic too.
+                var variables = definitions.get(name) instanceof RecordDef record ? record.typeParameters() : List.<String>of();
+                var type = variables.isEmpty() ? name : name.of(variables.stream().map(TypeRef.Variable::new).toArray(TypeRef[]::new));
+                inline.put(schema.location(), type);
+                yield type;
             }
             default -> structural(schema, kind, owner, hint);
         };
@@ -223,10 +228,42 @@ public final class TypeMapper {
             .isPresent()).findFirst();
     }
 
-    /** The type variable a {@code $dynamicRef} stands for inside the generic class {@code owner}. */
+    /**
+     * The type variable a {@code $dynamicRef} stands for inside {@code owner}: a generic class, or a
+     * class nested in one (inline records of a generic template share its type variables).
+     */
     private Optional<TypeRef> typeVariable(ClassName owner, String dynamicRef) {
-        return Optional.ofNullable(definitions.get(owner)).map(definition -> typeParameters(definition.schema()))
-            .flatMap(parameters -> Optional.ofNullable(parameters.get(dynamicRef.replaceFirst("^#", "")))).map(TypeRef.Variable::new);
+        for (var name = Optional.of(owner); name.isPresent(); name = enclosing(name.get())) {
+            var variable = Optional.ofNullable(definitions.get(name.get())).map(definition -> typeParameters(definition.schema()))
+                .flatMap(parameters -> Optional.ofNullable(parameters.get(dynamicRef.replaceFirst("^#", "")))).<TypeRef>map(TypeRef.Variable::new);
+            if (variable.isPresent()) {
+                return variable;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<ClassName> enclosing(ClassName name) {
+        return name.isNested() ? Optional.of(new ClassName(name.packageName(), name.simpleNames().subList(0, name.simpleNames().size() - 1)))
+            : Optional.empty();
+    }
+
+    /**
+     * The type parameters of the record {@code name}: its own (see {@link #typeParameters(Schema)}),
+     * else those of the generic template it is nested in that its schema uses.
+     */
+    private List<String> typeParameters(Schema schema, ClassName name) {
+        var own = typeParameters(schema);
+        if (!own.isEmpty()) {
+            return List.copyOf(own.values());
+        }
+        for (var outer = enclosing(name); outer.isPresent(); outer = enclosing(outer.get())) {
+            var template = Optional.ofNullable(definitions.get(outer.get())).map(definition -> typeParameters(definition.schema())).orElse(Map.of());
+            if (!template.isEmpty()) {
+                return template.entrySet().stream().filter(anchor -> refersTo(schema.object(), "#" + anchor.getKey())).map(Map.Entry::getValue).toList();
+            }
+        }
+        return List.of();
     }
 
     /** Whether {@code schema} (resolved) admits {@code null}. */
@@ -491,7 +528,7 @@ public final class TypeMapper {
     private RecordDef recordDef(Schema schema, ClassName name) {
         return new RecordDef(name, schema, properties(schema, name), additional(schema).map(value -> type(value, name, "AdditionalProperty"))
             .or(() -> closure(schema).stream().anyMatch(s -> s.keyword("additionalProperties").filter(v -> v.equals(dev.openapifn.json.JsonBoolean.TRUE)).isPresent())
-                ? Optional.of(TypeRef.OBJECT) : Optional.empty()), List.copyOf(typeParameters(schema).values()));
+                ? Optional.of(TypeRef.OBJECT) : Optional.empty()), typeParameters(schema, name));
     }
 
     private List<Property> properties(Schema schema, ClassName owner) {

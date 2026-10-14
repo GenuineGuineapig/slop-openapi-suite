@@ -234,4 +234,10 @@ components:
       properties:
         items: {type: array, items: {$dynamicRef: '#item'}}
         total: {type: integer}
+        meta:
+          type: object
+          properties:
+            first: {$dynamicRef: '#item'}
+            pages: {type: object, properties: {last: {$dynamicRef: '#item'}}}
+            count: {type: integer}
     Color: {type: string, enum: [red, green]}
