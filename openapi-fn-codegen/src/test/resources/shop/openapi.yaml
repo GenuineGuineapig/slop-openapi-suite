@@ -51,6 +51,26 @@ paths:
             application/json: {schema: {$ref: 'schemas/pets.yaml#/Pet'}}
         4XX:
           $ref: '#/components/responses/Problem'
+      callbacks:
+        petCreated:
+          '{$request.header.X-Callback-Url}':
+            post:
+              operationId: petCreatedCallback
+              requestBody:
+                required: true
+                content:
+                  application/json: {schema: {$ref: 'schemas/pets.yaml#/Pet'}}
+              responses:
+                '204': {description: received}
+            put:
+              requestBody:
+                content:
+                  text/plain: {schema: {type: string}}
+              responses:
+                '200':
+                  description: acknowledged
+                  content:
+                    text/plain: {schema: {type: string}}
     query:
       operationId: searchPets
       tags: [pets]
@@ -137,6 +157,27 @@ paths:
           description: OK
           content:
             text/plain: {schema: {type: string}}
+webhooks:
+  petAdopted:
+    post:
+      operationId: petAdopted
+      summary: A pet found a home
+      parameters:
+        - {name: X-Signature, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: 'schemas/pets.yaml#/Pet'}}
+      responses:
+        '202': {description: accepted}
+  stockLow:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, required: [sku], properties: {sku: {type: string}}}
+      responses:
+        '204': {description: noted}
 components:
   schemas:
     Order:

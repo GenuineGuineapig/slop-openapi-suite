@@ -75,7 +75,7 @@ public final class TypeMapper {
         api.model().components().schemas().forEach((name, schema) -> names.put(registry.deref(schema).location(), modelName(Names.pascal(name))));
         var visited = new HashSet<URI>();
         api.model().components().schemas().values().forEach(schema -> index(schema, visited));
-        api.operations().forEach(operation -> operationSchemas(operation).forEach(schema -> index(schema, visited)));
+        api.allOperations().forEach(operation -> operationSchemas(operation).forEach(schema -> index(schema, visited)));
     }
 
     /** The schemas an operation uses directly: parameters, bodies, sequential items and headers. */

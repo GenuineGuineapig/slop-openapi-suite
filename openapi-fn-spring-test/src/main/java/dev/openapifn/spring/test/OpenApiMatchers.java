@@ -7,8 +7,10 @@ import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.servlet.CachedBodyRequest;
 import dev.openapifn.spring.servlet.ServletMessages;
 import dev.openapifn.validation.OpenApiValidator;
+import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.ValidationReport;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -34,6 +36,18 @@ public final class OpenApiMatchers {
 
     public static ResultMatcher conformsTo(OpenApiValidator validator) {
         return result -> check(validator.validate(request(result), response(result)), result);
+    }
+
+    /**
+     * Asserts that both the request and the response conform to the operation {@code operationId}
+     * (path, webhook or callback) without routing, e.g. for webhook and callback receivers.
+     */
+    public static ResultMatcher conformsTo(OpenApiRuntime runtime, String operationId) {
+        return result -> {
+            var match = new OperationMatch(runtime.operation(operationId), Map.of());
+            var validator = runtime.validator();
+            check(validator.validateRequest(match, request(result)).report().merge(validator.validateResponse(match, response(result))), result);
+        };
     }
 
     /** Asserts that the response conforms (the request is only used to find the operation). */

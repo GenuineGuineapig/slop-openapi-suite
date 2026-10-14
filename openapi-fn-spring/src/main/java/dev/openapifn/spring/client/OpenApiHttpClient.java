@@ -33,6 +33,9 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class OpenApiHttpClient {
 
+    /** Request attribute naming the operation of a call (see {@link ClientCall#operationId()}). */
+    public static final String OPERATION_ATTRIBUTE = OpenApiHttpClient.class.getName() + ".operation";
+
     private static final Pattern EXPRESSION = Pattern.compile("\\{([^}]+)}");
     private static final BodyWriter WRITER = new BodyWriter(new SchemaShapes(SchemaRegistry.empty()));
 
@@ -50,9 +53,17 @@ public final class OpenApiHttpClient {
         return baseUrl;
     }
 
+    /** A client sending to {@code baseUrl} instead, e.g. the URL a webhook subscriber or callback registered. */
+    public OpenApiHttpClient to(String baseUrl) {
+        return new OpenApiHttpClient(restClient, baseUrl, mapper);
+    }
+
     /** Sends {@code call} and decodes the response. */
     public <R> R exchange(ClientCall call, Function<ClientResponse, R> decoder) {
         var request = restClient.method(HttpMethod.valueOf(call.method())).uri(uri(call));
+        if (call.operationId() != null) {
+            request.attribute(OPERATION_ATTRIBUTE, call.operationId());
+        }
         var cookies = new ArrayList<Map.Entry<String, String>>();
         for (var param : call.parameters()) {
             var value = toJson(param.value());

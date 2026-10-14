@@ -53,6 +53,11 @@ class OpenApiMatchersTest {
             return ResponseEntity.noContent().build();
         }
 
+        @PostMapping("/hooks/adopted")
+        ResponseEntity<Map<String, Object>> adopted(@RequestBody Map<String, Object> pet) {
+            return ResponseEntity.ok(pet);
+        }
+
         @PutMapping("/api/pets/{id}/photo")
         ResponseEntity<byte[]> photo() {
             return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(new byte[] {1});
@@ -78,6 +83,16 @@ class OpenApiMatchersTest {
                     return request;
                 }))
             .andExpect(OpenApiMatchers.conformsTo(pets));
+    }
+
+    @Test
+    void checksExchangesAgainstNamedOperations() throws Exception {
+        var pets = runtimes.get("pets");
+        mvc.perform(post("/hooks/adopted").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Rex\"}"))
+            .andExpect(OpenApiMatchers.conformsTo(pets, "petAdopted"));
+        assertThatThrownBy(() -> mvc.perform(post("/hooks/adopted").contentType(MediaType.APPLICATION_JSON).content("{\"tag\":\"x\"}"))
+            .andExpect(OpenApiMatchers.conformsTo(pets, "petAdopted"))).isInstanceOf(AssertionError.class)
+            .hasMessageContaining("request.body.schema.required").hasMessageContaining("response.body.schema.required");
     }
 
     @Test

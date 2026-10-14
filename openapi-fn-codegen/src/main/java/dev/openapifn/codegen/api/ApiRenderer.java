@@ -195,7 +195,12 @@ public final class ApiRenderer {
     private static String javadoc(OperationModel operation) {
         var op = operation.operation().operation();
         var text = java.util.stream.Stream.of(op.summary(), op.description()).flatMap(Optional::stream).collect(Collectors.joining("\n\n"));
-        return (text.isEmpty() ? "" : text + "\n\n") + "<p>{@code " + operation.operation().method() + " " + operation.operation().path() + "}";
+        var kind = switch (operation.operation().kind()) {
+            case PATH -> "";
+            case WEBHOOK -> "Webhook ";
+            case CALLBACK -> "Callback to ";
+        };
+        return (text.isEmpty() ? "" : text + "\n\n") + "<p>" + kind + "{@code " + operation.operation().method() + " " + operation.operation().path() + "}";
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -210,7 +215,9 @@ public final class ApiRenderer {
         out.javadoc("Serves the {@code " + group + "} operations by delegating to {@link " + imports.ref(apiName)
             + "}; requests are validated and bound by the openapi-fn runtime. Answers 501 while no implementation is registered.");
         out.line(generated(imports)).line("@SuppressWarnings(\"deprecation\")").line("@" + imports.ref(REST_CONTROLLER));
-        out.line("@" + imports.ref(REQUEST_MAPPING) + "(\"${openapi-fn.specs." + names.apiName() + ".base-path:" + names.basePath() + "}\")");
+        if (operations.stream().noneMatch(OperationModel::outbound)) {
+            out.line("@" + imports.ref(REQUEST_MAPPING) + "(\"${openapi-fn.specs." + names.apiName() + ".base-path:" + names.basePath() + "}\")");
+        }
         out.open("public class " + name.simpleName());
         out.line("private final " + imports.ref(OPENAPI_RUNTIME) + " runtime;");
         out.line("private final " + imports.ref(OBJECT_PROVIDER) + "<" + imports.ref(apiName) + "> api;");
@@ -222,7 +229,7 @@ public final class ApiRenderer {
             var method = operation.operation().method();
             if (MAPPABLE_METHODS.contains(method)) {
                 out.blank().line("@" + imports.ref(REQUEST_MAPPING) + "(method = " + imports.ref(REQUEST_METHOD) + "." + method + ", path = "
-                    + Names.literal(mappingPath(operation)) + ")");
+                    + Names.literal(mappingPath(operation, names)) + ")");
                 handler(operation, "public", out, imports);
             } else {
                 custom.computeIfAbsent(operation.operation().path(), path -> new ArrayList<>()).add(operation);
@@ -230,7 +237,7 @@ public final class ApiRenderer {
         }
         custom.forEach((path, pathOperations) -> {
             out.blank().javadoc("Dispatches the methods Spring cannot map by annotation.");
-            out.line("@" + imports.ref(REQUEST_MAPPING) + "(path = " + Names.literal(mappingPath(pathOperations.getFirst())) + ")");
+            out.line("@" + imports.ref(REQUEST_MAPPING) + "(path = " + Names.literal(mappingPath(pathOperations.getFirst(), names)) + ")");
             out.open("public " + imports.ref(RESPONSE_ENTITY) + "<Object> " + pathOperations.getFirst().method() + "Dispatch(" + imports.ref(SERVLET_REQUEST)
                 + " request)");
             out.open("return switch (request.getMethod())");
@@ -255,9 +262,12 @@ public final class ApiRenderer {
     /**
      * The Spring mapping pattern of an operation. Spring matches segments without their
      * {@code ;} parameters, so matrix-style expressions become {@code *} (the runtime extracts
-     * their raw values itself).
+     * their raw values itself). Webhooks and callbacks are received at a configurable path.
      */
-    static String mappingPath(OperationModel operation) {
+    static String mappingPath(OperationModel operation, GeneratorNames names) {
+        if (operation.outbound()) {
+            return "${openapi-fn.specs." + names.apiName() + "." + operation.receiverKind() + "." + operation.method() + ".path:" + operation.receiverPath() + "}";
+        }
         var path = operation.operation().path();
         for (var parameter : operation.operation().parameters()) {
             if (parameter.in() == ParameterLocation.PATH && parameter.style() == dev.openapifn.model.ParameterStyle.MATRIX) {
@@ -300,7 +310,8 @@ public final class ApiRenderer {
         var name = names.client(group);
         var imports = imports(name, Set.of());
         var out = new Source();
-        out.javadoc("A client for the {@code " + group + "} operations. Every described response, errors included, is returned as a value of the "
+        out.javadoc((operations.stream().anyMatch(OperationModel::outbound) ? "Sends the {@code " + group + "} to the URLs their receivers registered."
+            : "A client for the {@code " + group + "} operations.") + " Every described response, errors included, is returned as a value of the "
             + "operation's sealed response type; undescribed statuses raise {@code UnexpectedResponseException}.");
         out.line(generated(imports)).line("@SuppressWarnings(\"deprecation\")");
         out.open("public class " + name.simpleName());
@@ -329,11 +340,18 @@ public final class ApiRenderer {
     }
 
     private void clientMethod(OperationModel operation, Map<String, String> constants, Source out, Imports imports) {
-        out.open("public " + imports.ref(operation.response()) + " " + operation.method() + "(" + operation.request().map(r -> imports.ref(r) + " request")
-            .orElse("") + ")");
+        var parameters = new ArrayList<String>();
+        if (operation.outbound()) {
+            parameters.add(imports.ref(TypeRef.URI) + " target");
+        }
+        operation.request().ifPresent(r -> parameters.add(imports.ref(r) + " request"));
+        out.open("public " + imports.ref(operation.response()) + " " + operation.method() + "(" + String.join(", ", parameters) + ")");
         var chain = new ArrayList<String>();
         chain.add("var call = " + imports.ref(CLIENT_CALL) + ".of(" + Names.literal(operation.operation().method()) + ", "
-            + Names.literal(operation.operation().path()) + ")");
+            + Names.literal(operation.outbound() ? "" : operation.operation().path()) + ")");
+        if (operation.outbound()) {
+            chain.add("    .operation(" + Names.literal(operation.id()) + ")");
+        }
         for (var parameter : operation.parameters()) {
             chain.add("    .param(" + constants.get(operation.method() + "/" + parameter.property().javaName()) + ", request."
                 + parameter.property().javaName() + "())");
@@ -350,7 +368,7 @@ public final class ApiRenderer {
             out.line("call = call.multipart(" + imports.ref(ARRAYS) + ".asList(" + parts(body, record, imports) + "));");
             out.close();
         }, () -> out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());")));
-        out.open("return http.exchange(call, response -> switch (response.status())");
+        out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + ".exchange(call, response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
         Optional<OperationModel.VariantModel> fallback = Optional.empty();
         for (var variant : operation.variants()) {

@@ -40,7 +40,7 @@ class GeneratorTest {
         var compilation = Compilation.of(api, GeneratorConfig.of("shop", "com.example.shop"), dir, Map.of("com/example/shop/ShopApplication.java", APPLICATION));
         assertThat(compilation.success).as(compilation.diagnostics).isTrue();
         var summary = Launch.tests(compilation, "com.example.shop.api.PetsControllerTest", "com.example.shop.api.OrdersControllerTest",
-            "com.example.shop.api.DefaultControllerTest");
+            "com.example.shop.api.DefaultControllerTest", "com.example.shop.api.WebhooksControllerTest", "com.example.shop.api.CallbacksControllerTest");
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
         assertThat(summary.succeeded()).isGreaterThanOrEqualTo(10);
     }
@@ -82,7 +82,12 @@ class GeneratorTest {
                 "order:3-day:3:Card[method=card, last4=4242]:Address:[LinesItem[sku=sku-1, quantity=2]]",
                 "pickup:StringValue[value=pickup]",
                 "events:[placed, paid]",
-                "health:UP");
+                "health:UP",
+                "adopted:202",
+                "stock:204",
+                "callback:204",
+                "put:ack:hi",
+                "invalid:400");
         } finally {
             thread.setContextClassLoader(previous);
         }

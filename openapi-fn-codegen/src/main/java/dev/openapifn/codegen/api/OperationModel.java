@@ -103,13 +103,21 @@ public record OperationModel(ApiOperation operation, String id, String method, S
         Map.entry(502, "BadGateway"), Map.entry(503, "ServiceUnavailable"), Map.entry(504, "GatewayTimeout"), Map.entry(505, "HttpVersionNotSupported"),
         Map.entry(507, "InsufficientStorage"), Map.entry(511, "NetworkAuthenticationRequired"));
 
-    /** Builds the model of {@code operation}; types are registered with {@code mapper}. */
+    /** Builds the model of a path operation, grouped by its first tag; types are registered with {@code mapper}. */
     public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods) {
+        return of(operation, operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default"),
+            operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods);
+    }
+
+    /**
+     * Builds the model of an operation in {@code group}; {@code fallbackName} names its Java method
+     * when it has no {@code operationId}.
+     */
+    public static OperationModel of(ApiOperation operation, String group, String fallbackName, String apiPackage, TypeMapper mapper,
+                                    Set<String> takenMethods) {
         var id = operation.displayName();
-        var method = Names.unique(Names.camel(operation.operationId().orElse(operation.method().toLowerCase(java.util.Locale.ROOT) + " "
-            + operation.path())), takenMethods);
+        var method = Names.unique(Names.camel(operation.operationId().orElse(fallbackName)), takenMethods);
         var pascal = Character.toUpperCase(method.charAt(0)) + method.substring(1);
-        var group = operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default");
         var requestName = ClassName.of(apiPackage, pascal + "Request");
         var responseName = ClassName.of(apiPackage, pascal + "Response");
         var componentNames = new HashSet<String>(List.of("builder", "body"));
@@ -204,6 +212,21 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     private static Schema empty() {
         var uri = URI.create("urn:openapi-fn:any");
         return Schema.at(JsonObject.EMPTY, uri, JsonPointer.ROOT, uri, Dialect.DRAFT_2020_12);
+    }
+
+    /** Whether the API provider sends this operation's requests (a webhook or callback) rather than serving them. */
+    public boolean outbound() {
+        return operation.kind() != ApiOperation.Kind.PATH;
+    }
+
+    /** The default path a receiving controller maps a webhook or callback to, e.g. {@code /webhooks/newPet}. */
+    public String receiverPath() {
+        return "/" + receiverKind() + "/" + method;
+    }
+
+    /** {@code webhooks} or {@code callbacks}. */
+    public String receiverKind() {
+        return operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks";
     }
 
     /** All request record components in order. */

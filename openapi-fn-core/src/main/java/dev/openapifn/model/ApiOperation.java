@@ -6,17 +6,27 @@ import java.util.Optional;
 /**
  * An operation together with its context and with path-item level settings already merged in.
  *
- * @param path the path template, or the webhook name for webhooks
+ * @param path the path template; for webhooks the webhook name, for callbacks the runtime expression of the URL
  * @param method upper-case HTTP method
  * @param pathItem the containing path item
  * @param operation the operation
  * @param parameters effective parameters (path item parameters overridden by operation parameters)
  * @param security effective security requirements (operation level, else global)
  * @param servers effective servers (operation, else path item, else global)
- * @param webhook whether this operation describes a webhook
+ * @param kind where the operation is described
  */
 public record ApiOperation(String path, String method, PathItem pathItem, Operation operation, List<Parameter> parameters,
-                           List<SecurityRequirement> security, List<Server> servers, boolean webhook) {
+                           List<SecurityRequirement> security, List<Server> servers, Kind kind) {
+
+    /** Where an operation is described, which decides who sends its requests. */
+    public enum Kind {
+        /** Under {@code paths}: the API serves it. */
+        PATH,
+        /** Under {@code webhooks} (3.1+): the API provider sends it to subscribers. */
+        WEBHOOK,
+        /** In the {@code callbacks} of an operation: the API provider sends it to a URL taken from the triggering exchange. */
+        CALLBACK
+    }
 
     public ApiOperation {
         parameters = List.copyOf(parameters);

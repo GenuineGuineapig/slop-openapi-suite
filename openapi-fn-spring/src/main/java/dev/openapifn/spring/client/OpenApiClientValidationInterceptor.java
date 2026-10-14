@@ -3,11 +3,14 @@ package dev.openapifn.spring.client;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import dev.openapifn.model.ApiOperation;
 import dev.openapifn.spring.OpenApiValidationException;
 import dev.openapifn.validation.OpenApiValidator;
+import dev.openapifn.validation.OperationMatch;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Map;
 import java.util.Optional;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -39,7 +42,8 @@ public final class OpenApiClientValidationInterceptor implements ClientHttpReque
         var uri = request.getURI();
         var message = new HttpRequest(request.getMethod().name(), uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""),
             headers(request.getHeaders()), body.length == 0 ? Optional.empty() : Optional.of(body));
-        var validation = validator.validateRequest(message);
+        var validation = operation(request).map(operation -> validator.validateRequest(new OperationMatch(operation, Map.of()), message))
+            .orElseGet(() -> validator.validateRequest(message));
         if (validation.report().hasErrors()) {
             throw new OpenApiValidationException(validation.report());
         }
@@ -58,6 +62,13 @@ public final class OpenApiClientValidationInterceptor implements ClientHttpReque
             }
         });
         return buffered;
+    }
+
+    /** The webhook or callback a request belongs to: those have no path to route by. */
+    private Optional<ApiOperation> operation(org.springframework.http.HttpRequest request) {
+        return Optional.ofNullable(request.getAttributes().get(OpenApiHttpClient.OPERATION_ATTRIBUTE))
+            .flatMap(id -> validator.api().operation(id.toString()))
+            .filter(operation -> operation.kind() != ApiOperation.Kind.PATH);
     }
 
     private static Headers headers(HttpHeaders source) {

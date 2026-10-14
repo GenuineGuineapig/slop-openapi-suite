@@ -15,8 +15,10 @@ import org.jspecify.annotations.Nullable;
  * @param parameters parameter values in declaration order
  * @param body the body, if any
  * @param acceptTypes acceptable media types
+ * @param operationId the operation the call belongs to, which identifies webhooks and callbacks for validation (they have no path)
  */
-public record ClientCall(String method, String pathTemplate, List<Param> parameters, @Nullable Body body, List<String> acceptTypes) {
+public record ClientCall(String method, String pathTemplate, List<Param> parameters, @Nullable Body body, List<String> acceptTypes,
+                         @Nullable String operationId) {
 
     /**
      * A parameter value.
@@ -62,7 +64,7 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
     }
 
     public static ClientCall of(String method, String pathTemplate) {
-        return new ClientCall(method, pathTemplate, List.of(), null, List.of());
+        return new ClientCall(method, pathTemplate, List.of(), null, List.of(), null);
     }
 
     /** A copy with a parameter value; {@code null} values are ignored. */
@@ -72,21 +74,26 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
         }
         var copy = new ArrayList<>(parameters);
         copy.add(new Param(spec, value));
-        return new ClientCall(method, pathTemplate, copy, body, acceptTypes);
+        return new ClientCall(method, pathTemplate, copy, body, acceptTypes, operationId);
     }
 
     /** A copy with a body; a {@code null} value means no body. */
     public ClientCall body(String contentType, @Nullable Object value) {
-        return new ClientCall(method, pathTemplate, parameters, value == null ? null : new Body(contentType, value), acceptTypes);
+        return new ClientCall(method, pathTemplate, parameters, value == null ? null : new Body(contentType, value), acceptTypes, operationId);
     }
 
     /** A copy with a {@code multipart/form-data} body of the non-null parts. */
     public ClientCall multipart(List<@Nullable Part> parts) {
         return new ClientCall(method, pathTemplate, parameters, new Body("multipart/form-data", parts.stream().filter(Objects::nonNull).toList()),
-            acceptTypes);
+            acceptTypes, operationId);
     }
 
     public ClientCall accept(String... mediaTypes) {
-        return new ClientCall(method, pathTemplate, parameters, body, List.of(mediaTypes));
+        return new ClientCall(method, pathTemplate, parameters, body, List.of(mediaTypes), operationId);
+    }
+
+    /** A copy that names its operation. */
+    public ClientCall operation(String id) {
+        return new ClientCall(method, pathTemplate, parameters, body, acceptTypes, id);
     }
 }

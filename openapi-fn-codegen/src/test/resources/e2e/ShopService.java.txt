@@ -11,7 +11,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ShopService implements PetsApi, OrdersApi, DefaultApi {
+public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi, CallbacksApi {
 
     static final UUID ORDER = UUID.fromString("3fa85f64-5717-4562-b3fc-2c963f66afa6");
 
@@ -91,5 +91,25 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi {
     @Override
     public HealthResponse health() {
         return HealthResponse.ok("UP");
+    }
+
+    @Override
+    public PetAdoptedResponse petAdopted(PetAdoptedRequest request) {
+        return request.xSignature().equals("signed") ? PetAdoptedResponse.accepted() : null;
+    }
+
+    @Override
+    public PostStockLowResponse postStockLow(PostStockLowRequest request) {
+        return PostStockLowResponse.noContent();
+    }
+
+    @Override
+    public PetCreatedCallbackResponse petCreatedCallback(PetCreatedCallbackRequest request) {
+        return PetCreatedCallbackResponse.noContent();
+    }
+
+    @Override
+    public CreatePetPetCreatedPutResponse createPetPetCreatedPut(CreatePetPetCreatedPutRequest request) {
+        return CreatePetPetCreatedPutResponse.ok("ack:" + request.body());
     }
 }

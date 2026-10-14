@@ -4,6 +4,7 @@ import com.example.shop.api.*;
 import com.example.shop.model.*;
 import dev.openapifn.spring.FilePart;
 import dev.openapifn.spring.client.OpenApiHttpClient;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +57,26 @@ public final class EndToEnd {
         results.add("pickup:" + pickup.shipping());
         results.add("events:" + ((OrderEventsResponse.Ok) orders.orderEvents()).body().stream().map(OrderEvent::type).toList());
         results.add("health:" + ((HealthResponse.Ok) defaults.health()).body());
+
+        // Webhooks and callbacks are sent to receivers; here the same application receives them.
+        var root = baseUrl.substring(0, baseUrl.indexOf("/api/v1"));
+        var webhooks = new WebhooksClient(http);
+        var callbacks = new CallbacksClient(http);
+        var tom = Cat.builder().name("Tom").kind(Kind.CAT).build();
+        results.add("adopted:" + webhooks.petAdopted(URI.create(root + "/webhooks/petAdopted"), new PetAdoptedRequest("signed", tom)).status());
+        results.add("stock:" + webhooks.postStockLow(URI.create(root + "/webhooks/postStockLow"),
+            new PostStockLowRequest(new PostStockLowRequest.Body("sku-1"))).status());
+        results.add("callback:" + callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(tom))
+            .status());
+        results.add("put:" + ((CreatePetPetCreatedPutResponse.Ok) callbacks.createPetPetCreatedPut(URI.create(root + "/callbacks/createPetPetCreatedPut"),
+            new CreatePetPetCreatedPutRequest("hi"))).body());
+        try {
+            callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(new Pet.Default(null, "", Kind.BIRD,
+                null, null)));
+            results.add("invalid:accepted");
+        } catch (dev.openapifn.spring.client.UnexpectedResponseException e) {
+            results.add("invalid:" + e.response().status());
+        }
         return results;
     }
 

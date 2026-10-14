@@ -185,11 +185,22 @@ class ClientTest {
             paths:
               /pets:
                 post:
+                  operationId: createPet
                   requestBody:
                     required: true
                     content: {application/json: {schema: {type: object, required: [name]}}}
                   responses:
                     '200': {description: ok, content: {application/json: {schema: {type: object, required: [id]}}}}
+                  callbacks:
+                    created:
+                      '{$request.body#/callback}':
+                        post:
+                          operationId: petCreated
+                          requestBody:
+                            required: true
+                            content: {application/json: {schema: {type: object, required: [id]}}}
+                          responses:
+                            '204': {description: received}
             """).orElseThrow(d -> new AssertionError(d.toString()));
         var validator = OpenApiValidator.of(api);
         var strict = RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true));
@@ -207,6 +218,20 @@ class ClientTest {
         lenient.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess());
         assertThat(lenient.client().<Integer>exchange(valid, ClientResponse::status)).isEqualTo(200);
         assertThat(lenient.client().<Integer>exchange(valid, ClientResponse::status)).isEqualTo(200);
+        var callbacks = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
+        callbacks.server().expect(requestTo("https://subscriber.example.com/hooks?x=1")).andRespond(withSuccess().body(new byte[0]));
+        var subscriber = callbacks.client().to("https://subscriber.example.com/hooks");
+        assertThat(subscriber.baseUrl()).isEqualTo("https://subscriber.example.com/hooks");
+        var created = ClientCall.of("POST", "").operation("petCreated").param(ParameterSerializer.Spec.of("x", ParameterLocation.QUERY), 1);
+        assertThatThrownBy(() -> subscriber.exchange(created.body("application/json", Map.of()), r -> null))
+            .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("request.body.schema.required");
+        assertThatThrownBy(() -> subscriber.exchange(created.body("application/json", Map.of("id", 1)), r -> null))
+            .isInstanceOf(OpenApiValidationException.class).hasMessageContaining("response.status.unknown");
+        var named = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
+        named.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
+        named.server().expect(requestTo("https://api.example.com/v1/pets")).andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
+        assertThat(named.client().<Integer>exchange(valid.operation("unknownOperation"), ClientResponse::status)).isEqualTo(200);
+        assertThat(named.client().<Integer>exchange(valid.operation("createPet"), ClientResponse::status)).isEqualTo(200);
         var unknown = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
         unknown.server().expect(requestTo("https://api.example.com/v1/other")).andRespond(withSuccess());
         assertThatThrownBy(() -> unknown.client().exchange(ClientCall.of("GET", "/other"), r -> null)).isInstanceOf(OpenApiValidationException.class);

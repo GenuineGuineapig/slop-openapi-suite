@@ -95,7 +95,7 @@ class OpenApiParserTest {
         assertThat(doc.operation("listPets").orElseThrow().operation().responses().forStatus(500).orElseThrow().description())
             .contains("Not found");
         assertThat(doc.webhooks()).singleElement().satisfies(w -> {
-            assertThat(w.webhook()).isTrue();
+            assertThat(w.kind()).isEqualTo(dev.openapifn.model.ApiOperation.Kind.WEBHOOK);
             assertThat(w.path()).isEqualTo("newPet");
         });
         assertThat(doc.operation("newPetWebhook")).isPresent();
@@ -399,6 +399,7 @@ class OpenApiParserTest {
     @Test
     void callbacksExamplesLinksAndTags() {
         var doc = ok(v31("""
+            security: [{key: []}]
             paths:
               /a:
                 post:
@@ -406,16 +407,42 @@ class OpenApiParserTest {
                     onEvent:
                       x-ext: 1
                       '{$request.body#/url}':
-                        post: {responses: {'200': {description: ok}}}
+                        post: {operationId: eventHappened, responses: {'200': {description: ok}}}
+                  responses: {'200': {description: ok}}
+            webhooks:
+              hook:
+                post:
+                  callbacks:
+                    onAck:
+                      '{$request.header.X-Ack}':
+                        put: {security: [{key: []}], responses: {'204': {description: acknowledged}}}
                   responses: {'200': {description: ok}}
             tags: [{name: a, summary: s, description: d, externalDocs: {url: u}, parent: p, kind: nav}]
             externalDocs: {url: https://docs}
             components:
+              securitySchemes:
+                key: {type: apiKey, name: k, in: header}
               examples:
                 full: {summary: s, description: d, value: 1}
                 data: {dataValue: {a: 1}, serializedValue: 'a=1'}
                 external: {externalValue: https://x}
             """));
+        assertThat(doc.callbacks()).satisfiesExactly(event -> {
+            assertThat(event.owner()).isEqualTo(doc.operations().getFirst());
+            assertThat(event.name()).isEqualTo("onEvent");
+            assertThat(event.operation().kind()).isEqualTo(dev.openapifn.model.ApiOperation.Kind.CALLBACK);
+            assertThat(event.operation().path()).isEqualTo("{$request.body#/url}");
+            assertThat(event.operation().security()).isEmpty();
+        }, ack -> {
+            assertThat(ack.owner()).isEqualTo(doc.webhooks().getFirst());
+            assertThat(ack.operation().method()).isEqualTo("PUT");
+            assertThat(ack.operation().security()).hasSize(1);
+        });
+        assertThat(doc.operations().getFirst().security()).hasSize(1);
+        assertThat(doc.webhooks().getFirst().security()).isEmpty();
+        assertThat(doc.allOperations()).extracting(dev.openapifn.model.ApiOperation::kind).containsExactly(dev.openapifn.model.ApiOperation.Kind.PATH,
+            dev.openapifn.model.ApiOperation.Kind.WEBHOOK, dev.openapifn.model.ApiOperation.Kind.CALLBACK, dev.openapifn.model.ApiOperation.Kind.CALLBACK);
+        assertThat(doc.operation("eventHappened")).contains(doc.callbacks().getFirst().operation());
         var callback = doc.operations().getFirst().operation().callbacks().get("onEvent");
         assertThat(callback.expressions()).containsOnlyKeys("{$request.body#/url}");
         assertThat(callback.extensions()).containsKey("x-ext");

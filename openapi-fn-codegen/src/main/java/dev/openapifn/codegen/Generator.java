@@ -4,6 +4,7 @@ import dev.openapifn.codegen.api.ApiRenderer;
 import dev.openapifn.codegen.api.GeneratorNames;
 import dev.openapifn.codegen.api.OperationModel;
 import dev.openapifn.codegen.api.TestRenderer;
+import dev.openapifn.codegen.java.Names;
 import dev.openapifn.codegen.java.TypeRef.ClassName;
 import dev.openapifn.codegen.model.ModelRenderer;
 import dev.openapifn.codegen.model.TypeMapper;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Generates Java sources, tests and resources from an API description. A pure function of the
@@ -34,6 +36,21 @@ public final class Generator {
         for (var operation : api.operations()) {
             var model = OperationModel.of(operation, names.apiPackage(), mapper, taken);
             groups.computeIfAbsent(model.group(), group -> new ArrayList<>()).add(model);
+        }
+        // Webhooks and callbacks are sent by the API provider: they get receiving controllers and sending clients of their own.
+        var groupNames = new HashSet<>(groups.keySet());
+        var webhooks = Names.unique("Webhooks", groupNames);
+        for (var operation : api.webhooks()) {
+            var model = OperationModel.of(operation, webhooks, operation.method().toLowerCase(Locale.ROOT) + " " + operation.path(), names.apiPackage(),
+                mapper, taken);
+            groups.computeIfAbsent(webhooks, group -> new ArrayList<>()).add(model);
+        }
+        var callbacks = Names.unique("Callbacks", groupNames);
+        for (var callback : api.callbacks()) {
+            var owner = callback.owner().operationId().orElse(callback.owner().method().toLowerCase(Locale.ROOT) + " " + callback.owner().path());
+            var model = OperationModel.of(callback.operation(), callbacks, owner + " " + callback.name() + " " + callback.operation().method()
+                .toLowerCase(Locale.ROOT), names.apiPackage(), mapper, taken);
+            groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
         }
         var models = new ModelRenderer(mapper);
         var renderer = new ApiRenderer(mapper, models, names);

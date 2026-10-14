@@ -109,7 +109,8 @@ public final class TestRenderer {
         out.line("given(api." + call + ").willReturn(" + stub.orElse("null") + ");");
         out.line("mvc.perform(" + request.orElse("request(" + imports.ref(HTTP_METHOD) + ".GET, \"/\")") + ")");
         out.line("    .andExpect(status().is(" + status + "))");
-        out.line("    .andExpect(" + imports.ref(MATCHERS) + ".conformsTo(runtimes.get(" + imports.ref(names.spec()) + ".NAME)));");
+        out.line("    .andExpect(" + imports.ref(MATCHERS) + ".conformsTo(runtimes.get(" + imports.ref(names.spec()) + ".NAME)"
+            + (operation.outbound() ? ", " + Names.literal(operation.id()) : "") + "));");
         out.line("then(api).should()." + call + ";");
         out.close();
     }
@@ -169,8 +170,8 @@ public final class TestRenderer {
     /** A request builder expression; {@code complete} includes optional-but-exemplified input and the body. */
     private Optional<String> requestExpression(OperationModel operation, boolean complete, Imports imports) {
         var op = operation.operation();
-        var path = new StringBuilder(names.basePath().equals("/") ? "" : names.basePath());
-        var template = op.path();
+        var path = new StringBuilder(names.basePath().equals("/") || operation.outbound() ? "" : names.basePath());
+        var template = operation.outbound() ? operation.receiverPath() : op.path();
         var query = new ArrayList<Map.Entry<String, String>>();
         var headers = new LinkedHashMap<String, String>();
         var cookies = new ArrayList<Map.Entry<String, String>>();
