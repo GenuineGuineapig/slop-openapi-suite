@@ -10,6 +10,8 @@ import dev.openapifn.codegen.model.ModelDef.Property;
 import dev.openapifn.codegen.model.ModelDef.RecordDef;
 import dev.openapifn.codegen.model.ModelRenderer;
 import dev.openapifn.codegen.model.TypeMapper;
+import dev.openapifn.http.CollectionFormat;
+import dev.openapifn.http.ContentType;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
 import dev.openapifn.model.ParameterLocation;
@@ -46,6 +48,7 @@ public final class ApiRenderer {
     static final ClassName PARAMETER_STYLE = ClassName.of("dev.openapifn.model", "ParameterStyle");
     static final ClassName TYPE_REFERENCE = ClassName.of("tools.jackson.core.type", "TypeReference");
     static final ClassName OBJECTS = ClassName.of("java.util", "Objects");
+    static final ClassName OPTIONAL = ClassName.of("java.util", "Optional");
     static final ClassName LINKED_HASH_MAP = ClassName.of("java.util", "LinkedHashMap");
     static final ClassName ARRAYS = ClassName.of("java.util", "Arrays");
     static final ClassName REST_CONTROLLER = ClassName.of("org.springframework.web.bind.annotation", "RestController");
@@ -373,9 +376,7 @@ public final class ApiRenderer {
                 var p = parameter.parameter();
                 var constant = Names.constant(operation.method()) + "_" + Names.constant(parameter.property().javaName());
                 constants.put(operation.method() + "/" + parameter.property().javaName(), constant);
-                out.line("private static final " + imports.ref(PARAMETER_SPEC) + " " + constant + " = new " + imports.ref(PARAMETER_SPEC) + "("
-                    + Names.literal(p.name()) + ", " + imports.ref(PARAMETER_LOCATION) + "." + p.in().name() + ", " + imports.ref(PARAMETER_STYLE) + "."
-                    + p.style().name() + ", " + p.explode() + ", " + p.allowReserved() + ");");
+                out.line("private static final " + imports.ref(PARAMETER_SPEC) + " " + constant + " = " + spec(p, imports) + ";");
             }
         }
         var http = reactive ? WEB_CLIENT : HTTP_CLIENT;
@@ -420,7 +421,16 @@ public final class ApiRenderer {
             out.open("if (body != null)");
             out.line("call = call.multipart(" + imports.ref(ARRAYS) + ".asList(" + parts(body, record, imports) + "));");
             out.close();
-        }, () -> out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());")));
+        }, () -> {
+            out.line("call = call.body(" + Names.literal(body.contentType()) + ", request.body());");
+            if (ContentType.parse(body.contentType()).filter(type -> type.essence().equals("application/x-www-form-urlencoded")).isPresent()) {
+                body.mediaType().encoding().forEach((property, encoding) -> {
+                    if (encoding.serializes()) {
+                        out.line("call = call.encoding(" + Names.literal(property) + ", " + spec(encoding.asParameter(property, Optional.empty()), imports) + ");");
+                    }
+                });
+            }
+        }));
         out.open("return " + (operation.outbound() ? "http.to(target.toString())" : "http") + "." + (reactive ? "<" + imports.ref(operation.response()) + ">" : "")
             + "exchange(call, response -> switch (response.status())");
         var ranges = new ArrayList<OperationModel.VariantModel>();
@@ -471,8 +481,18 @@ public final class ApiRenderer {
             arguments.add(source + ".status()");
         }
         variant.body().ifPresent(body -> arguments.add(read(source, body.type(), imports)));
-        variant.headers().forEach((header, property) -> arguments.add(source + ".header(" + Names.literal(header) + ", " + token(property.type(), imports) + ")"));
+        variant.headers().forEach((header, property) -> arguments.add(source + ".header(" + Names.literal(header) + ", " + token(property.type(), imports)
+            + CollectionFormat.delimiter(variant.response().headers().get(header).extensions()).map(delimiter -> ", " + Names.literal(delimiter)).orElse("")
+            + ")"));
         return "new " + imports.ref(operation.response()) + "." + variant.name() + "(" + String.join(", ", arguments) + ")";
+    }
+
+    /** A parameter spec as a constructor call (with the Swagger 2.0 collection format's delimiter, if any). */
+    private static String spec(dev.openapifn.model.Parameter parameter, Imports imports) {
+        return "new " + imports.ref(PARAMETER_SPEC) + "(" + Names.literal(parameter.name()) + ", " + imports.ref(PARAMETER_LOCATION) + "."
+            + parameter.in().name() + ", " + imports.ref(PARAMETER_STYLE) + "." + parameter.style().name() + ", " + parameter.explode() + ", "
+            + parameter.allowReserved() + CollectionFormat.delimiter(parameter.extensions())
+                .map(delimiter -> ", " + imports.ref(OPTIONAL) + ".of(" + Names.literal(delimiter) + ")").orElse("") + ")";
     }
 
     /** The record whose components are sent as {@code multipart/form-data} parts, if the body is one; other bodies are encoded from their JSON. */

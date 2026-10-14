@@ -7,11 +7,14 @@ import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.model.Encoding;
+import dev.openapifn.model.Parameter;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.ParameterStyle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
@@ -30,13 +33,30 @@ public final class ParameterSerializer {
      * @param style serialization style
      * @param explode whether arrays and objects are exploded
      * @param allowReserved whether reserved characters stay unencoded in query values
+     * @param delimiter the delimiter of array items that replaces the style's (a Swagger 2.0
+     *     collection format, see {@link CollectionFormat})
      */
-    public record Spec(String name, ParameterLocation in, ParameterStyle style, boolean explode, boolean allowReserved) {
+    public record Spec(String name, ParameterLocation in, ParameterStyle style, boolean explode, boolean allowReserved, Optional<String> delimiter) {
+
+        public Spec(String name, ParameterLocation in, ParameterStyle style, boolean explode, boolean allowReserved) {
+            this(name, in, style, explode, allowReserved, Optional.empty());
+        }
 
         /** A spec with the default style and explode for {@code in}. */
         public static Spec of(String name, ParameterLocation in) {
             var style = in.defaultStyle();
             return new Spec(name, in, style, style.explodeByDefault(), false);
+        }
+
+        /** The spec of a described parameter. */
+        public static Spec of(Parameter parameter) {
+            return new Spec(parameter.name(), parameter.in(), parameter.style(), parameter.explode(), parameter.allowReserved(),
+                CollectionFormat.delimiter(parameter.extensions()));
+        }
+
+        /** The spec of a property of an {@code application/x-www-form-urlencoded} body, serialized like a query parameter. */
+        public static Spec of(String property, Encoding encoding) {
+            return of(encoding.asParameter(property, Optional.empty()));
         }
     }
 
@@ -63,7 +83,7 @@ public final class ParameterSerializer {
                     : ";" + spec.name() + "=" + join(alternating(object, encode), ",");
                 default -> ";" + spec.name() + "=" + encode.apply(text(value));
             };
-            default -> simple(value, spec.explode(), encode);
+            default -> simple(value, spec.explode(), encode, spec.delimiter().map(encode).orElse(","));
         };
     }
 
@@ -75,17 +95,17 @@ public final class ParameterSerializer {
             return object.members().entrySet().stream()
                 .map(e -> Map.entry(UrlCodec.encode(spec.name() + "[" + e.getKey() + "]", ""), encode.apply(text(e.getValue())))).toList();
         }
-        var separator = switch (spec.style()) {
+        var separator = spec.delimiter().map(delimiter -> UrlCodec.encode(delimiter, "")).orElseGet(() -> switch (spec.style()) {
             case SPACE_DELIMITED -> "%20";
             case PIPE_DELIMITED -> "%7C";
             default -> ",";
-        };
+        });
         return pairs(name, value, spec.explode(), separator, encode);
     }
 
     /** The header value ({@code simple} style, not percent-encoded). */
     public static String header(Spec spec, JsonValue value) {
-        return simple(value, spec.explode(), UnaryOperator.identity());
+        return simple(value, spec.explode(), UnaryOperator.identity(), spec.delimiter().orElse(","));
     }
 
     /** Cookie {@code name=value} pairs; {@code form} style values are percent-encoded, {@code cookie} style ones are not. */
@@ -116,9 +136,9 @@ public final class ParameterSerializer {
         };
     }
 
-    private static String simple(JsonValue value, boolean explode, UnaryOperator<String> encode) {
+    private static String simple(JsonValue value, boolean explode, UnaryOperator<String> encode, String delimiter) {
         return switch (value) {
-            case JsonArray array -> join(items(array, encode), ",");
+            case JsonArray array -> join(items(array, encode), delimiter);
             case JsonObject object -> join(explode ? assignments(object, encode) : alternating(object, encode), ",");
             default -> encode.apply(text(value));
         };

@@ -1,5 +1,6 @@
 package dev.openapifn.parse;
 
+import dev.openapifn.http.CollectionFormat;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonObject;
@@ -192,27 +193,34 @@ final class Swagger2Converter {
         return new JsonObject(out);
     }
 
-    /** {@code collectionFormat} as {@code style} and {@code explode} (only {@code csv} exists outside the query). */
+    /**
+     * {@code collectionFormat} as {@code style} and {@code explode}. What OpenAPI 3 cannot express
+     * ({@code tsv}, and other formats than {@code csv} outside the query) is kept as the
+     * {@code x-collection-format} extension, which parsing and serialization honour.
+     */
     private void style(String collectionFormat, String in, Map<String, JsonValue> out) {
+        if (CollectionFormat.delimiter(collectionFormat).isEmpty() && !collectionFormat.equals("multi")) {
+            warnings.add("unknown collectionFormat '" + collectionFormat + "'; using csv");
+            return;
+        }
         if (!in.equals("query")) {
-            if (!collectionFormat.equals("csv")) {
-                warnings.add("collectionFormat '" + collectionFormat + "' of a " + in + " parameter has no OpenAPI 3 equivalent; using csv");
+            if (collectionFormat.equals("multi")) {
+                warnings.add("collectionFormat 'multi' is only valid for query and formData parameters; using csv");
+            } else if (!collectionFormat.equals("csv")) {
+                out.put(CollectionFormat.EXTENSION, JsonString.of(collectionFormat));
             }
             return;
         }
         var style = switch (collectionFormat) {
             case "ssv" -> "spaceDelimited";
             case "pipes" -> "pipeDelimited";
-            case "multi" -> "form";
-            default -> {
-                if (!collectionFormat.equals("csv")) {
-                    warnings.add("collectionFormat '" + collectionFormat + "' has no OpenAPI 3 equivalent; using csv");
-                }
-                yield "form";
-            }
+            default -> "form";
         };
         out.put("style", JsonString.of(style));
         out.put("explode", JsonBoolean.of(collectionFormat.equals("multi")));
+        if (collectionFormat.equals("tsv")) {
+            out.put(CollectionFormat.EXTENSION, JsonString.of(collectionFormat));
+        }
     }
 
     /** The schema of a parameter, header or items object described with schema keywords of its own. */
@@ -290,6 +298,9 @@ final class Swagger2Converter {
                 var h = new LinkedHashMap<String, JsonValue>();
                 definition.get("description").ifPresent(description -> h.put("description", description));
                 h.put("schema", valueSchema(definition));
+                if (definition.string("type").filter("array"::equals).isPresent()) {
+                    style(definition.string("collectionFormat").orElse("csv"), "header", h);
+                }
                 converted.put(name, new JsonObject(h));
             });
             out.put("headers", new JsonObject(converted));

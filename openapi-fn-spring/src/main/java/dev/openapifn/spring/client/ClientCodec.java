@@ -100,7 +100,7 @@ public final class ClientCodec {
         return switch (body.value()) {
             case Stream<?> items -> {
                 try (items) {
-                    yield encode(new ClientCall.Body(body.contentType(), items.toList()));
+                    yield encode(new ClientCall.Body(body.contentType(), items.toList(), body.encodings()));
                 }
             }
             case FilePart file -> new BodyWriter.MultipartBody(file.content(), multipart || body.contentType().contains("*") ? file.contentType()
@@ -113,6 +113,8 @@ public final class ClientCodec {
                 var bounded = body.contentType() + "; boundary=" + BodyWriter.boundary();
                 yield new BodyWriter.MultipartBody(WRITER.write(toJson(value), ContentType.parse(bounded).orElseThrow(), Optional.empty()), bounded);
             }
+            case Object value when type.essence().equals("application/x-www-form-urlencoded") -> new BodyWriter.MultipartBody(
+                BodyWriter.form(toJson(value), body.encodings()).getBytes(StandardCharsets.UTF_8), body.contentType());
             default -> new BodyWriter.MultipartBody(type.isJson() ? mapper.writeValueAsBytes(body.value())
                 : WRITER.write(toJson(body.value()), type, Optional.empty()), body.contentType());
         };

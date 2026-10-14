@@ -354,9 +354,10 @@ class OpenApiValidatorTest {
         assertThat(jsonl.contentType().essence()).isEqualTo("application/jsonl");
         assertThat(items(jsonl, "{\"type\":\"a\"}\n\n{}\n{\n")).containsExactly("{\"type\":\"a\"}", "{} request.body.schema.required@body/1",
             "- request.body.invalid@body");
-        // Without an item schema, an item is validated against the item of the schema at its position; the length is not checked.
+        // Without an item schema, an item is validated against the item of the schema at its position; maxItems as the items pass.
         assertThat(items(VALIDATOR.requestItems(match, "application/x-ndjson").orElseThrow(), "{}\n{}\n{\"type\":\"b\"}"))
-            .containsExactly("{} request.body.schema.required@body/0", "{} request.body.schema.required@body/1", "{\"type\":\"b\"}");
+            .containsExactly("{} request.body.schema.required@body/0", "{} request.body.schema.required@body/1 request.body.schema.maxItems@body/1",
+                "{\"type\":\"b\"}");
         assertThat(items(VALIDATOR.requestItems(match, "application/json-seq").orElseThrow(), "\u001e1\n\u001e{")).containsExactly("1",
             "- request.body.invalid@body");
         assertThat(items(VALIDATOR.requestItems(match, "multipart/mixed; boundary=b").orElseThrow(),
@@ -379,6 +380,25 @@ class OpenApiValidatorTest {
                 "{\"data\":\"1\"}");
         assertThat(VALIDATOR.responseItems(events, 500, "text/event-stream")).isEmpty();
         assertThat(VALIDATOR.responseItems(match, 202, "application/jsonl")).isEmpty();
+    }
+
+    @Test
+    void streamedSequencesAreCheckedAsAWhole() {
+        var streams = VALIDATOR.validateRequestHead(HttpRequest.of("POST", "/v1/streams").withHeader("Content-Type", "application/jsonl")).match()
+            .orElseThrow();
+        var jsonl = (java.util.function.Function<String, List<String>>) body -> items(VALIDATOR.requestItems(streams, "application/jsonl").orElseThrow(), body);
+        assertThat(jsonl.apply("{\"n\":1}\n")).containsExactly("{\"n\":1}", "- request.body.schema.contains@body request.body.schema.minItems@body");
+        assertThat(jsonl.apply("{\"flag\":1}\n{\"flag\":1}\n")).containsExactly("{\"flag\":1}",
+            "{\"flag\":1} request.body.schema.uniqueItems@body/1 request.body.schema.maxContains@body/1");
+        assertThat(jsonl.apply("{\"flag\":1}\n{\"n\":\"x\"}\n")).containsExactly("{\"flag\":1}", "{\"n\":\"x\"} request.body.schema.type@body/1/n");
+        assertThat(jsonl.apply("[]\n{\"flag\":1}\n")).containsExactly("[] request.body.schema.type@body/0", "{\"flag\":1}");
+        var seq = VALIDATOR.requestItems(streams, "application/json-seq").orElseThrow();
+        assertThat(items(seq, "\u001e1\n\u001e2\n")).containsExactly("1", "2", "- request.body.schema.minContains@body");
+        assertThat(items(VALIDATOR.requestItems(streams, "application/json-seq").orElseThrow(), "\u001e1\n\u001e1\n")).containsExactly("1", "1");
+        // Whole bodies: the items against the itemSchema, and the sequence against the schema.
+        var whole = HttpRequest.of("POST", "/v1/streams").withBody("application/jsonl", "{\"n\":1}\n[]\n");
+        assertThat(request(whole)).containsExactly("request.body.schema.type@body/1", "request.body.schema.contains@body");
+        assertThat(request(whole.withBody("application/jsonl", "{\"n\":\"x\"}\n{\"flag\":1}\n"))).containsExactly("request.body.schema.type@body/0/n");
     }
 
     @Test

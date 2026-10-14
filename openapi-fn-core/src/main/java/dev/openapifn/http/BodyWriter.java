@@ -88,13 +88,37 @@ public final class BodyWriter {
 
     /** An object as {@code application/x-www-form-urlencoded}: arrays repeat the name, nested objects are JSON. */
     public static String form(JsonValue value) {
+        return form(value, java.util.Map.of());
+    }
+
+    /**
+     * An object as {@code application/x-www-form-urlencoded}, serializing the properties that have a
+     * spec like query parameters (see {@link #formSpecs}); others as in {@link #form(JsonValue)}.
+     */
+    public static String form(JsonValue value, java.util.Map<String, ParameterSerializer.Spec> specs) {
         var pairs = new ArrayList<String>();
         value.asObject().orElse(JsonObject.EMPTY).members().forEach((name, member) -> {
+            var spec = specs.get(name);
+            if (spec != null) {
+                ParameterSerializer.query(spec, member).forEach(pair -> pairs.add(pair.getKey() + "=" + pair.getValue()));
+                return;
+            }
             var values = member instanceof JsonArray array ? array.values() : List.of(member);
             values.forEach(item -> pairs.add(UrlCodec.encode(name, "") + "=" + UrlCodec.encode(
                 item instanceof JsonObject || item instanceof JsonArray ? JsonWriter.compact(item) : ParameterSerializer.text(item), "")));
         });
         return String.join("&", pairs);
+    }
+
+    /** The specs of the form properties whose encodings say how they are serialized (see {@link dev.openapifn.model.Encoding#serializes()}). */
+    public static java.util.Map<String, ParameterSerializer.Spec> formSpecs(java.util.Map<String, dev.openapifn.model.Encoding> encodings) {
+        var specs = new java.util.LinkedHashMap<String, ParameterSerializer.Spec>();
+        encodings.forEach((name, encoding) -> {
+            if (encoding.serializes()) {
+                specs.put(name, ParameterSerializer.Spec.of(name, encoding));
+            }
+        });
+        return specs;
     }
 
     /**

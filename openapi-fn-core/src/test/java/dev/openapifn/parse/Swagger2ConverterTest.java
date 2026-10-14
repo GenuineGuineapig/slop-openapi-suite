@@ -42,10 +42,9 @@ class Swagger2ConverterTest {
         assertThat(model.externalDocs()).isPresent();
         assertThat(model.security()).singleElement().satisfies(requirement -> assertThat(requirement.schemes()).containsKey("apiKey"));
         assertThat(API.operations()).extracting(operation -> operation.displayName())
-            .containsExactly("listPets", "createPet", "updatePet", "deletePet", "uploadPhoto", "addNote", "addLabels", "legacy");
-        assertThat(API.warnings()).extracting(Diagnostic::message).containsExactly(
-            "collectionFormat 'tsv' has no OpenAPI 3 equivalent; using csv",
-            "collectionFormat 'pipes' of a header parameter has no OpenAPI 3 equivalent; using csv");
+            .containsExactly("listPets", "createPet", "updatePet", "deletePet", "uploadPhoto", "getBatch", "addNote", "addLabels", "legacy");
+        // Collection formats OpenAPI 3 cannot express are kept as an extension, not lost.
+        assertThat(API.warnings()).isEmpty();
     }
 
     @Test
@@ -88,8 +87,9 @@ class Swagger2ConverterTest {
         assertThat(multipart.schema().orElseThrow().object().toJson()).isEqualTo("{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"string\","
             + "\"format\":\"binary\",\"description\":\"The photo\"},\"note\":{\"type\":\"string\"}},\"required\":[\"file\"]}");
         var note = API.operation("addNote").orElseThrow().operation().requestBody().orElseThrow().content().get("application/x-www-form-urlencoded");
-        assertThat(note.encoding()).containsOnlyKeys("labels");
-        assertThat(note.schema().orElseThrow().subschemaMap("properties")).containsOnlyKeys("author", "text", "labels", "many");
+        assertThat(note.encoding()).containsOnlyKeys("labels", "tabbed");
+        assertThat(note.encoding().get("tabbed").extensions()).containsEntry("x-collection-format", json("\"tsv\""));
+        assertThat(note.schema().orElseThrow().subschemaMap("properties")).containsOnlyKeys("author", "text", "labels", "many", "tabbed");
         assertThat(note.encoding().get("labels").style()).contains(ParameterStyle.PIPE_DELIMITED);
         var labels = API.operation("addLabels").orElseThrow().operation().requestBody().orElseThrow();
         assertThat(labels.required()).isFalse();
@@ -148,6 +148,54 @@ class Swagger2ConverterTest {
         assertThat(validator.validateRequest(created).report().isEmpty()).isTrue();
         assertThat(validator.validateResponse(created, HttpResponse.of(201).withBody("application/json", "{\"name\":\"Rex\"}")).errors())
             .extracting(issue -> issue.key()).containsExactly("response.body.schema.required");
+    }
+
+    @Test
+    void keepsCollectionFormatsOpenApi3CannotExpress() {
+        var validator = OpenApiValidator.of(API);
+        var list = validator.validateRequest(HttpRequest.of("GET", "/v2/pets?tabs=a%09b&words=c%20d&tags=e|f").withHeader("api_key", "k"));
+        assertThat(list.report().isEmpty()).isTrue();
+        assertThat(list.parameters()).containsEntry("query.tabs", json("[\"a\",\"b\"]")).containsEntry("query.words", json("[\"c\",\"d\"]"));
+        var deleted = validator.validateRequest(HttpRequest.of("DELETE", "/v2/pets/1").withHeader("X-Tags", "a|b").withHeader("api_key", "k"));
+        assertThat(deleted.parameters()).containsEntry("header.X-Tags", json("[\"a\",\"b\"]"));
+        var batch = validator.validateRequest(HttpRequest.of("GET", "/v2/batches/1%092").withHeader("api_key", "k"));
+        assertThat(batch.report().isEmpty()).isTrue();
+        assertThat(batch.parameters()).containsEntry("path.ids", json("[1,2]"));
+        var note = validator.validateRequest(HttpRequest.of("POST", "/v2/pets/1/notes").withHeader("api_key", "k")
+            .withBody("application/x-www-form-urlencoded", "text=t&labels=a|b&tabbed=x%09y&many=1&many=2"));
+        assertThat(note.report().isEmpty()).isTrue();
+        assertThat(note.body()).contains(json("{\"text\":\"t\",\"labels\":[\"a\",\"b\"],\"tabbed\":[\"x\",\"y\"],\"many\":[\"1\",\"2\"]}"));
+        var listed = HttpRequest.of("GET", "/v2/pets").withHeader("api_key", "k");
+        assertThat(validator.validateResponse(listed, HttpResponse.of(200).withHeader("X-Codes", "1 2").withBody("application/json", "[]")).isEmpty())
+            .isTrue();
+        assertThat(validator.validateResponse(listed, HttpResponse.of(200).withHeader("X-Codes", "1 x").withBody("application/json", "[]")).errors())
+            .extracting(issue -> issue.key()).containsExactly("response.header.schema.type");
+
+        var tabs = API.operation("listPets").orElseThrow().parameters().stream().filter(p -> p.name().equals("tabs")).findFirst().orElseThrow();
+        assertThat(dev.openapifn.http.ParameterSerializer.query(dev.openapifn.http.ParameterSerializer.Spec.of(tabs), json("[\"a\",\"b\"]")))
+            .containsExactly(Map.entry("tabs", "a%09b"));
+        var tags = API.operation("deletePet").orElseThrow().parameters().get(1);
+        assertThat(dev.openapifn.http.ParameterSerializer.header(dev.openapifn.http.ParameterSerializer.Spec.of(tags), json("[\"a\",\"b\"]")))
+            .isEqualTo("a|b");
+        var ids = API.operation("getBatch").orElseThrow().parameters().getFirst();
+        assertThat(dev.openapifn.http.ParameterSerializer.path(dev.openapifn.http.ParameterSerializer.Spec.of(ids), json("[1,2]"))).isEqualTo("1%092");
+        var form = API.operation("addNote").orElseThrow().operation().requestBody().orElseThrow().content().get("application/x-www-form-urlencoded");
+        assertThat(dev.openapifn.http.BodyWriter.form(json("{\"labels\":[\"a\",\"b\"],\"tabbed\":[\"x\",\"y\"],\"many\":[\"1\",\"2\"]}"),
+            dev.openapifn.http.BodyWriter.formSpecs(form.encoding()))).isEqualTo("labels=a%7Cb&tabbed=x%09y&many=1&many=2");
+
+        var unusual = parse("""
+            swagger: '2.0'
+            info: {title: t, version: v}
+            paths:
+              /a:
+                get:
+                  parameters:
+                    - {name: X-A, in: header, type: array, items: {type: string}, collectionFormat: multi}
+                    - {name: b, in: query, type: array, items: {type: string}, collectionFormat: semicolons}
+                  responses: {'200': {description: ok}}
+            """);
+        assertThat(unusual.warnings()).extracting(Diagnostic::message).containsExactly(
+            "collectionFormat 'multi' is only valid for query and formData parameters; using csv", "unknown collectionFormat 'semicolons'; using csv");
     }
 
     @Test

@@ -29,11 +29,9 @@ public final class OpenApiClients {
     /** The HTTP client for API {@code name}. */
     public OpenApiHttpClient http(String name, String defaultBaseUrl) {
         var settings = Optional.ofNullable(properties.clients().get(name));
-        var builder = builders.get();
-        if (settings.filter(OpenApiFnProperties.Client::validate).isPresent()) {
-            builder = builder.requestInterceptor(new OpenApiClientValidationInterceptor(runtimes.get().get(name).validator(), true));
-        }
+        var validator = settings.filter(OpenApiFnProperties.Client::validate).map(client -> new ClientValidator(runtimes.get().get(name).validator(), true))
+            .orElse(null);
         var baseUrl = settings.map(OpenApiFnProperties.Client::baseUrl).orElse(null);
-        return new OpenApiHttpClient(builder.build(), baseUrl != null ? baseUrl : defaultBaseUrl, mapper);
+        return new OpenApiHttpClient(builders.get().build(), baseUrl != null ? baseUrl : defaultBaseUrl, mapper, validator);
     }
 }

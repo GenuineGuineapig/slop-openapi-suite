@@ -76,6 +76,15 @@ public final class ReactiveClientResponse {
         return head().header(name, type);
     }
 
+    /** A header whose list items are separated by {@code delimiter}, see {@link ClientResponse#header(String, Class, String)}. */
+    public <T> @Nullable T header(String name, Class<T> type, String delimiter) {
+        return head().header(name, type, delimiter);
+    }
+
+    public <T> @Nullable T header(String name, TypeReference<T> type, String delimiter) {
+        return head().header(name, type, delimiter);
+    }
+
     private ClientResponse head() {
         return new ClientResponse(status, headers, new byte[0], mapper);
     }

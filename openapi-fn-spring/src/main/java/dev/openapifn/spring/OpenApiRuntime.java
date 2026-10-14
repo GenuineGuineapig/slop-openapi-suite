@@ -241,10 +241,11 @@ public final class OpenApiRuntime {
         return new Reply(response.status(), headers, type, schema, body);
     }
 
+    /** A header value serialized as described (explode, collection format), else in the {@code simple} style. */
     private String headerValue(Optional<Response> declared, String header, Object value) {
-        var explode = declared.map(r -> r.headers().entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(header))
-            .anyMatch(e -> e.getValue().explode())).orElse(false);
-        var spec = new ParameterSerializer.Spec(header, ParameterLocation.HEADER, ParameterStyle.SIMPLE, explode, false);
+        var spec = declared.flatMap(r -> r.headers().entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(header)).findFirst())
+            .map(e -> ParameterSerializer.Spec.of(e.getValue().asParameter(header)))
+            .orElseGet(() -> new ParameterSerializer.Spec(header, ParameterLocation.HEADER, ParameterStyle.SIMPLE, false, false));
         return ParameterSerializer.header(spec, toJson(value));
     }
 

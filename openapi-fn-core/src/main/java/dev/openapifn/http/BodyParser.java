@@ -150,7 +150,11 @@ public final class BodyParser {
         return event.isEmpty() ? Optional.empty() : Optional.of(new JsonObject(event));
     }
 
-    /** A form body; properties whose encoding has a JSON {@code contentType} are parsed as JSON. */
+    /**
+     * A form body. Properties whose encoding has a JSON {@code contentType} are parsed as JSON;
+     * properties whose encoding gives a {@code style}, {@code explode} or collection format are
+     * parsed like query parameters of that style; others are repeated names (arrays) or single values.
+     */
     private JsonValue form(String text, Optional<Schema> schema, Map<String, Encoding> encodings) {
         var members = new LinkedHashMap<>(parameters.formObject(text, schema).members());
         for (var pair : UrlCodec.parseQuery(text)) {
@@ -160,6 +164,21 @@ public final class BodyParser {
                 members.put(pair.getKey(), Json.parse(pair.getValue()).toOptional().orElse(JsonString.of(pair.getValue())));
             }
         }
+        var sources = ParameterParser.Sources.ofQuery(text);
+        var names = schema.map(shapes::propertyNames).orElse(java.util.Set.of());
+        encodings.forEach((name, encoding) -> {
+            if (!encoding.serializes()) {
+                return;
+            }
+            var parameter = encoding.asParameter(name, schema.flatMap(s -> shapes.property(s, name)));
+            if (parameter.style() == dev.openapifn.model.ParameterStyle.DEEP_OBJECT) {
+                members.keySet().removeIf(key -> key.startsWith(name + "["));
+            }
+            var others = new java.util.HashSet<>(names);
+            others.remove(name);
+            parameters.parse(parameter, sources, others).toOptional().flatMap(java.util.function.Function.identity())
+                .ifPresent(value -> members.put(name, value));
+        });
         return new JsonObject(members);
     }
 

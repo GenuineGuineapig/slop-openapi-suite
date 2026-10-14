@@ -159,6 +159,40 @@ class StreamingTest {
             assertThat(client(RestClient.builder()).<Integer>exchange(call, response -> response.body(Integer.class))).isEqualTo(1);
         }
 
+        /** With validation, the client still streams: each item is validated as it is written. */
+        @Test
+        void validatingClientsStreamRequests() {
+            var validator = new dev.openapifn.spring.client.ClientValidator(runtimes.get("pets").validator(), true);
+            var client = new OpenApiHttpClient(RestClient.builder().defaultHeader("X-Key", "k").build(), "http://localhost:" + port + "/api",
+                JsonMapper.builder().build(), validator);
+            EventsController.received = new CountDownLatch(1);
+            var latch = EventsController.received;
+            var events = Stream.of(0, 1).map(i -> Map.of("n", i == 0 ? 0 : await(latch) ? 1 : 99));
+            var call = ClientCall.of("POST", "/events").param(MODE, "wait").body("application/jsonl", events);
+            assertThat(client.<Integer>exchange(call, response -> response.body(Integer.class))).isEqualTo(1);
+            // The default header carries the credentials the description requires.
+            var created = ClientCall.of("POST", "/pets").body("application/json", Map.of("name", "Rex"));
+            assertThat(client.<Integer>exchange(created, dev.openapifn.spring.client.ClientResponse::status)).isEqualTo(201);
+            var anonymous = new OpenApiHttpClient(RestClient.create(), "http://localhost:" + port + "/api", JsonMapper.builder().build(), validator);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> anonymous.exchange(created, dev.openapifn.spring.client.ClientResponse::status))
+                .isInstanceOf(dev.openapifn.spring.client.ClientValidationException.class).hasMessageContaining("request.security.missing");
+            var invalid = ClientCall.of("POST", "/events").body("application/jsonl", Stream.of(Map.of("n", 1), Map.of("n", -1)));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(invalid, dev.openapifn.spring.client.ClientResponse::status))
+                .hasStackTraceContaining("request.body.schema.minimum");
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(ClientCall.of("GET", "/broken"),
+                    dev.openapifn.spring.client.ClientResponse::status))
+                .isInstanceOf(dev.openapifn.spring.client.ClientValidationException.class).hasMessageContaining("response.body.schema.required");
+            var badItems = ClientCall.of("GET", "/events").param(ParameterSerializer.Spec.of("invalid", ParameterLocation.QUERY), 1)
+                .accept("application/jsonl");
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(badItems, response -> {
+                try (var items = response.items(new TypeReference<Map<String, Integer>>() { })) {
+                    return items.toList();
+                }
+            })).isInstanceOf(dev.openapifn.spring.client.ClientValidationException.class).hasMessageContaining("response.body.schema.minimum");
+            var mixed = ClientCall.of("GET", "/events").param(FORMAT, "mixed").accept("multipart/mixed");
+            assertThat(client.<Integer>exchange(mixed, dev.openapifn.spring.client.ClientResponse::status)).isEqualTo(200);
+        }
+
         private static boolean await(CountDownLatch latch) {
             try {
                 return latch.await(5, TimeUnit.SECONDS);

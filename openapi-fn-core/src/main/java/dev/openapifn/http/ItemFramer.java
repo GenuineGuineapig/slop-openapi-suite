@@ -36,8 +36,9 @@ public final class ItemFramer {
      * @param content the item's content without delimiters (headers and body for multipart parts);
      *     blank for frames that carry no item, such as empty lines
      * @param error why the body ended badly (an unterminated multipart body); only on the last frame
+     * @param last whether this is the last frame of the body (the one {@link #finish()} returns)
      */
-    public record Frame(byte[] raw, byte[] content, Optional<String> error) {
+    public record Frame(byte[] raw, byte[] content, Optional<String> error, boolean last) {
 
         /** Whether the content is empty or white space. */
         public boolean blank() {
@@ -137,14 +138,14 @@ public final class ItemFramer {
         var rest = Arrays.copyOfRange(buffer, Math.min(contentStart, length), length);
         rawStart = contentStart = scanned = lineStart = length;
         return switch (kind) {
-            case LINES -> new Frame(raw, stripCarriageReturn(rest), Optional.empty());
-            case RECORDS, EVENTS -> new Frame(raw, rest, Optional.empty());
+            case LINES -> new Frame(raw, stripCarriageReturn(rest), Optional.empty(), true);
+            case RECORDS, EVENTS -> new Frame(raw, rest, Optional.empty(), true);
             case PARTS -> new Frame(raw, NONE, switch (partState) {
                 case PREAMBLE -> Optional.of("multipart body does not contain the boundary '"
                     + new String(delimiter, 2, delimiter.length - 2, StandardCharsets.ISO_8859_1) + "'");
                 case CLOSED -> Optional.empty();
                 default -> Optional.of("multipart body is not terminated by the closing boundary");
-            });
+            }, true);
         };
     }
 
@@ -278,7 +279,7 @@ public final class ItemFramer {
 
     /** A frame of the raw bytes up to {@code rawEnd}. */
     private Frame frame(int rawEnd, byte[] itemContent) {
-        var frame = new Frame(Arrays.copyOfRange(buffer, rawStart, rawEnd), itemContent, Optional.empty());
+        var frame = new Frame(Arrays.copyOfRange(buffer, rawStart, rawEnd), itemContent, Optional.empty(), false);
         rawStart = rawEnd;
         if (kind != Kind.PARTS) {
             contentStart = Math.max(contentStart, rawEnd);

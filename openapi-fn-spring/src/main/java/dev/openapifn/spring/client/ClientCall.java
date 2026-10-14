@@ -3,6 +3,7 @@ package dev.openapifn.spring.client;
 import dev.openapifn.http.ParameterSerializer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
@@ -35,8 +36,18 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
      *
      * @param contentType the media type
      * @param value the value (for multipart, a list of parts)
+     * @param encodings how properties of an {@code application/x-www-form-urlencoded} body are
+     *     serialized, when their Encoding Objects say (others repeat their name per item)
      */
-    public record Body(String contentType, Object value) {
+    public record Body(String contentType, Object value, Map<String, ParameterSerializer.Spec> encodings) {
+
+        public Body {
+            encodings = Map.copyOf(encodings);
+        }
+
+        public Body(String contentType, Object value) {
+            this(contentType, value, Map.of());
+        }
     }
 
     /**
@@ -86,6 +97,16 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
     public ClientCall multipart(List<@Nullable Part> parts) {
         return new ClientCall(method, pathTemplate, parameters, new Body("multipart/form-data", parts.stream().filter(Objects::nonNull).toList()),
             acceptTypes, operationId);
+    }
+
+    /** A copy whose form body serializes {@code property} like a query parameter of {@code spec} (an Encoding Object's style). */
+    public ClientCall encoding(String property, ParameterSerializer.Spec spec) {
+        if (body == null) {
+            return this;
+        }
+        var encodings = new java.util.LinkedHashMap<>(body.encodings());
+        encodings.put(property, spec);
+        return new ClientCall(method, pathTemplate, parameters, new Body(body.contentType(), body.value(), encodings), acceptTypes, operationId);
     }
 
     public ClientCall accept(String... mediaTypes) {

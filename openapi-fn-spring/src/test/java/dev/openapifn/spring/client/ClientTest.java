@@ -343,6 +343,50 @@ class ClientTest {
     }
 
     @Test
+    void encodesFormPropertiesAndDecodesDelimitedHeaders() {
+        var pipes = new ParameterSerializer.Spec("tags", ParameterLocation.QUERY, ParameterStyle.PIPE_DELIMITED, false, false);
+        assertThat(ClientCall.of("GET", "/a").encoding("tags", pipes).body()).isNull();
+        var call = ClientCall.of("POST", "/forms").body("application/x-www-form-urlencoded", Map.of("tags", List.of("a", "b"))).encoding("tags", pipes);
+        assertThat(call.body().encodings()).containsOnlyKeys("tags");
+        var client = setup(RestClient.builder()).client();
+        assertThat(new String(client.encode(call.body()).body(), StandardCharsets.UTF_8)).isEqualTo("tags=a%7Cb");
+        var response = new ClientResponse(200, dev.openapifn.http.Headers.of("X-Codes", "1 2"), new byte[0], MAPPER);
+        assertThat(response.header("X-Codes", Integer[].class, " ")).containsExactly(1, 2);
+        assertThat(response.header("X-Codes", new TypeReference<List<Integer>>() { }, " ")).containsExactly(1, 2);
+    }
+
+    @Test
+    void validatesWithoutAnInterceptor() {
+        var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"), """
+            openapi: 3.1.0
+            info: {title: t, version: v}
+            webhooks:
+              adopted:
+                post:
+                  operationId: adopted
+                  requestBody: {content: {application/json: {schema: {type: object}}}}
+                  responses: {'200': {description: ok}}
+            """).orElseThrow(d -> new AssertionError(d.toString()));
+        // Unknown paths are tolerated: requests to them match no operation, so nothing of them is validated.
+        var lenient = OpenApiValidator.of(api, OpenApiValidator.Options.DEFAULT.withLevels(dev.openapifn.validation.LevelPolicy.DEFAULT
+            .with(dev.openapifn.validation.IssueKeys.REQUEST_PATH_MISSING, dev.openapifn.validation.Level.IGNORE)));
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OpenApiHttpClient(builder.build(), "https://api.example.com", MAPPER, new ClientValidator(lenient, true));
+        server.expect(requestTo("https://api.example.com/unknown")).andExpect(content().string("1\n"))
+            .andRespond(withSuccess("2\n", MediaType.parseMediaType("application/jsonl")));
+        assertThat(client.<List<Integer>>exchange(ClientCall.of("POST", "/unknown").body("application/jsonl", Stream.of(1)), response -> {
+            try (var items = response.items(Integer.class)) {
+                return items.toList();
+            }
+        })).containsExactly(2);
+        assertThatThrownBy(() -> client.to("https://hooks.example.com").exchange(ClientCall.of("POST", "").operation("adopted")
+            .body("application/jsonl", Stream.of(Map.of())), ClientResponse::status))
+            .isInstanceOf(ClientValidationException.class).hasMessageContaining("request.contentType.notAllowed");
+        server.verify();
+    }
+
+    @Test
     void interceptorBuffersResponses() throws Exception {
         var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"),
             "openapi: 3.1.0\ninfo: {title: t, version: v}\npaths:\n  /x:\n    get:\n      responses: {'200': {description: ok}}\n")

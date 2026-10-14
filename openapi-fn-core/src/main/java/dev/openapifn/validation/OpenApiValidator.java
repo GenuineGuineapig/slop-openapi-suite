@@ -567,14 +567,14 @@ public final class OpenApiValidator {
             parts(content, contentType, mediaType, side, issues);
         }
         var key = side + ".body.schema";
+        // A sequence's items conform to the itemSchema, and the sequence as a whole (an array) to the schema.
         if (mediaType.itemSchema().isPresent() && value instanceof JsonArray items) {
             var itemSchema = mediaType.itemSchema().get();
             for (int i = 0; i < items.size(); i++) {
                 issues.schemaAt(key, "body", JsonPointer.of(Integer.toString(i)), schemas.validate(itemSchema, items.values().get(i), direction));
             }
-        } else {
-            mediaType.schema().ifPresent(schema -> issues.schema(key, "body", schemas.validate(schema, value, direction)));
         }
+        mediaType.schema().ifPresent(schema -> issues.schema(key, "body", schemas.validate(schema, value, direction)));
         return Optional.of(value);
     }
 
@@ -590,10 +590,13 @@ public final class OpenApiValidator {
 
     /**
      * Validates the items of one streamed body as they arrive: each frame of the body's
-     * {@link #framer()} is parsed and validated against the item schema (the {@code itemSchema},
-     * else the item of the {@code schema} at the item's position) and, for multipart parts, the
-     * item encoding. Findings are located at {@code body/<index>}. Constraints on the sequence as
-     * a whole (such as {@code maxItems}) are not checked. Instances are not thread-safe.
+     * {@link #framer()} is parsed and validated against the {@code itemSchema} and the item of the
+     * {@code schema} at the item's position, and, for multipart parts, against the item encoding.
+     * Constraints of the {@code schema} on the sequence as a whole are checked as items pass:
+     * {@code maxItems}, {@code uniqueItems} (which remembers the items seen) and {@code maxContains}
+     * on the item that violates them, {@code minItems} and {@code contains} / {@code minContains}
+     * with the last frame. Findings are located at {@code body/<index>}, or at {@code body} for the
+     * sequence. Instances are not thread-safe.
      */
     public final class ItemValidator {
 
@@ -601,6 +604,9 @@ public final class OpenApiValidator {
         private final MediaType mediaType;
         private final Direction direction;
         private final String side;
+        private final List<Schema> sequence;
+        private final java.util.Set<JsonValue> seen = new java.util.HashSet<>();
+        private final Map<Schema, Integer> contained = new LinkedHashMap<>();
         private int index;
 
         private ItemValidator(ContentType type, MediaType mediaType, Direction direction, String side) {
@@ -608,6 +614,8 @@ public final class OpenApiValidator {
             this.mediaType = mediaType;
             this.direction = direction;
             this.side = side;
+            this.sequence = mediaType.schema().map(OpenApiValidator.this::applying).orElse(List.of()).stream()
+                .filter(schema -> SEQUENCE_KEYWORDS.stream().anyMatch(schema::has)).toList();
         }
 
         /** The content type of the body. */
@@ -634,11 +642,71 @@ public final class OpenApiValidator {
                 if (type.type().equals("multipart")) {
                     Multipart.part(frame.content()).peek(part -> part(part, positionalEncoding(mediaType, position), "body." + position, side, issues));
                 }
-                mediaType.itemSchema().or(() -> mediaType.schema().flatMap(schema -> shapes.item(schema, position)))
-                    .ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", JsonPointer.of(Integer.toString(position)),
-                        schemas.validate(schema, value.get(), direction)));
+                var at = JsonPointer.of(Integer.toString(position));
+                var itemSchema = mediaType.itemSchema().map(api.schemas()::deref);
+                itemSchema.ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", at, schemas.validate(schema, value.get(), direction)));
+                mediaType.schema().flatMap(schema -> shapes.item(schema, position)).map(api.schemas()::deref)
+                    .filter(schema -> itemSchema.filter(same -> same.location().equals(schema.location())).isEmpty())
+                    .ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", at, schemas.validate(schema, value.get(), direction)));
+                sequenceItem(value.get(), position, issues);
+            }
+            if (frame.last()) {
+                sequenceEnd(issues);
             }
             return new Item(value, issues.report());
+        }
+
+        /** The constraints on the sequence that an item can violate as it arrives. */
+        private void sequenceItem(JsonValue value, int position, Issues issues) {
+            var location = "body/" + position;
+            for (var schema : sequence) {
+                var key = side + ".body.schema.";
+                schema.number("maxItems").filter(max -> position == max.intValue())
+                    .ifPresent(max -> issues.add(key + "maxItems", "must have at most " + max.intValue() + " items", location));
+                if (schema.object().bool("uniqueItems").orElse(false) && seen.contains(value)) {
+                    issues.add(key + "uniqueItems", "must not contain duplicate items", location);
+                }
+                schema.subschema("contains").filter(contains -> schemas.validate(contains, value, direction).isEmpty()).ifPresent(contains -> {
+                    var matched = contained.merge(schema, 1, Integer::sum);
+                    schema.number("maxContains").filter(max -> matched == max.intValue() + 1).ifPresent(max ->
+                        issues.add(key + "maxContains", "must contain at most " + max.intValue() + " matching items", location));
+                });
+            }
+            seen.add(value);
+        }
+
+        /** The constraints on the sequence that are only known at its end. */
+        private void sequenceEnd(Issues issues) {
+            for (var schema : sequence) {
+                var key = side + ".body.schema.";
+                schema.number("minItems").filter(min -> index < min.intValue())
+                    .ifPresent(min -> issues.add(key + "minItems", "must have at least " + min.intValue() + " items", "body"));
+                if (schema.has("contains")) {
+                    var min = schema.number("minContains").map(java.math.BigDecimal::intValue).orElse(1);
+                    if (contained.getOrDefault(schema, 0) < min) {
+                        issues.add(key + (min == 1 ? "contains" : "minContains"), min == 1 ? "must contain at least one matching item"
+                            : "must contain at least " + min + " matching items", "body");
+                    }
+                }
+            }
+        }
+    }
+
+    /** The keywords constraining a sequence as a whole. */
+    private static final List<String> SEQUENCE_KEYWORDS = List.of("maxItems", "minItems", "uniqueItems", "contains");
+
+    /** A schema and the schemas that apply with it wherever it applies: its {@code $ref} and {@code allOf} chain. */
+    private List<Schema> applying(Schema schema) {
+        var result = new ArrayList<Schema>();
+        applying(schema, result, new java.util.HashSet<>());
+        return result;
+    }
+
+    private void applying(Schema schema, List<Schema> result, java.util.Set<java.net.URI> seen) {
+        var resolved = api.schemas().deref(schema);
+        if (seen.add(resolved.location())) {
+            result.add(resolved);
+            resolved.subschemaList("allOf").forEach(member -> applying(member, result, seen));
         }
     }
 

@@ -160,6 +160,19 @@ paths:
             schema: {type: array}
       responses:
         '202': {description: Accepted}
+  /streams:
+    post:
+      operationId: streams
+      security: []
+      requestBody:
+        content:
+          application/jsonl:
+            itemSchema: {type: object}
+            schema: {allOf: [{$ref: '#/components/schemas/Batch'}, {minItems: 2}]}
+          application/json-seq:
+            schema: {allOf: [{$ref: '#/components/schemas/TwoOnes'}, {$ref: '#/components/schemas/TwoOnes'}]}
+      responses:
+        '204': {description: none}
   /matrix/{coords}:
     get:
       operationId: matrix
@@ -194,6 +207,13 @@ components:
         tags: {type: array, items: {type: string}, xml: {wrapped: true}}
         secret: {type: string, writeOnly: true}
         kind: {type: string, enum: [cat, dog]}
+    TwoOnes: {contains: {const: 1}, minContains: 2}
+    Batch:
+      type: array
+      uniqueItems: true
+      contains: {type: object, required: [flag]}
+      maxContains: 1
+      items: {type: object, properties: {n: {type: integer}}}
     Event:
       type: object
       required: [type]

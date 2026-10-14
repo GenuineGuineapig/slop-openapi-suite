@@ -74,7 +74,10 @@ paths:
             schema:
               type: object
               required: [name]
-              properties: {name: {type: string}, count: {type: integer}}
+              properties: {name: {type: string}, count: {type: integer}, tags: {type: array, items: {type: string}}, meta: {type: object}}
+            encoding:
+              tags: {style: pipeDelimited}
+              meta: {contentType: application/json}
       responses:
         '200': {description: ok, content: {text/plain: {schema: {type: integer}}}}
   /maps:

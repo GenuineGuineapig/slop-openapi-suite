@@ -299,7 +299,7 @@ public final class TestRenderer {
         }
         for (var entry : values.entrySet()) {
             var parameter = entry.getKey();
-            var spec = new ParameterSerializer.Spec(parameter.name(), parameter.in(), parameter.style(), parameter.explode(), parameter.allowReserved());
+            var spec = ParameterSerializer.Spec.of(parameter);
             var value = parameter.content().isEmpty() ? entry.getValue() : dev.openapifn.json.JsonString.of(entry.getValue().toJson());
             switch (parameter.in()) {
                 case PATH -> template = template.replace("{" + parameter.name() + "}", ParameterSerializer.path(spec, value));
@@ -338,7 +338,9 @@ public final class TestRenderer {
         }
         var sent = ContentType.parse(mediaType).filter(type -> type.type().equals("multipart")).isPresent() ? mediaType + "; boundary=" + BOUNDARY
             : mediaType;
-        var text = new String(new BodyWriter(shapes).write(example.get(), ContentType.parse(sent).orElseThrow(), schema), StandardCharsets.UTF_8);
+        var form = ContentType.parse(sent).filter(type -> type.essence().equals("application/x-www-form-urlencoded")).isPresent();
+        var text = form ? BodyWriter.form(example.get(), BodyWriter.formSpecs(body.mediaType().encoding()))
+            : new String(new BodyWriter(shapes).write(example.get(), ContentType.parse(sent).orElseThrow(), schema), StandardCharsets.UTF_8);
         return Optional.of(new TextBody(sent, text));
     }
 

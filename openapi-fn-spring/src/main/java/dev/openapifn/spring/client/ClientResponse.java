@@ -166,21 +166,31 @@ public final class ClientResponse {
 
     /** The header {@code name} converted to {@code type} ({@code simple} style), or {@code null} when absent. */
     public <T> @Nullable T header(String name, Class<T> type) {
-        return header(name, mapper.constructType(type));
+        return header(name, mapper.constructType(type), ",");
     }
 
     public <T> @Nullable T header(String name, TypeReference<T> type) {
-        return header(name, mapper.constructType(type));
+        return header(name, mapper.constructType(type), ",");
     }
 
-    private <T> @Nullable T header(String name, JavaType type) {
+    /** A header whose list items are separated by {@code delimiter} (a Swagger 2.0 collection format) rather than commas. */
+    public <T> @Nullable T header(String name, Class<T> type, String delimiter) {
+        return header(name, mapper.constructType(type), delimiter);
+    }
+
+    public <T> @Nullable T header(String name, TypeReference<T> type, String delimiter) {
+        return header(name, mapper.constructType(type), delimiter);
+    }
+
+    private <T> @Nullable T header(String name, JavaType type, String delimiter) {
         var raw = headers.all(name);
         if (raw.isEmpty()) {
             return null;
         }
         var isList = type.isCollectionLikeType() || type.isArrayType();
         var joined = String.join(",", raw);
-        var value = isList ? Json.of(List.of(joined.split(",")).stream().map(String::trim).toList()) : JsonString.of(joined);
+        var value = isList ? Json.of(List.of(joined.split(java.util.regex.Pattern.quote(delimiter))).stream().map(String::trim).toList())
+            : JsonString.of(joined);
         return mapper.treeToValue(JacksonJson.toJsonNode(value), type);
     }
 }

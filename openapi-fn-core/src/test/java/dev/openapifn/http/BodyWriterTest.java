@@ -127,7 +127,7 @@ class BodyWriterTest {
             + "--m\r\nContent-Type: text/plain\r\n\r\nx\r\n--m--\r\n");
         assertThat(new BodyParser(SHAPES).parse(body.toByteArray(), mixed, media(Optional.empty())).toOptional()).contains(json("[{\"a\":1},\"x\"]"));
         var parser = new BodyParser(SHAPES);
-        var frame = new ItemFramer.Frame(new byte[0], "1".getBytes(StandardCharsets.UTF_8), Optional.empty());
+        var frame = new ItemFramer.Frame(new byte[0], "1".getBytes(StandardCharsets.UTF_8), Optional.empty(), false);
         assertThat(parser.item(frame, ContentType.parse("application/jsonl; charset=nope").orElseThrow(), media(Optional.empty()), 0).failure())
             .contains("unsupported charset 'nope'");
         assertThat(parser.item(frame, jsonl, media(Optional.empty()), 0).toOptional()).contains(Optional.of(json("1")));

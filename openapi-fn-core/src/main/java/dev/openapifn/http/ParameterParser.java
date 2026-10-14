@@ -47,14 +47,23 @@ public final class ParameterParser {
 
         /** Sources taken from a request whose path template matched with {@code pathValues}. */
         public static Sources of(HttpRequest request, Map<String, String> pathValues) {
-            var query = new ArrayList<Map.Entry<String, String>>();
-            for (var part : request.query().split("&")) {
+            return new Sources(pathValues, pairs(request.query()), request.query(), request.headers(), UrlCodec.parseCookies(request.headers().all("Cookie")));
+        }
+
+        /** Sources holding only a query string, such as an {@code application/x-www-form-urlencoded} body. */
+        public static Sources ofQuery(String query) {
+            return new Sources(Map.of(), pairs(query), query, Headers.EMPTY, List.of());
+        }
+
+        private static List<Map.Entry<String, String>> pairs(String query) {
+            var pairs = new ArrayList<Map.Entry<String, String>>();
+            for (var part : query.split("&")) {
                 if (!part.isEmpty()) {
                     var eq = part.indexOf('=');
-                    query.add(Map.entry(UrlCodec.decode(eq < 0 ? part : part.substring(0, eq), true), eq < 0 ? "" : part.substring(eq + 1)));
+                    pairs.add(Map.entry(UrlCodec.decode(eq < 0 ? part : part.substring(0, eq), true), eq < 0 ? "" : part.substring(eq + 1)));
                 }
             }
-            return new Sources(pathValues, query, request.query(), request.headers(), UrlCodec.parseCookies(request.headers().all("Cookie")));
+            return pairs;
         }
     }
 
@@ -87,7 +96,8 @@ public final class ParameterParser {
                 yield raw == null ? Result.ok(Optional.empty()) : path(parameter, raw, shape, schema).map(Optional::of);
             }
             case QUERY -> query(parameter, sources.query(), shape, schema, otherQueryNames);
-            case HEADER -> Result.ok(joinedHeader(sources.headers(), parameter.name()).map(raw -> simple(raw, shape, schema, parameter.explode(), String::trim)));
+            case HEADER -> Result.ok(joinedHeader(sources.headers(), parameter.name())
+                .map(raw -> simple(raw, shape, schema, parameter.explode(), String::trim, CollectionFormat.delimiter(parameter.extensions()).orElse(","))));
             case COOKIE -> Result.ok(cookie(parameter, sources.cookies(), shape, schema));
             case QUERYSTRING -> Result.ok(Optional.of(sources.rawQuery()).filter(q -> !q.isEmpty()).map(q -> formObject(q, schema)));
         };
@@ -156,7 +166,7 @@ public final class ParameterParser {
                 });
             }
             case MATRIX -> matrix(parameter, raw, shape, schema, decode);
-            default -> Result.ok(simple(raw, shape, schema, parameter.explode(), decode));
+            default -> Result.ok(simple(raw, shape, schema, parameter.explode(), decode, CollectionFormat.delimiter(parameter.extensions()).orElse(",")));
         };
     }
 
@@ -188,11 +198,11 @@ public final class ParameterParser {
         });
     }
 
-    /** The {@code simple} style shared by path and header parameters. */
-    private JsonValue simple(String raw, Shape shape, Optional<Schema> schema, boolean explode, UnaryOperator<String> decode) {
+    /** The {@code simple} style shared by path and header parameters; array items are separated by {@code delimiter}. */
+    private JsonValue simple(String raw, Shape shape, Optional<Schema> schema, boolean explode, UnaryOperator<String> decode, String delimiter) {
         return switch (shape) {
             case PRIMITIVE -> primitive(decode.apply(raw), schema);
-            case ARRAY -> array(split(raw, ","), decode, schema);
+            case ARRAY -> array(splitDecoded(raw, delimiter), decode, schema);
             case OBJECT -> explode ? assignments(split(raw, ","), decode, schema) : alternating(split(raw, ","), decode, schema);
         };
     }
@@ -222,11 +232,11 @@ public final class ParameterParser {
         if (values.isEmpty()) {
             return Result.ok(Optional.empty());
         }
-        var separator = switch (parameter.style()) {
+        var separator = CollectionFormat.delimiter(parameter.extensions()).orElseGet(() -> switch (parameter.style()) {
             case SPACE_DELIMITED -> " ";
             case PIPE_DELIMITED -> "|";
             default -> ",";
-        };
+        });
         return Result.ok(Optional.of(switch (shape) {
             case PRIMITIVE -> primitive(decode.apply(values.getFirst()), schema);
             case ARRAY -> parameter.explode() ? array(values, decode, schema) : array(splitDecoded(values.getFirst(), separator), decode, schema);
@@ -234,13 +244,14 @@ public final class ParameterParser {
         }));
     }
 
-    /** Splits on {@code separator}, also accepting the separator in percent-encoded or {@code +} form (spaces). */
+    /** Splits on {@code separator}, also accepting the separator percent-encoded (and spaces as {@code +}); commas are only literal. */
     private static List<String> splitDecoded(String raw, String separator) {
         if (separator.equals(",")) {
             return split(raw, ",");
         }
-        var normalized = separator.equals(" ") ? raw.replace("%20", " ").replace("+", " ") : raw.replace("%7C", "|").replace("%7c", "|");
-        return split(normalized, separator);
+        var encoded = UrlCodec.encode(separator, "");
+        var normalized = raw.replace(encoded, separator).replace(encoded.toLowerCase(java.util.Locale.ROOT), separator);
+        return split(separator.equals(" ") ? normalized.replace("+", " ") : normalized, separator);
     }
 
     private Optional<JsonValue> explodedFormObject(List<Map.Entry<String, String>> query, Schema schema, Set<String> otherNames,

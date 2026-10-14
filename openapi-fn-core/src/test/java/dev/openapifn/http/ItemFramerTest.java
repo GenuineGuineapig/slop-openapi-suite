@@ -93,7 +93,7 @@ class ItemFramerTest {
         var frames = framer("application/jsonl").frames("1\n2".getBytes(StandardCharsets.UTF_8));
         assertThat(frames).extracting(frame -> new String(frame.content(), StandardCharsets.UTF_8)).containsExactly("1", "2");
         assertThat(frames.getFirst().blank()).isFalse();
-        assertThat(new ItemFramer.Frame(new byte[0], " \t\r\n".getBytes(StandardCharsets.UTF_8), Optional.empty()).blank()).isTrue();
+        assertThat(new ItemFramer.Frame(new byte[0], " \t\r\n".getBytes(StandardCharsets.UTF_8), Optional.empty(), false).blank()).isTrue();
         assertThat(framer("application/jsonl").feed("1\n".getBytes(StandardCharsets.UTF_8))).hasSize(1);
     }
 
