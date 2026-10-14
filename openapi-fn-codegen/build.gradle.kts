@@ -21,3 +21,17 @@ dependencies {
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
 }
+
+/** A self-contained jar for the command line: java -jar openapi-fn-codegen-<version>-cli.jar --spec ... */
+val cliJar by tasks.registering(Jar::class) {
+    archiveClassifier = "cli"
+    manifest.attributes("Main-Class" to "dev.openapifn.codegen.cli.Main")
+    from(sourceSets.main.map { it.output })
+    from(configurations.runtimeClasspath.map { classpath -> classpath.map { if (it.isDirectory) it else zipTree(it) } })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class")
+}
+
+tasks.assemble {
+    dependsOn(cliJar)
+}
