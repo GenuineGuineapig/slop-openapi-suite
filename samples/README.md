@@ -10,6 +10,7 @@ controllers, request mapping or validation: the build generates them. You implem
 | [petstore](petstore) | Small hand-written API in two documents | The basics: `oneOf` with discriminator, `allOf`, headers, problem responses |
 | [museum](museum) | [Redocly Museum API](https://github.com/Redocly/museum-openapi-example) | HTTP basic auth, binary (`image/png`) responses, a webhook |
 | [train-travel](train-travel) | [Train Travel API](https://github.com/bump-sh-examples/train-travel-api) (OpenAPI 3.2) | OAuth 2, `QUERY` and custom `SUBSCRIBE` methods, JSON Lines streams, envelope responses, read/write-only payment data, a webhook sent and received |
+| [train-travel-webflux](train-travel-webflux) | The same Train Travel API on Spring WebFlux | Generated `Mono`/`Flux` interfaces, reactive controllers and `WebClient` clients, `@WebFluxTest`s, a `Flux` of live updates validated item by item |
 | [galaxy](galaxy) | [Scalar Galaxy](https://github.com/scalar/scalar/tree/main/packages/galaxy) | Generic `PaginatedResource<Planet>` from `$dynamicRef`, discriminated unions, multipart upload, several auth schemes, callbacks and a webhook sent and received |
 
 Every sample has two kinds of tests:

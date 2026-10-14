@@ -21,7 +21,6 @@ import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.ValidationReport;
-import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -34,6 +33,9 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Flux;
@@ -72,12 +74,26 @@ public final class OpenApiWebClient {
      * @param failOnInvalidResponse whether invalid responses are errors (else they are logged)
      */
     public OpenApiWebClient(WebClient webClient, String baseUrl, JsonMapper mapper, @Nullable OpenApiValidator validator, boolean failOnInvalidResponse) {
-        this.webClient = webClient;
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.validator = validator;
+        // Requests are validated as they are sent: with the client's default headers and filters applied.
+        this.webClient = validator == null ? webClient : webClient.mutate().filter(this::validate).build();
+        this.baseUrl = withoutTrailingSlash(baseUrl);
         this.mapper = mapper;
         this.codec = new ClientCodec(mapper);
-        this.validator = validator;
         this.failOnInvalidResponse = failOnInvalidResponse;
+    }
+
+    private OpenApiWebClient(OpenApiWebClient client, String baseUrl) {
+        this.validator = client.validator;
+        this.webClient = client.webClient;
+        this.baseUrl = withoutTrailingSlash(baseUrl);
+        this.mapper = client.mapper;
+        this.codec = client.codec;
+        this.failOnInvalidResponse = client.failOnInvalidResponse;
+    }
+
+    private static String withoutTrailingSlash(String baseUrl) {
+        return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 
     public String baseUrl() {
@@ -86,7 +102,7 @@ public final class OpenApiWebClient {
 
     /** A client sending to {@code baseUrl} instead, e.g. the URL a webhook subscriber or callback registered. */
     public OpenApiWebClient to(String baseUrl) {
-        return new OpenApiWebClient(webClient, baseUrl, mapper, validator, failOnInvalidResponse);
+        return new OpenApiWebClient(this, baseUrl);
     }
 
     /** Sends {@code call} and decodes the response. */
@@ -109,6 +125,26 @@ public final class OpenApiWebClient {
         });
     }
 
+    /**
+     * What the validation filter needs of a request and learns about it: the encoded body (or that
+     * it is streamed), the operation it belongs to, and the operation it matched.
+     */
+    private static final class Sending {
+
+        private final byte @Nullable [] body;
+        private final boolean streamed;
+        private final @Nullable String operationId;
+        private Optional<OperationMatch> match = Optional.empty();
+
+        Sending(byte @Nullable [] body, boolean streamed, @Nullable String operationId) {
+            this.body = body;
+            this.streamed = streamed;
+            this.operationId = operationId;
+        }
+    }
+
+    private static final String SENDING = OpenApiWebClient.class.getName() + ".sending";
+
     /** Sends a call whose body is encoded whole, or streamed when {@code itemType} is present. */
     private <R> Mono<R> send(ClientCall call, Optional<ContentType> itemType, @Nullable Flux<?> items, Function<ReactiveClientResponse, Mono<R>> decoder) {
         var uri = codec.uri(baseUrl, call);
@@ -120,15 +156,15 @@ public final class OpenApiWebClient {
         if (itemType.isPresent()) {
             headers = headers.with("Content-Type", itemType.get().toString());
         }
-        var match = validateRequest(call, uri, headers, encoded == null ? null : encoded.body(), itemType.isPresent());
-        var request = webClient.method(HttpMethod.valueOf(call.method())).uri(uri);
+        var sending = new Sending(encoded == null ? null : encoded.body(), itemType.isPresent(), call.operationId());
+        var request = webClient.method(HttpMethod.valueOf(call.method())).uri(uri).attribute(SENDING, sending);
         headers.values().forEach((name, values) -> values.forEach(value -> request.header(name, value)));
         if (encoded != null) {
             request.body(BodyInserters.fromValue(encoded.body()));
         }
         if (itemType.isPresent()) {
             var type = itemType.get();
-            var validated = validatedItems(match, type, java.util.Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)));
+            var validated = validatedItems(sending, type, java.util.Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)));
             var end = BodyWriter.end(type);
             request.body(BodyInserters.fromDataBuffers(validated.concatWith(end.length == 0 ? Flux.empty() : Flux.just(end))
                 .map(bytes -> (DataBuffer) DefaultDataBufferFactory.sharedInstance.wrap(bytes))));
@@ -136,39 +172,47 @@ public final class OpenApiWebClient {
         return request.retrieve().onStatus(status -> true, response -> Mono.empty()).toEntityFlux(DataBuffer.class)
             .onErrorMap(WebClientRequestException.class, e -> e.getCause() instanceof ClientValidationException invalid ? invalid : e)
             .flatMap(entity -> decoder.apply(new ReactiveClientResponse(entity.getStatusCode().value(), ReactiveMessages.headers(entity.getHeaders()),
-                java.util.Objects.requireNonNullElse(entity.getBody(), Flux.<DataBuffer>empty()), mapper, match.map(this::validation).orElse(null))));
+                java.util.Objects.requireNonNullElse(entity.getBody(), Flux.<DataBuffer>empty()), mapper, sending.match.map(this::validation).orElse(null))));
     }
 
-    /** Validates a request (or its head, for a streamed body), throwing on violations; the matched operation when validating. */
-    private Optional<OperationMatch> validateRequest(ClientCall call, URI uri, Headers headers, byte @Nullable [] body, boolean head) {
-        if (validator == null) {
-            return Optional.empty();
-        }
-        var message = new HttpRequest(call.method(), uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""), headers,
-            Optional.ofNullable(body).filter(bytes -> bytes.length > 0));
-        var operation = Optional.ofNullable(call.operationId()).flatMap(id -> validator.api().operation(id)).filter(op -> op.kind() != ApiOperation.Kind.PATH);
-        RequestValidation validation = operation.map(op -> new OperationMatch(op, Map.of()))
-            .map(match -> head ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message))
-            .orElseGet(() -> head ? validator.validateRequestHead(message) : validator.validateRequest(message));
-        if (validation.report().hasErrors()) {
-            throw new ClientValidationException("Request " + call.method() + " " + uri + " violates the API description", validation.report());
-        }
-        return validation.match();
+    /** The validation filter: validates a request as it is sent (its head, for a streamed body), failing on violations. */
+    private Mono<ClientResponse> validate(ClientRequest request, ExchangeFunction next) {
+        return Mono.defer(() -> {
+            var validator = java.util.Objects.requireNonNull(this.validator);
+            var sending = (Sending) request.attribute(SENDING).orElseThrow();
+            var uri = request.url();
+            var message = new HttpRequest(request.method().name(), uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""),
+                ReactiveMessages.headers(request.headers()), Optional.ofNullable(sending.body).filter(bytes -> bytes.length > 0));
+            var head = sending.streamed;
+            var operation = Optional.ofNullable(sending.operationId).flatMap(id -> validator.api().operation(id))
+                .filter(op -> op.kind() != ApiOperation.Kind.PATH);
+            RequestValidation validation = operation.map(op -> new OperationMatch(op, Map.of()))
+                .map(match -> head ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message))
+                .orElseGet(() -> head ? validator.validateRequestHead(message) : validator.validateRequest(message));
+            if (validation.report().hasErrors()) {
+                return Mono.error(new ClientValidationException("Request " + request.method() + " " + uri + " violates the API description",
+                    validation.report()));
+            }
+            sending.match = validation.match();
+            return next.exchange(request);
+        });
     }
 
     /** The encoded items of a streamed request body, validated as they are produced when validating. */
-    private Flux<byte[]> validatedItems(Optional<OperationMatch> match, ContentType type, Flux<byte[]> items) {
-        var validator = match.flatMap(m -> java.util.Objects.requireNonNull(this.validator).requestItems(m, type.toString()));
-        if (validator.isEmpty()) {
-            return items;
-        }
-        var framer = validator.get().framer();
-        return items.doOnNext(bytes -> framer.feed(bytes).forEach(frame -> {
-            var report = validator.get().validate(frame).report();
-            if (report.hasErrors()) {
-                throw new ClientValidationException("A request item violates the API description", report);
+    private Flux<byte[]> validatedItems(Sending sending, ContentType type, Flux<byte[]> items) {
+        return Flux.defer(() -> {
+            var validator = sending.match.flatMap(m -> java.util.Objects.requireNonNull(this.validator).requestItems(m, type.toString()));
+            if (validator.isEmpty()) {
+                return items;
             }
-        }));
+            var framer = validator.get().framer();
+            return items.doOnNext(bytes -> framer.feed(bytes).forEach(frame -> {
+                var report = validator.get().validate(frame).report();
+                if (report.hasErrors()) {
+                    throw new ClientValidationException("A request item violates the API description", report);
+                }
+            }));
+        });
     }
 
     private ReactiveClientResponse.Validation validation(OperationMatch match) {

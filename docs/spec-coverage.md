@@ -6,7 +6,8 @@ field of every object is read into the model (`openapi-fn-core`, `dev.openapifn.
 below says what each feature *does* in the parts that act on the model:
 
 * **Validation**: `OpenApiValidator`, also behind the Spring filter and the test matchers
-* **Runtime**: Spring binding and response mapping (`openapi-fn-spring`)
+* **Runtime**: Spring binding and response mapping, for Spring MVC (`openapi-fn-spring`) and
+  WebFlux (`openapi-fn-spring-webflux`)
 * **Codegen**: generated code (`openapi-fn-codegen`)
 
 "Model" means the information is available through the model but has no behaviour; this is
@@ -67,7 +68,7 @@ usually because the specification gives it none (descriptions, documentation lin
 | XML (`xml`: `name`, `namespace`, `prefix`, `attribute`, `wrapped`, `nodeType` 3.2) | Parsing to JSON for validation, writing from JSON |
 | `application/x-www-form-urlencoded` with `encoding` styles | Validation, binding, generated clients |
 | `multipart/form-data` with `encoding` (`contentType`, `headers`, nested) | Validation of parts (content types, headers, schemas), binding (files as `FilePart`), generated clients and tests |
-| `itemSchema`, `prefixEncoding`, `itemEncoding` (3.2): `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`, positional `multipart/mixed` | Validation per item, also while streaming (`ItemFramer`, `OpenApiValidator.requestItems` / `responseItems`). Streamed in both directions by the runtime and generated code as `Stream<T>` |
+| `itemSchema`, `prefixEncoding`, `itemEncoding` (3.2): `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`, positional `multipart/mixed` | Validation per item, also while streaming (`ItemFramer`, `OpenApiValidator.requestItems` / `responseItems`). Streamed in both directions by the runtime and generated code as `Stream<T>` (`Flux<T>` with WebFlux) |
 | Text and binary bodies, `format: binary`, `contentMediaType` | Validation, `FilePart` / `String` in generated code |
 | Responses by status, by range (`2XX`) and `default`; Response `summary` (3.2) | Validation, sealed response types with a record per variant |
 | Response `headers` (`required`, schema, `content`) | Validation, typed components of response records |

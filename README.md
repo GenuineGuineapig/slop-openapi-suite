@@ -4,7 +4,8 @@ Give it an OpenAPI description and get a working Spring Boot 4 API out of it:
 
 * **Generated**: models, controllers, delegate interfaces, HTTP clients, controller tests,
   receivers and senders for webhooks and callbacks.
-* **Runtime**: request and response validation in the filter chain.
+* **Runtime**: request and response validation in the filter chain, for Spring MVC and Spring
+  WebFlux.
 
 It is written in Java 21 in a functional style: immutable records, sealed types, and a `Result`
 type instead of exceptions in the core.
@@ -53,6 +54,25 @@ your code. The plugin adds the runtime (`openapi-fn-spring`) and the test suppor
 (`openapi-fn-spring-test`, `spring-boot-starter-webmvc-test`). The Gradle daemon needs Java 21;
 add `gradle/gradle-daemon-jvm.properties` with `toolchainVersion=21`.
 
+For a **Spring WebFlux** application, depend on `spring-boot-starter-webflux` (and
+`spring-boot-starter-webclient` for clients) and set `reactive = true` in `openapiFn` (or per
+spec). The interfaces then return `Mono`s, sequential bodies are `Flux`es, clients use `WebClient`,
+the generated tests are `@WebFluxTest`s with `WebTestClient`, and the plugin adds
+`openapi-fn-spring-webflux` and `spring-boot-starter-webflux-test` instead:
+
+```java
+@Component
+class PetService implements PetsApi {
+
+    @Override
+    public Mono<GetPetResponse> getPet(GetPetRequest request) {
+        return pets.find(request.petId())                       // Mono<Pet>
+            .map(GetPetResponse::ok)
+            .defaultIfEmpty(GetPetResponse.notFound(new Problem("Not Found", 404)));
+    }
+}
+```
+
 Implement the generated interface. That is all the server code you write:
 
 ```java
@@ -98,8 +118,8 @@ running application through the generated clients.
 | Operations | A request record per operation and a sealed response type with one record per status (or range, or `default`), including typed response headers |
 | Paths | A delegate interface (`PetsApi`) and a `@RestController` per tag. Custom methods (3.2 `additionalOperations`, `QUERY`) are dispatched too |
 | Webhooks, callbacks | Receiver interfaces and controllers (at `openapi-fn.specs.<api>.receivers.<method>.path`, default `/webhooks/<method>` or `/callbacks/<method>`), and senders that take the target URL |
-| Clients | `RestClient` clients per tag that serialize every parameter style and body type, and decode every described response |
-| Tests | A `@WebMvcTest` per controller: an exchange built from examples (validated against the description), plus a test that incomplete requests are rejected |
+| Clients | `RestClient` clients (or `WebClient` clients returning `Mono`s, for WebFlux) per tag that serialize every parameter style and body type, and decode every described response |
+| Tests | A `@WebMvcTest` (or `@WebFluxTest` with `WebTestClient`) per controller: an exchange built from examples (validated against the description), plus a test that incomplete requests are rejected |
 | Bundle | The description (with remote documents) under `META-INF/openapi-fn/<api>/`, found by the runtime automatically |
 
 Request and response bodies cover these media types:
@@ -112,7 +132,7 @@ Request and response bodies cover these media types:
 ## Streaming
 
 Bodies of sequential media types are `java.util.stream.Stream`s of their items (the `itemSchema`,
-or the `items` of an array `schema`), and they stream end to end:
+or the `items` of an array `schema`), or `Flux`es with WebFlux, and they stream end to end:
 
 ```java
 // Server: items are written and flushed as the stream produces them.
@@ -127,7 +147,7 @@ try (var updates = ((SubscribeTripResponse.Ok) trips.subscribeTrip(request)).bod
 ```
 
 Request bodies stream the same way: a client sends a `Stream` item by item, and a controller
-receives a `Stream` that reads the request as it is consumed. Validation keeps up with the
+receives a `Stream` (or `Flux`) that reads the request as it is consumed. Validation keeps up with the
 stream: the filter checks the status, headers and content type first, then each item as it
 passes, and only passes on items that are valid. When responses fail on violations, an invalid
 response becomes a 500 problem while nothing has been sent yet; later, the stream ends before the
@@ -209,8 +229,9 @@ java -jar openapi-fn-codegen-0.1.0-SNAPSHOT-cli.jar --spec api.yaml --name petst
 ```
 
 The self-contained jar comes from `./gradlew :openapi-fn-codegen:cliJar`. Options:
-`--test-output`, `--resources-output`, `--base-path`, `--no-server`, `--no-client`, `--no-tests`. The Gradle task takes the same settings: `basePath`, `server`, `client` and `tests`
-on each spec.
+`--test-output`, `--resources-output`, `--base-path`, `--no-server`, `--no-client`, `--no-tests`,
+`--reactive`. The Gradle task takes the same settings: `basePath`, `server`, `client`, `tests` and
+`reactive` on each spec.
 
 ## Migrating from openapi-generator (spring generator)
 
@@ -237,8 +258,8 @@ because you implement interfaces rather than edit generated files.
 | `validator.validate(request, response)` | `validator.validate(request, response)` (the request routes, the response is checked against the matched operation) |
 | `ValidationReport`, message keys such as `validation.request.body.schema.required` | `ValidationReport`, keys such as `request.body.schema.required` |
 | `LevelResolver` | `LevelPolicy` (`openapi-fn.validation.levels` in Spring) |
-| Spring MVC `OpenApiValidationFilter` + interceptor | Auto-configured `OpenApiValidationFilter` (requests and responses, problem details) |
-| `OpenApiValidationMatchers.openApi().isValid(...)` (MockMvc) | `OpenApiMatchers.conformsTo(runtime)` and `responseConformsTo(runtime)` |
+| Spring MVC `OpenApiValidationFilter` + interceptor | Auto-configured `OpenApiValidationFilter` (requests and responses, problem details); `OpenApiValidationWebFilter` for WebFlux |
+| `OpenApiValidationMatchers.openApi().isValid(...)` (MockMvc) | `OpenApiMatchers.conformsTo(runtime)` and `responseConformsTo(runtime)`; `OpenApiExchangeAssertions` for `WebTestClient` |
 | `OpenApiValidationClientHttpRequestInterceptor` | Generated clients with `openapi-fn.clients.<api>.validate=true`, or `OpenApiClientValidationInterceptor` on any `RestClient` |
 | Swagger 2.0 and OpenAPI 3.0 | Swagger 2.0, OpenAPI 3.0, 3.1 and 3.2 |
 
@@ -247,8 +268,9 @@ because you implement interfaces rather than edit generated files.
 | Module | Contents |
 |---|---|
 | `openapi-fn-core` | Functional utilities (`Result`, …), JSON and YAML, multi-document loading, the OpenAPI model, JSON Schema validation, HTTP message parsing and serialization, request/response validation, example generation, Swagger 2.0 conversion |
-| `openapi-fn-spring` | Spring Boot 4 runtime: auto-configuration, validation filter, request binding and response mapping for generated controllers, problem details, generated-client support |
-| `openapi-fn-spring-test` | MockMvc matchers |
+| `openapi-fn-spring` | Spring Boot 4 runtime: auto-configuration, request binding and response mapping for generated controllers (independent of the web stack), the Spring MVC validation filter, problem details, `RestClient` client support |
+| `openapi-fn-spring-webflux` | Spring WebFlux: the reactive runtime of generated controllers, the validation `WebFilter`, `WebClient` client support, auto-configuration |
+| `openapi-fn-spring-test` | MockMvc matchers and `WebTestClient` assertions |
 | `openapi-fn-codegen` | The code generator and its CLI |
 | `openapi-fn-gradle-plugin` | The `dev.openapifn` Gradle plugin |
 
@@ -257,7 +279,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 
 ## Limitations
 
-* **Spring MVC only.** WebFlux has no runtime (generated clients use `RestClient`).
 * **Credentials are checked for presence and syntax, not verified.** Basic credentials must be
   base64 `user:password`, bearer tokens RFC 6750 tokens; verifying them is Spring Security's job.
   `mutualTLS` requirements count as satisfied.
