@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -236,6 +237,109 @@ class ClientTest {
         var unknown = setup(RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(validator, true)));
         unknown.server().expect(requestTo("https://api.example.com/v1/other")).andRespond(withSuccess());
         assertThatThrownBy(() -> unknown.client().exchange(ClientCall.of("GET", "/other"), r -> null)).isInstanceOf(ClientValidationException.class);
+    }
+
+    @Test
+    void streamsItems() throws Exception {
+        var lines = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), "{\"a\":1}\n".getBytes(StandardCharsets.UTF_8),
+            MAPPER);
+        try (var items = lines.items(new TypeReference<Map<String, Integer>>() { })) {
+            assertThat(items).containsExactly(Map.of("a", 1));
+        }
+        var array = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/json"), "[1,2]".getBytes(StandardCharsets.UTF_8), MAPPER);
+        assertThat(array.items(Integer.class)).containsExactly(1, 2);
+        assertThat(new ClientResponse(204, dev.openapifn.http.Headers.EMPTY, new byte[0], MAPPER).items(Integer.class)).isEmpty();
+        var closed = new java.util.concurrent.atomic.AtomicInteger();
+        var broken = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"),
+            new java.io.ByteArrayInputStream("{\n".getBytes(StandardCharsets.UTF_8)), closed::incrementAndGet, MAPPER);
+        assertThatThrownBy(() -> broken.items(Object.class).toList()).isInstanceOf(IllegalStateException.class)
+            .hasMessageStartingWith("Cannot decode application/jsonl content: item 0 must be valid JSON");
+        var unreadable = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), new java.io.InputStream() {
+            @Override
+            public int read() throws java.io.IOException {
+                throw new java.io.IOException("broken");
+            }
+        }, closed::incrementAndGet, MAPPER);
+        assertThatThrownBy(unreadable::bytes).isInstanceOf(java.io.UncheckedIOException.class);
+        assertThat(closed).hasValue(1);
+
+        var setup = setup(RestClient.builder());
+        var mixed = MediaType.parseMediaType("multipart/mixed");
+        setup.server().expect(requestTo("https://api.example.com/v1/lines")).andExpect(header("Content-Type", "application/jsonl"))
+            .andExpect(content().string("{\"a\":1}\n{\"a\":2}\n"))
+            .andRespond(withSuccess("{\"b\":1}\n{\"b\":2}\n", MediaType.parseMediaType("application/jsonl")));
+        setup.server().expect(requestTo("https://api.example.com/v1/parts"))
+            .andExpect(request -> assertThat(request.getHeaders().getContentType()).satisfies(type -> assertThat(type.isCompatibleWith(mixed)).isTrue()))
+            .andExpect(request -> assertThat(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsString())
+                .contains("Content-Type: application/json\r\n\r\n{\"a\":1}\r\n", "Content-Type: image/png\r\n\r\nA\r\n"))
+            .andRespond(withSuccess("x", MediaType.parseMediaType("application/jsonl")));
+        setup.server().expect(requestTo("https://api.example.com/v1/fixed")).andExpect(header("Content-Type", "multipart/mixed; boundary=fixed"))
+            .andExpect(content().string("--fixed\r\nContent-Type: text/plain\r\n\r\n1\r\n--fixed--\r\n")).andRespond(withSuccess());
+        setup.server().expect(requestTo("https://api.example.com/v1/array")).andExpect(content().string("[1,2]")).andRespond(withSuccess());
+        setup.server().expect(requestTo("https://api.example.com/v1/failing"))
+            .andRespond(withSuccess("{\"b\":1}\n", MediaType.parseMediaType("application/jsonl")));
+        var client = setup.client();
+        assertThat(client.<List<Map<String, Integer>>>exchange(ClientCall.of("POST", "/lines").body("application/jsonl", Stream.of(Map.of("a", 1), Map.of("a", 2))),
+            response -> {
+                try (var items = response.items(new TypeReference<Map<String, Integer>>() { })) {
+                    return items.toList();
+                }
+            })).containsExactly(Map.of("b", 1), Map.of("b", 2));
+        assertThat(client.<Integer>exchange(ClientCall.of("POST", "/parts").body("multipart/mixed",
+            Stream.of(Map.of("a", 1), FilePart.of("f.png", "image/png", new byte[] {65}))), ClientResponse::status)).isEqualTo(200);
+        assertThat(client.<Integer>exchange(ClientCall.of("POST", "/fixed").body("multipart/mixed; boundary=fixed", Stream.of(1)), ClientResponse::status))
+            .isEqualTo(200);
+        assertThat(client.<Integer>exchange(ClientCall.of("POST", "/array").body("application/json", Stream.of(1, 2)), ClientResponse::status)).isEqualTo(200);
+        assertThatThrownBy(() -> client.exchange(ClientCall.of("POST", "/invalid").body("nonsense", Stream.of(1)), ClientResponse::status))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("Invalid content type nonsense");
+        assertThatThrownBy(() -> client.exchange(ClientCall.of("GET", "/failing"), response -> {
+            throw new IllegalStateException("decoder failed");
+        })).isInstanceOf(IllegalStateException.class).hasMessage("decoder failed");
+        setup.server().verify();
+    }
+
+    @Test
+    void interceptorValidatesItemsWhileTheyAreRead() throws Exception {
+        var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"), """
+            openapi: 3.2.0
+            info: {title: t, version: v}
+            paths:
+              /x:
+                get:
+                  responses:
+                    '200':
+                      description: ok
+                      headers: {X-Required: {required: true, schema: {type: string}}}
+                      content: {application/jsonl: {itemSchema: {type: object, required: [n]}}}
+            """).orElseThrow(d -> new AssertionError(d.toString()));
+        var validator = OpenApiValidator.of(api);
+        var request = new org.springframework.mock.http.client.MockClientHttpRequest(HttpMethod.GET, URI.create("https://h/x"));
+        java.util.function.Function<String, org.springframework.mock.http.client.MockClientHttpResponse> response = body -> {
+            var mock = new org.springframework.mock.http.client.MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatus.OK);
+            mock.getHeaders().add("Content-Type", "application/jsonl");
+            mock.getHeaders().add("X-Required", "yes");
+            return mock;
+        };
+        var valid = new OpenApiClientValidationInterceptor(validator, true).intercept(request, new byte[0], (r, b) -> response.apply("{\"n\":1}\n"));
+        var body = valid.getBody();
+        assertThat(body.read(new byte[0], 0, 0)).isZero();
+        var read = new java.io.ByteArrayOutputStream();
+        for (int b = body.read(); b >= 0; b = body.read()) {
+            read.write(b);
+        }
+        assertThat(read.toString(StandardCharsets.UTF_8)).isEqualTo("{\"n\":1}\n");
+        assertThat(body.read(new byte[4], 0, 4)).isEqualTo(-1);
+
+        var invalid = new OpenApiClientValidationInterceptor(validator, true).intercept(request, new byte[0], (r, b) -> response.apply("{\"n\":1}\n{}\n"));
+        assertThatThrownBy(() -> invalid.getBody().readAllBytes()).isInstanceOf(ClientValidationException.class)
+            .hasMessageContaining("response.body.schema.required");
+        var logged = new OpenApiClientValidationInterceptor(validator, false).intercept(request, new byte[0], (r, b) -> response.apply("{}\n"));
+        assertThat(logged.getBody().readAllBytes()).hasSize(3);
+        assertThatThrownBy(() -> new OpenApiClientValidationInterceptor(validator, true).intercept(request, new byte[0], (r, b) -> {
+            var headless = response.apply("{\"n\":1}\n");
+            headless.getHeaders().remove("X-Required");
+            return headless;
+        })).isInstanceOf(ClientValidationException.class).hasMessageContaining("response.header.missing");
     }
 
     @Test

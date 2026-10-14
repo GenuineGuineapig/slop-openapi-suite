@@ -118,10 +118,14 @@ class TrainTravelApiIntegrationTest {
         assertThat(trip.departureTime()).isEqualTo(DEPARTURE.plusHours(1));
         assertThat(trip.price()).isEqualByComparingTo("59.90");
 
-        // A custom SUBSCRIBE method (OpenAPI 3.2 additionalOperations) streaming JSON Lines.
-        var updates = trips.subscribeTrip(new SubscribeTripRequest(trip.id()));
-        assertThat(updates).isInstanceOfSatisfying(SubscribeTripResponse.Ok.class, ok -> assertThat(ok.body()).extracting(TripUpdate::type)
-            .containsExactly(TripUpdate.Type.DELAY, TripUpdate.Type.PLATFORM, TripUpdate.Type.DEPARTED));
+        // A custom SUBSCRIBE method (OpenAPI 3.2 additionalOperations) streaming JSON Lines: each update arrives as it is produced.
+        var updates = (SubscribeTripResponse.Ok) trips.subscribeTrip(new SubscribeTripRequest(trip.id()));
+        var arrivals = new java.util.ArrayList<Long>();
+        try (var stream = updates.body()) {
+            assertThat(stream.peek(update -> arrivals.add(System.nanoTime())).map(TripUpdate::type))
+                .containsExactly(TripUpdate.Type.DELAY, TripUpdate.Type.PLATFORM, TripUpdate.Type.DEPARTED);
+        }
+        assertThat(java.time.Duration.ofNanos(arrivals.getLast() - arrivals.getFirst())).isGreaterThan(MockTrips.UPDATE_INTERVAL);
     }
 
     @Test

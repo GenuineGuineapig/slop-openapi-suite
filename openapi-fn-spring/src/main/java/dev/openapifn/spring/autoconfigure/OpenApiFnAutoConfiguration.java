@@ -7,6 +7,7 @@ import dev.openapifn.schema.SchemaValidator;
 import dev.openapifn.spring.OpenApiExceptionHandler;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
+import dev.openapifn.spring.StreamedBodyConverter;
 import dev.openapifn.spring.client.OpenApiClients;
 import dev.openapifn.spring.servlet.OpenApiValidationFilter;
 import dev.openapifn.validation.LevelPolicy;
@@ -27,7 +28,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.http.converter.HttpMessageConverters;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -94,6 +97,18 @@ public class OpenApiFnAutoConfiguration {
     @ConditionalOnMissingBean
     public OpenApiExceptionHandler openApiExceptionHandler() {
         return new OpenApiExceptionHandler();
+    }
+
+    /** Writes the streamed bodies of generated controllers item by item. */
+    @Bean
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    public WebMvcConfigurer openApiFnMessageConverters() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void configureMessageConverters(HttpMessageConverters.ServerBuilder builder) {
+                builder.addCustomConverter(new StreamedBodyConverter());
+            }
+        };
     }
 
     /** Clients use the application's {@code RestClient.Builder} (a fresh clone each time) when there is one. */

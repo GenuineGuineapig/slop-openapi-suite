@@ -214,9 +214,9 @@ public final class ModelRenderer {
         out.close();
     }
 
-    /** An immutable copy of a collection-valued property (tolerating {@code null} elements). */
+    /** An immutable copy of a collection-valued property (tolerating {@code null} elements); streams are not copied. */
     private static Optional<String> copy(TypeRef type, String name, boolean nullable, Imports imports) {
-        if (!(type instanceof TypeRef.Parameterized parameterized)) {
+        if (!(type instanceof TypeRef.Parameterized parameterized) || parameterized.raw().equals(TypeRef.STREAM)) {
             return Optional.empty();
         }
         var raw = parameterized.raw();

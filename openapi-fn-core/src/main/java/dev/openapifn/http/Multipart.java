@@ -73,7 +73,8 @@ public final class Multipart {
         }
     }
 
-    private static Result<Part, String> part(byte[] content) {
+    /** A part from its content between delimiters: headers, a blank line and the body. */
+    public static Result<Part, String> part(byte[] content) {
         var text = new String(content, StandardCharsets.ISO_8859_1);
         var headerless = text.startsWith("\r\n") ? 2 : text.startsWith("\n") ? 1 : 0;
         if (headerless > 0) {

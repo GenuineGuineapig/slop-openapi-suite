@@ -2,6 +2,7 @@ package dev.openapifn.spring;
 
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
+import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.http.PathTemplate;
 import dev.openapifn.http.SchemaShapes;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.HandlerMapping;
@@ -41,6 +43,12 @@ public final class OpenApiRuntime {
 
     /** Request attribute under which the validation filter stores the {@link RequestValidation}. */
     public static final String VALIDATION_ATTRIBUTE = OpenApiRuntime.class.getName() + ".validation";
+
+    /**
+     * Request attribute marking a request rejected while it was bound (an invalid streamed item, for
+     * example), whose response is a problem rather than a response of the operation.
+     */
+    public static final String REJECTED_ATTRIBUTE = OpenApiRuntime.class.getName() + ".rejected";
 
     private final String name;
     private final OpenApiDocument api;
@@ -103,16 +111,29 @@ public final class OpenApiRuntime {
 
     /** Validates {@code request} against the operation it targets: a receiver's webhook or callback, or the routed path operation. */
     public RequestValidation validate(dev.openapifn.http.HttpRequest request) {
+        return validate(request, false);
+    }
+
+    /**
+     * Validates everything but the body of a request whose body is streamed (see {@link ItemStreams#sequential}),
+     * like {@link #validate}; the items are validated as they are bound, see {@link RequestBinding#items}.
+     */
+    public RequestValidation validateHead(dev.openapifn.http.HttpRequest request) {
+        return validate(request, true);
+    }
+
+    private RequestValidation validate(dev.openapifn.http.HttpRequest request, boolean head) {
         var receiver = receivers.get(request.path());
         if (receiver == null) {
-            return validator.validateRequest(request);
+            return head ? validator.validateRequestHead(request) : validator.validateRequest(request);
         }
         if (!receiver.method().equals(request.method())) {
             var issue = new ValidationIssue(IssueKeys.REQUEST_OPERATION_NOT_ALLOWED, Level.ERROR, request.method() + " is not allowed for "
                 + request.path() + "; allowed: [" + receiver.method() + "]", "method");
             return new RequestValidation(new ValidationReport(List.of(issue)), Optional.empty(), Map.of(), Optional.empty());
         }
-        return validator.validateRequest(new OperationMatch(receiver, Map.of()), request);
+        var match = new OperationMatch(receiver, Map.of());
+        return head ? validator.validateRequestHead(match, request) : validator.validateRequest(match, request);
     }
 
     /**
@@ -123,15 +144,22 @@ public final class OpenApiRuntime {
      */
     public RequestBinding bind(HttpServletRequest request, String operationId) {
         var operation = operation(operationId);
-        var message = ServletMessages.toHttpRequest(request);
+        var streamed = ItemStreams.sequential(request.getContentType());
+        var message = streamed ? ServletMessages.head(request) : ServletMessages.toHttpRequest(request);
+        var match = new OperationMatch(operation, pathValues(request, operation));
         var validation = request.getAttribute(VALIDATION_ATTRIBUTE) instanceof RequestValidation cached
-            && cached.match().filter(match -> match.operation().equals(operation)).isPresent()
+            && cached.match().filter(cachedMatch -> cachedMatch.operation().equals(operation)).isPresent()
             ? cached
-            : validator.validateRequest(new OperationMatch(operation, pathValues(request, operation)), message);
+            : streamed ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message);
         if (failOnInvalidRequest && validation.report().hasErrors()) {
             throw new OpenApiValidationException(validation.report());
         }
-        return new RequestBinding(validation, message, mapper);
+        if (!streamed) {
+            return new RequestBinding(validation, message, mapper);
+        }
+        var items = validator.requestItems(match, request.getContentType());
+        return new RequestBinding(validation, message, mapper, new RequestBinding.Items(() -> ServletMessages.input(request),
+            ContentType.parse(request.getContentType()).orElseThrow(), items, failOnInvalidRequest));
     }
 
     /** Raw path values from the handler mapping's pattern, falling back to the validator's router. */
@@ -197,12 +225,27 @@ public final class OpenApiRuntime {
         return body instanceof FilePart file ? file.contentType() : FilePart.OCTET_STREAM;
     }
 
+    /** The body to write: content of files, a {@link StreamedBody} for streams of sequential media types, or the serialized value. */
     private Object serialize(Object body, ContentType type, Optional<dev.openapifn.schema.Schema> schema) {
         return switch (body) {
             case FilePart file -> file.content();
             case byte[] bytes -> bytes;
+            case Stream<?> items when ItemFramer.isSequential(type) -> new StreamedBody(items, item -> item(item, type), BodyWriter.end(type));
+            case Stream<?> items -> {
+                try (items) {
+                    yield serialize(items.toList(), type, schema);
+                }
+            }
             default -> type.isJson() ? mapper.writeValueAsBytes(body) : writer.write(toJson(body), type, schema);
         };
+    }
+
+    /** An item of a sequential body; files become positional parts as they are. */
+    private byte[] item(Object item, ContentType type) {
+        if (item instanceof FilePart file && type.type().equals("multipart")) {
+            return BodyWriter.part(type.parameter("boundary").orElseThrow(), BodyWriter.part(file.contentType(), file.content()));
+        }
+        return BodyWriter.item(toJson(item), type);
     }
 
     private JsonValue toJson(Object value) {

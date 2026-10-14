@@ -82,6 +82,7 @@ class GeneratorTest {
                 "order:3-day:3:Card[method=card, last4=4242]:Address:[LinesItem[sku=sku-1, quantity=2]]",
                 "pickup:StringValue[value=pickup]",
                 "events:[placed, paid]",
+                "imported:2",
                 "health:UP",
                 "adopted:202",
                 "stock:204",

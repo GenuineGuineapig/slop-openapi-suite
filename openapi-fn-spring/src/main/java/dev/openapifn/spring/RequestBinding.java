@@ -1,17 +1,30 @@
 package dev.openapifn.spring;
 
+import dev.openapifn.http.BodyParser;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.HttpRequest;
+import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.Multipart;
+import dev.openapifn.http.SchemaShapes;
+import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.model.MediaType;
+import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.validation.Level;
+import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
 import dev.openapifn.validation.ValidationIssue;
 import dev.openapifn.validation.ValidationReport;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
@@ -23,18 +36,42 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * The parameters and body of a validated request, converted to Java types on demand with
- * Jackson. Generated controllers construct their request records from it.
+ * Jackson. Generated controllers construct their request records from it. Bodies of sequential
+ * media types are streamed: {@link #items} reads and validates them item by item.
  */
 public final class RequestBinding {
+
+    private static final BodyParser PARSER = new BodyParser(new SchemaShapes(SchemaRegistry.empty()));
+
+    /**
+     * A streamed body.
+     *
+     * @param input the source of its bytes, read once
+     * @param contentType its content type, a sequential one
+     * @param validator the validator of its items, when its media type is described
+     * @param failOnInvalid whether an invalid item ends the stream with an {@link OpenApiValidationException}
+     */
+    record Items(Supplier<InputStream> input, ContentType contentType, Optional<OpenApiValidator.ItemValidator> validator, boolean failOnInvalid) {
+    }
 
     private final RequestValidation validation;
     private final HttpRequest request;
     private final JsonMapper mapper;
+    private final Optional<Items> streamed;
 
     RequestBinding(RequestValidation validation, HttpRequest request, JsonMapper mapper) {
+        this(validation, request, mapper, Optional.empty());
+    }
+
+    RequestBinding(RequestValidation validation, HttpRequest request, JsonMapper mapper, Items streamed) {
+        this(validation, request, mapper, Optional.of(streamed));
+    }
+
+    private RequestBinding(RequestValidation validation, HttpRequest request, JsonMapper mapper, Optional<Items> streamed) {
         this.validation = validation;
         this.request = request;
         this.mapper = mapper;
+        this.streamed = streamed;
     }
 
     public RequestValidation validation() {
@@ -66,13 +103,19 @@ public final class RequestBinding {
 
     @SuppressWarnings("unchecked")
     private <T> @Nullable T body(JavaType type) {
-        var bytes = request.body();
+        var raw = type.getRawClass();
+        var whole = raw == byte[].class || raw == FilePart.class || raw == String.class;
+        if (streamed.isPresent() && !whole) {
+            try (var values = values(streamed.get())) {
+                return convert(JacksonJson.toJsonNode(new JsonArray(values.toList())), type, "body");
+            }
+        }
+        var bytes = streamed.map(items -> readAll(items.input().get())).filter(content -> content.length > 0).or(request::body);
         if (bytes.isEmpty()) {
             return null;
         }
         var contentType = request.contentType().flatMap(ContentType::parse);
         var json = contentType.filter(ContentType::isJson).isPresent();
-        var raw = type.getRawClass();
         if (!json && raw == byte[].class) {
             return (T) bytes.get();
         }
@@ -92,6 +135,48 @@ public final class RequestBinding {
             embedFiles((ObjectNode) node, Multipart.parse(bytes.get(), boundary.get()).toOptional().orElse(List.of()));
         }
         return convert(node, type, "body");
+    }
+
+    /**
+     * The items of the body, converted to {@code type}. A streamed body (of a sequential media type)
+     * is read as the stream is consumed, and each item is validated as it arrives: an invalid item
+     * ends the stream with an {@link OpenApiValidationException} (when failing on invalid requests
+     * is enabled). Other bodies are read at once, as an array of items.
+     */
+    public <T> Stream<T> items(Class<T> type) {
+        return items(mapper.constructType(type));
+    }
+
+    public <T> Stream<T> items(TypeReference<T> type) {
+        return items(mapper.constructType(type));
+    }
+
+    private <T> Stream<T> items(JavaType type) {
+        if (streamed.isPresent()) {
+            return values(streamed.get()).map(value -> convert(JacksonJson.toJsonNode(value), type, "body"));
+        }
+        List<T> list = body(mapper.getTypeFactory().constructCollectionType(List.class, type));
+        return list == null ? Stream.empty() : list.stream();
+    }
+
+    private static Stream<JsonValue> values(Items items) {
+        var framer = ItemFramer.of(items.contentType()).orElseThrow();
+        Function<ItemFramer.Frame, Optional<JsonValue>> item = items.validator().<Function<ItemFramer.Frame, Optional<JsonValue>>>map(validator -> frame -> {
+            var validated = validator.validate(frame);
+            if (items.failOnInvalid() && validated.report().hasErrors()) {
+                throw new OpenApiValidationException(validated.report());
+            }
+            return validated.value();
+        }).orElseGet(() -> frame -> PARSER.item(frame, items.contentType(), MediaType.EMPTY, 0).toOptional().flatMap(Function.identity()));
+        return ItemStreams.read(items.input().get(), framer, item);
+    }
+
+    private static byte[] readAll(InputStream input) {
+        try (input) {
+            return input.readAllBytes();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /**

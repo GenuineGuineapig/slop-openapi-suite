@@ -319,6 +319,68 @@ class OpenApiValidatorTest {
                 "response.body.schema.type@body/2");
     }
 
+    /** The items of a streamed body fed in chunks of three bytes, as value and issues (frames without either are left out). */
+    private static List<String> items(OpenApiValidator.ItemValidator validator, String body) {
+        var framer = validator.framer();
+        var bytes = body.getBytes(StandardCharsets.UTF_8);
+        var frames = new java.util.ArrayList<dev.openapifn.http.ItemFramer.Frame>();
+        for (int i = 0; i < bytes.length; i += 3) {
+            frames.addAll(framer.feed(bytes, i, Math.min(3, bytes.length - i)));
+        }
+        frames.add(framer.finish());
+        return frames.stream().map(validator::validate).filter(item -> item.value().isPresent() || !item.report().isEmpty())
+            .map(item -> item.value().map(value -> value.toJson()).orElse("-") + issues(item.report()).stream().map(issue -> " " + issue).collect(
+                java.util.stream.Collectors.joining()))
+            .toList();
+    }
+
+    @Test
+    void streamedBodies() {
+        var publish = HttpRequest.of("POST", "/v1/events").withHeader("Content-Type", "application/jsonl");
+        var head = VALIDATOR.validateRequestHead(publish);
+        assertThat(issues(head.report())).isEmpty();
+        assertThat(head.body()).isEmpty();
+        assertThat(request(publish)).containsExactly("request.body.missing@body");
+        assertThat(issues(VALIDATOR.validateRequestHead(HttpRequest.of("POST", "/v1/events").withHeader("Content-Type", "text/csv")).report()))
+            .containsExactly("request.contentType.notAllowed@header.Content-Type");
+        assertThat(issues(VALIDATOR.validateRequestHead(HttpRequest.of("POST", "/v1/events")).report()))
+            .containsExactly("request.contentType.missing@header.Content-Type");
+        assertThat(issues(VALIDATOR.validateRequestHead(HttpRequest.of("GET", "/v1/events").withHeader("Content-Type", "application/jsonl")).report()))
+            .containsExactly("request.body.unexpected@body");
+        assertThat(issues(VALIDATOR.validateRequestHead(HttpRequest.of("POST", "/v1/nowhere")).report())).containsExactly("request.path.missing@path");
+
+        var match = head.match().orElseThrow();
+        var jsonl = VALIDATOR.requestItems(match, "application/jsonl").orElseThrow();
+        assertThat(jsonl.contentType().essence()).isEqualTo("application/jsonl");
+        assertThat(items(jsonl, "{\"type\":\"a\"}\n\n{}\n{\n")).containsExactly("{\"type\":\"a\"}", "{} request.body.schema.required@body/1",
+            "- request.body.invalid@body");
+        // Without an item schema, an item is validated against the item of the schema at its position; the length is not checked.
+        assertThat(items(VALIDATOR.requestItems(match, "application/x-ndjson").orElseThrow(), "{}\n{}\n{\"type\":\"b\"}"))
+            .containsExactly("{} request.body.schema.required@body/0", "{} request.body.schema.required@body/1", "{\"type\":\"b\"}");
+        assertThat(items(VALIDATOR.requestItems(match, "application/json-seq").orElseThrow(), "\u001e1\n\u001e{")).containsExactly("1",
+            "- request.body.invalid@body");
+        assertThat(items(VALIDATOR.requestItems(match, "multipart/mixed; boundary=b").orElseThrow(),
+            "--b\r\nContent-Type: text/plain\r\n\r\n{\"type\": 1}\r\n--b\r\nContent-Type: application/json\r\n\r\n{\"type\": \"t\"}\r\n"
+                + "--b\r\nbroken\r\n--b"))
+            .containsExactly("\"{\\\"type\\\": 1}\" request.body.part.contentType@body.0 request.body.schema.type@body/0", "{\"type\":\"t\"}",
+                "- request.body.invalid@body", "- request.body.invalid@body");
+        assertThat(VALIDATOR.requestItems(match, "application/json")).isEmpty();
+        assertThat(VALIDATOR.requestItems(match, "application/x-jsonlines")).isEmpty();
+        assertThat(VALIDATOR.requestItems(match, "not a type")).isEmpty();
+
+        var events = VALIDATOR.validateRequest(HttpRequest.of("GET", "/v1/events")).match().orElseThrow();
+        assertThat(VALIDATOR.requestItems(events, "application/jsonl")).isEmpty();
+        assertThat(issues(VALIDATOR.validateResponseHead(events, HttpResponse.of(200).withHeader("Content-Type", "text/event-stream")))).isEmpty();
+        assertThat(issues(VALIDATOR.validateResponseHead(events, HttpResponse.of(200)))).containsExactly("response.contentType.missing@header.Content-Type");
+        assertThat(issues(VALIDATOR.validateResponseHead(events, HttpResponse.of(500)))).containsExactly("response.status.unknown@status");
+        assertThat(issues(VALIDATOR.validateResponseHead(match, HttpResponse.of(202)))).isEmpty();
+        assertThat(items(VALIDATOR.responseItems(events, 200, "text/event-stream").orElseThrow(), ": keep-alive\n\nevent: e\nretry: x\n\ndata: 1\n\n"))
+            .containsExactly("{\"event\":\"e\",\"retry\":\"x\"} response.body.schema.required@body/0 response.body.schema.type@body/0/retry",
+                "{\"data\":\"1\"}");
+        assertThat(VALIDATOR.responseItems(events, 500, "text/event-stream")).isEmpty();
+        assertThat(VALIDATOR.responseItems(match, 202, "application/jsonl")).isEmpty();
+    }
+
     @Test
     void webhooksAndCombinedValidation() {
         // Webhook requests are written by the API provider: read-only properties belong in them, write-only ones do not.

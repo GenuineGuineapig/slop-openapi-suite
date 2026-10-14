@@ -1,6 +1,7 @@
 package dev.openapifn.spring.servlet;
 
 import dev.openapifn.http.HttpRequest;
+import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.Problems;
@@ -19,7 +20,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.http.server.PathContainer;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.ContentCachingResponseWrapper;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 
@@ -29,6 +29,13 @@ import org.springframework.web.util.pattern.PathPatternParser;
  * validation result is stored as a request attribute for {@link OpenApiRuntime#bind}. Invalid
  * responses are logged or replaced by a 500 problem, depending on the configuration. Request
  * bodies of described paths are cached so that they can be validated and then consumed.
+ *
+ * <p>Bodies of sequential media types (JSON Lines, JSON text sequences, server-sent events,
+ * positional multipart) are streamed instead: request bodies are validated item by item as they
+ * are bound (see {@link dev.openapifn.spring.RequestBinding#items}), response bodies as they are
+ * written, passing on each item once it is valid. An invalid streamed response is replaced by a
+ * problem while nothing has been sent yet; later, when failing, the stream ends before the
+ * invalid item.
  */
 public final class OpenApiValidationFilter extends OncePerRequestFilter {
 
@@ -91,29 +98,44 @@ public final class OpenApiValidationFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        if (request.getContentLengthLong() > settings.maxBodySize()) {
+        var streamed = ItemStreams.sequential(request.getContentType());
+        if (!streamed && request.getContentLengthLong() > settings.maxBodySize()) {
             chain.doFilter(request, response);
             return;
         }
-        var cached = CachedBodyRequest.of(request);
-        var validation = runtime.get().validate(ServletMessages.toHttpRequest(cached));
-        cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, validation);
+        var forwarded = streamed ? request : CachedBodyRequest.of(request);
+        var validation = streamed ? runtime.get().validateHead(ServletMessages.head(request))
+            : runtime.get().validate(ServletMessages.toHttpRequest(forwarded));
+        forwarded.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, validation);
         if (settings.validateRequests() && validation.report().hasErrors()) {
             var status = IssueKeys.status(validation.report().errors().getFirst().key());
             problem(response, status, "Request validation failed", request.getRequestURI(), validation.report());
             return;
         }
         if (!settings.validateResponses() || validation.match().isEmpty()) {
-            chain.doFilter(cached, response);
+            chain.doFilter(forwarded, response);
             return;
         }
-        var wrapper = new ContentCachingResponseWrapper(response);
-        chain.doFilter(cached, wrapper);
+        var fail = settings.responseMode() == ResponseMode.FAIL;
+        var wrapper = new ValidatingResponseWrapper(response, runtime.get().validator(), validation.match().get(), fail,
+            report -> LOG.warn("Response of " + request.getMethod() + " " + request.getRequestURI() + " violates the API description:\n" + report));
+        chain.doFilter(forwarded, wrapper);
+        if (wrapper.streamed()) {
+            var failure = wrapper.finish();
+            if (failure.isPresent() && !response.isCommitted()) {
+                problem(response, 500, "Response validation failed", request.getRequestURI(), failure.get());
+            }
+            return;
+        }
+        if (forwarded.getAttribute(OpenApiRuntime.REJECTED_ATTRIBUTE) != null) {
+            wrapper.copyBodyToResponse();
+            return;
+        }
         var report = runtime.get().validator().validateResponse(validation.match().get(), ServletMessages.response(wrapper));
         if (!report.isEmpty()) {
             LOG.warn("Response of " + request.getMethod() + " " + request.getRequestURI() + " violates the API description:\n" + report);
         }
-        if (report.hasErrors() && settings.responseMode() == ResponseMode.FAIL) {
+        if (report.hasErrors() && fail) {
             wrapper.resetBuffer();
             problem(wrapper, 500, "Response validation failed", request.getRequestURI(), report);
         }

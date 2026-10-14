@@ -6,6 +6,8 @@ import dev.openapifn.codegen.java.TypeRef.ClassName;
 import dev.openapifn.codegen.model.ModelDef.Property;
 import dev.openapifn.codegen.model.TypeMapper;
 import dev.openapifn.http.ContentType;
+import dev.openapifn.http.ItemFramer;
+import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
 import dev.openapifn.model.ApiOperation;
@@ -188,15 +190,17 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     }
 
     /**
-     * The Java type of a body of {@code contentType}: sequential media types are lists of their
-     * item schema, structured and text content follow the schema, other text is a {@code String}
-     * and everything else (and {@code format: binary}) a {@code FilePart}.
+     * The Java type of a body of {@code contentType}: sequential media types are streams of their
+     * items (described by the {@code itemSchema}, or by the {@code items} of an array {@code schema}),
+     * structured and text content follow the schema, other text is a {@code String} and everything
+     * else (and {@code format: binary}) a {@code FilePart}.
      */
     static TypeRef bodyType(String contentType, MediaType mediaType, TypeMapper mapper, ClassName owner, String hint) {
-        if (mediaType.itemSchema().isPresent()) {
-            return TypeRef.LIST.of(mapper.type(mediaType.itemSchema().get(), owner, hint + "Item"));
-        }
         var type = ContentType.parse(contentType);
+        var item = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(schema -> new SchemaShapes(mapper.registry()).items(schema)));
+        if (type.filter(ItemFramer::isSequentialMediaType).isPresent() && item.isPresent()) {
+            return TypeRef.STREAM.of(mapper.type(item.get(), owner, hint + "Item"));
+        }
         var text = type.filter(t -> t.type().equals("text") && !t.isXml()).isPresent();
         var structured = type.filter(t -> t.isJson() || t.isXml() || t.type().equals("multipart")
             || t.essence().equals("application/x-www-form-urlencoded")).isPresent();
@@ -211,6 +215,12 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     private static Schema empty() {
         var uri = URI.create("urn:openapi-fn:any");
         return Schema.at(JsonObject.EMPTY, uri, JsonPointer.ROOT, uri, Dialect.DRAFT_2020_12);
+    }
+
+    /** The item type of a streamed body type ({@code Stream<T>}), if it is one. */
+    public static Optional<TypeRef> streamed(TypeRef type) {
+        return type instanceof TypeRef.Parameterized parameterized && parameterized.raw().equals(TypeRef.STREAM)
+            ? Optional.of(parameterized.arguments().getFirst()) : Optional.empty();
     }
 
     /** Whether the API provider sends this operation's requests (a webhook or callback) rather than serving them. */

@@ -5,6 +5,7 @@ import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.Multipart;
 import dev.openapifn.http.ParameterParser;
 import dev.openapifn.http.SchemaShapes;
@@ -15,6 +16,7 @@ import dev.openapifn.json.JsonPointer;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.ApiOperation;
+import dev.openapifn.model.Encoding;
 import dev.openapifn.model.Header;
 import dev.openapifn.model.MediaType;
 import dev.openapifn.model.Parameter;
@@ -176,13 +178,51 @@ public final class OpenApiValidator {
 
     /** Validates {@code request} against an already matched operation. */
     public RequestValidation validateRequest(OperationMatch match, HttpRequest request) {
+        return validateRequest(match, request, false);
+    }
+
+    /**
+     * Validates everything of a request but its body, for requests whose body is streamed: the
+     * {@code Content-Type} is checked, and the items of the body are validated as they arrive with
+     * the {@link #requestItems} validator.
+     */
+    public RequestValidation validateRequestHead(HttpRequest request) {
+        return route(request) instanceof Route.Found found ? validateRequestHead(found.match(), request) : validateRequest(request);
+    }
+
+    /** Validates everything of a request but its body against an already matched operation, see {@link #validateRequestHead(HttpRequest)}. */
+    public RequestValidation validateRequestHead(OperationMatch match, HttpRequest request) {
+        return validateRequest(match, request, true);
+    }
+
+    private RequestValidation validateRequest(OperationMatch match, HttpRequest request, boolean streamed) {
         var issues = new Issues();
         var operation = match.operation();
         security(operation, request, issues);
         var values = parameters(match, request, issues);
-        var body = requestBody(operation, request, issues);
+        var body = streamed ? streamedRequestBody(operation, request, issues) : requestBody(operation, request, issues);
         accept(operation, request, issues);
         return new RequestValidation(issues.report(), Optional.of(match), values, body);
+    }
+
+    /**
+     * A validator for the items of a streamed request body of {@code contentType}, if the operation
+     * describes that media type and it is sequential (see {@link ItemFramer#isSequential}).
+     */
+    public Optional<ItemValidator> requestItems(OperationMatch match, String contentType) {
+        return match.operation().operation().requestBody()
+            .flatMap(body -> items(body.content(), contentType, match.operation().requestDirection(), "request"));
+    }
+
+    /** A validator for the items of a streamed response body, see {@link #requestItems}. */
+    public Optional<ItemValidator> responseItems(OperationMatch match, int status, String contentType) {
+        return match.operation().operation().responses().forStatus(status)
+            .flatMap(response -> items(response.content(), contentType, match.operation().responseDirection(), "response"));
+    }
+
+    private Optional<ItemValidator> items(Map<String, MediaType> content, String contentType, Direction direction, String side) {
+        return ContentType.parse(contentType).filter(ItemFramer::isSequential)
+            .flatMap(type -> ContentType.bestMatch(content.keySet(), type).map(range -> new ItemValidator(type, content.get(range), direction, side)));
     }
 
     /** Whether a request carries a credential for a security scheme, and whether it is well formed. */
@@ -332,6 +372,13 @@ public final class OpenApiValidator {
         return body(content.get(), request.contentType(), declared.get().content(), operation.requestDirection(), "request", issues);
     }
 
+    /** The head of a request whose body is streamed: the body is expected, its content type must be described. */
+    private Optional<JsonValue> streamedRequestBody(ApiOperation operation, HttpRequest request, Issues issues) {
+        operation.operation().requestBody().ifPresentOrElse(declared -> mediaType(request.contentType(), declared.content(), "request", issues),
+            () -> issues.add(IssueKeys.REQUEST_BODY_UNEXPECTED, "the operation does not describe a request body", "body"));
+        return Optional.empty();
+    }
+
     private void accept(ApiOperation operation, HttpRequest request, Issues issues) {
         var accept = request.headers().first("Accept");
         var produced = new LinkedHashSet<String>();
@@ -370,6 +417,19 @@ public final class OpenApiValidator {
     }
 
     public ValidationReport validateResponse(OperationMatch match, HttpResponse response) {
+        return validateResponse(match, response, false);
+    }
+
+    /**
+     * Validates everything of a response but its body, for responses whose body is streamed: the
+     * status, the headers and the {@code Content-Type}. The items of the body are validated as they
+     * are produced with the {@link #responseItems} validator.
+     */
+    public ValidationReport validateResponseHead(OperationMatch match, HttpResponse response) {
+        return validateResponse(match, response, true);
+    }
+
+    private ValidationReport validateResponse(OperationMatch match, HttpResponse response, boolean streamed) {
         var issues = new Issues();
         var declared = match.operation().operation().responses().forStatus(response.status());
         if (declared.isEmpty()) {
@@ -380,7 +440,11 @@ public final class OpenApiValidator {
         responseHeaders(declared.get(), response.headers(), issues);
         var content = response.body().filter(bytes -> bytes.length > 0);
         var mediaTypes = declared.get().content();
-        if (mediaTypes.isEmpty()) {
+        if (streamed) {
+            if (!mediaTypes.isEmpty()) {
+                mediaType(response.contentType(), mediaTypes, "response", issues);
+            }
+        } else if (mediaTypes.isEmpty()) {
             content.ifPresent(bytes -> issues.add(IssueKeys.RESPONSE_BODY_UNEXPECTED, "the response " + response.status()
                 + " does not describe content", "body"));
         } else if (content.isEmpty()) {
@@ -433,31 +497,40 @@ public final class OpenApiValidator {
      * and {@code itemEncoding}.
      */
     private void parts(byte[] content, ContentType type, MediaType mediaType, String side, Issues issues) {
-        var formData = type.subtype().equals("form-data");
-        var parts = Multipart.parse(content, type.parameter("boundary").orElseThrow()).toOptional().orElseThrow();
-        for (int i = 0; i < parts.size(); i++) {
-            var part = parts.get(i);
-            var index = i;
-            var encoding = formData ? part.name().map(mediaType.encoding()::get)
-                : index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
-            var location = "body." + (formData ? part.name().orElse("") : Integer.toString(index));
-            encoding.ifPresent(declared -> {
-                declared.contentType().ifPresent(allowed -> part.contentType().flatMap(ContentType::parse).ifPresent(actual -> {
-                    var ranges = java.util.Arrays.stream(allowed.split(",")).map(String::trim).toList();
-                    if (ContentType.bestMatch(ranges, actual).isEmpty()) {
-                        issues.add(side + ".body.part.contentType", "part content type '" + actual.essence() + "' is not one of " + ranges, location);
-                    }
-                }));
-                headers(declared.headers(), part.headers(), side + ".body.part.header", location + ".", issues);
-            });
+        if (type.subtype().equals("form-data")) {
+            Multipart.parse(content, type.parameter("boundary").orElseThrow()).toOptional().orElseThrow()
+                .forEach(part -> part(part, part.name().map(mediaType.encoding()::get), "body." + part.name().orElse(""), side, issues));
+            return;
         }
+        var parts = ItemFramer.of(type).orElseThrow().frames(content).stream().filter(frame -> frame.content().length > 0)
+            .map(frame -> Multipart.part(frame.content()).toOptional().orElseThrow()).toList();
+        for (int i = 0; i < parts.size(); i++) {
+            part(parts.get(i), positionalEncoding(mediaType, i), "body." + i, side, issues);
+        }
+    }
+
+    private static Optional<Encoding> positionalEncoding(MediaType mediaType, int index) {
+        return index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
+    }
+
+    private void part(Multipart.Part part, Optional<Encoding> encoding, String location, String side, Issues issues) {
+        encoding.ifPresent(declared -> {
+            declared.contentType().ifPresent(allowed -> part.contentType().flatMap(ContentType::parse).ifPresent(actual -> {
+                var ranges = java.util.Arrays.stream(allowed.split(",")).map(String::trim).toList();
+                if (ContentType.bestMatch(ranges, actual).isEmpty()) {
+                    issues.add(side + ".body.part.contentType", "part content type '" + actual.essence() + "' is not one of " + ranges, location);
+                }
+            }));
+            headers(declared.headers(), part.headers(), side + ".body.part.header", location + ".", issues);
+        });
     }
 
     // ---------------------------------------------------------------------------------------------
     // Bodies
 
-    private Optional<JsonValue> body(byte[] content, Optional<String> contentTypeHeader, Map<String, MediaType> mediaTypes, Direction direction,
-                                     String side, Issues issues) {
+    /** The content type of a message and the media type describing it, reporting when there is none. */
+    private Optional<Map.Entry<ContentType, MediaType>> mediaType(Optional<String> contentTypeHeader, Map<String, MediaType> mediaTypes, String side,
+                                                                 Issues issues) {
         if (contentTypeHeader.isEmpty()) {
             issues.add(side + ".contentType.missing", "the " + side + " has a body but no Content-Type", "header.Content-Type");
             return Optional.empty();
@@ -473,15 +546,25 @@ public final class OpenApiValidator {
                 + mediaTypes.keySet(), "header.Content-Type");
             return Optional.empty();
         }
-        var mediaType = mediaTypes.get(range.get());
-        var parsed = bodies.parse(content, contentType.get(), mediaType);
+        return Optional.of(Map.entry(contentType.get(), mediaTypes.get(range.get())));
+    }
+
+    private Optional<JsonValue> body(byte[] content, Optional<String> contentTypeHeader, Map<String, MediaType> mediaTypes, Direction direction,
+                                     String side, Issues issues) {
+        var described = mediaType(contentTypeHeader, mediaTypes, side, issues);
+        if (described.isEmpty()) {
+            return Optional.empty();
+        }
+        var contentType = described.get().getKey();
+        var mediaType = described.get().getValue();
+        var parsed = bodies.parse(content, contentType, mediaType);
         if (parsed.isErr()) {
             issues.add(side + ".body.invalid", parsed.failure().orElseThrow(), "body");
             return Optional.empty();
         }
         var value = parsed.toOptional().orElseThrow();
-        if (contentType.get().type().equals("multipart")) {
-            parts(content, contentType.get(), mediaType, side, issues);
+        if (contentType.type().equals("multipart")) {
+            parts(content, contentType, mediaType, side, issues);
         }
         var key = side + ".body.schema";
         if (mediaType.itemSchema().isPresent() && value instanceof JsonArray items) {
@@ -493,6 +576,70 @@ public final class OpenApiValidator {
             mediaType.schema().ifPresent(schema -> issues.schema(key, "body", schemas.validate(schema, value, direction)));
         }
         return Optional.of(value);
+    }
+
+    /**
+     * An item of a streamed body.
+     *
+     * @param value the item, empty for frames without one (such as blank lines or comments) and
+     *     for items that cannot be parsed
+     * @param report the findings for this item
+     */
+    public record Item(Optional<JsonValue> value, ValidationReport report) {
+    }
+
+    /**
+     * Validates the items of one streamed body as they arrive: each frame of the body's
+     * {@link #framer()} is parsed and validated against the item schema (the {@code itemSchema},
+     * else the item of the {@code schema} at the item's position) and, for multipart parts, the
+     * item encoding. Findings are located at {@code body/<index>}. Constraints on the sequence as
+     * a whole (such as {@code maxItems}) are not checked. Instances are not thread-safe.
+     */
+    public final class ItemValidator {
+
+        private final ContentType type;
+        private final MediaType mediaType;
+        private final Direction direction;
+        private final String side;
+        private int index;
+
+        private ItemValidator(ContentType type, MediaType mediaType, Direction direction, String side) {
+            this.type = type;
+            this.mediaType = mediaType;
+            this.direction = direction;
+            this.side = side;
+        }
+
+        /** The content type of the body. */
+        public ContentType contentType() {
+            return type;
+        }
+
+        /** A new framer for the body. */
+        public ItemFramer framer() {
+            return ItemFramer.of(type).orElseThrow();
+        }
+
+        /** Parses and validates the item of the next frame. */
+        public Item validate(ItemFramer.Frame frame) {
+            var issues = new Issues();
+            var parsed = bodies.item(frame, type, mediaType, index);
+            if (parsed.isErr()) {
+                issues.add(side + ".body.invalid", parsed.failure().orElseThrow(), "body");
+                return new Item(Optional.empty(), issues.report());
+            }
+            var value = parsed.toOptional().orElseThrow();
+            if (value.isPresent()) {
+                var position = index++;
+                if (type.type().equals("multipart")) {
+                    Multipart.part(frame.content()).peek(part -> part(part, positionalEncoding(mediaType, position), "body." + position, side, issues));
+                }
+                mediaType.itemSchema().or(() -> mediaType.schema().flatMap(schema -> shapes.item(schema, position)))
+                    .ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", JsonPointer.of(Integer.toString(position)),
+                        schemas.validate(schema, value.get(), direction)));
+            }
+            return new Item(value, issues.report());
+        }
     }
 
     /** Collects issues with levels from the policy, dropping ignored ones. */

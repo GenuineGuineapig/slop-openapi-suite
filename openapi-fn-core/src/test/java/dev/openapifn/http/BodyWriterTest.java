@@ -109,6 +109,31 @@ class BodyWriterTest {
     }
 
     @Test
+    void writesItemsOneByOne() {
+        var jsonl = ContentType.parse("application/jsonl").orElseThrow();
+        assertThat(new String(new BodyWriter(SHAPES).write(json("{\"a\":1}"), jsonl, Optional.empty()), StandardCharsets.UTF_8)).isEqualTo("{\"a\":1}\n");
+        assertThat(BodyWriter.item(json("[1]"), jsonl)).asString(StandardCharsets.UTF_8).isEqualTo("[1]\n");
+        assertThat(BodyWriter.item(json("1"), ContentType.parse("application/json-seq").orElseThrow())).asString(StandardCharsets.UTF_8)
+            .isEqualTo("\u001e1\n");
+        assertThat(BodyWriter.item(json("{\"data\":\"d\"}"), ContentType.parse("text/event-stream").orElseThrow())).asString(StandardCharsets.UTF_8)
+            .isEqualTo("data: d\n\n");
+        assertThat(BodyWriter.end(jsonl)).isEmpty();
+        var mixed = ContentType.parse("multipart/mixed; boundary=m").orElseThrow();
+        var body = new java.io.ByteArrayOutputStream();
+        body.writeBytes(BodyWriter.item(json("{\"a\":1}"), mixed));
+        body.writeBytes(BodyWriter.part("m", BodyWriter.part("text/plain", "x".getBytes(StandardCharsets.UTF_8))));
+        body.writeBytes(BodyWriter.end(mixed));
+        assertThat(body.toString(StandardCharsets.UTF_8)).isEqualTo("--m\r\nContent-Type: application/json\r\n\r\n{\"a\":1}\r\n"
+            + "--m\r\nContent-Type: text/plain\r\n\r\nx\r\n--m--\r\n");
+        assertThat(new BodyParser(SHAPES).parse(body.toByteArray(), mixed, media(Optional.empty())).toOptional()).contains(json("[{\"a\":1},\"x\"]"));
+        var parser = new BodyParser(SHAPES);
+        var frame = new ItemFramer.Frame(new byte[0], "1".getBytes(StandardCharsets.UTF_8), Optional.empty());
+        assertThat(parser.item(frame, ContentType.parse("application/jsonl; charset=nope").orElseThrow(), media(Optional.empty()), 0).failure())
+            .contains("unsupported charset 'nope'");
+        assertThat(parser.item(frame, jsonl, media(Optional.empty()), 0).toOptional()).contains(Optional.of(json("1")));
+    }
+
+    @Test
     void writesMultipartValues() {
         var writer = new BodyWriter(SHAPES);
         var parser = new BodyParser(SHAPES);

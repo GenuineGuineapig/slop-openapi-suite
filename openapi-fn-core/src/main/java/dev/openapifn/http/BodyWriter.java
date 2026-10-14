@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Serializes JSON values to message bodies of a given media type; the inverse of
@@ -34,22 +33,45 @@ public final class BodyWriter {
      */
     public byte[] write(JsonValue value, ContentType type, Optional<Schema> schema) {
         if (type.type().equals("multipart")) {
-            var boundary = type.parameter("boundary").orElseThrow(() -> new IllegalArgumentException("multipart content type has no boundary"));
+            var boundary = boundary(type);
             return encode(boundary, type.subtype().equals("form-data") ? formParts(value) : positionalParts(value));
         }
-        var essence = type.essence();
-        var items = value instanceof JsonArray array ? array.values() : List.of(value);
-        var text = switch (essence) {
-            case "application/jsonl", "application/x-ndjson", "application/x-jsonlines" ->
-                items.stream().map(JsonWriter::compact).map(line -> line + "\n").collect(Collectors.joining());
-            case "application/json-seq" -> items.stream().map(item -> "\u001e" + JsonWriter.compact(item) + "\n").collect(Collectors.joining());
-            case "text/event-stream" -> items.stream().map(BodyWriter::event).collect(Collectors.joining());
-            case "application/x-www-form-urlencoded" -> form(value);
-            default -> type.isJson() ? JsonWriter.compact(value)
-                : type.isXml() ? xml.write(value, schema, "root")
-                : ParameterSerializer.text(value);
+        if (ItemFramer.isSequential(type)) {
+            var out = new ByteArrayOutputStream();
+            (value instanceof JsonArray array ? array.values() : List.of(value)).forEach(item -> out.writeBytes(item(item, type)));
+            return out.toByteArray();
+        }
+        var text = type.essence().equals("application/x-www-form-urlencoded") ? form(value)
+            : type.isJson() ? JsonWriter.compact(value)
+            : type.isXml() ? xml.write(value, schema, "root")
+            : ParameterSerializer.text(value);
+        return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * One item of a body of a sequential media type ({@link ItemFramer#isSequential}), so that
+     * items can be written as they are produced: a line, a JSON text sequence record, an event or
+     * a positional part (which needs the {@code boundary} parameter). {@link #end} follows the last item.
+     */
+    public static byte[] item(JsonValue item, ContentType type) {
+        if (type.type().equals("multipart")) {
+            return part(boundary(type), part(Optional.empty(), item));
+        }
+        var text = switch (type.essence()) {
+            case "application/json-seq" -> "\u001e" + JsonWriter.compact(item) + "\n";
+            case "text/event-stream" -> event(item);
+            default -> JsonWriter.compact(item) + "\n";
         };
         return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** What follows the last item of a body of a sequential media type: the closing delimiter of multipart bodies. */
+    public static byte[] end(ContentType type) {
+        return type.type().equals("multipart") ? ("--" + boundary(type) + "--\r\n").getBytes(StandardCharsets.UTF_8) : new byte[0];
+    }
+
+    private static String boundary(ContentType type) {
+        return type.parameter("boundary").orElseThrow(() -> new IllegalArgumentException("multipart content type has no boundary"));
     }
 
     private static String event(JsonValue value) {
@@ -102,14 +124,19 @@ public final class BodyWriter {
 
     private static byte[] encode(String boundary, List<Multipart.Part> parts) {
         var out = new ByteArrayOutputStream();
-        for (var part : parts) {
-            var head = new StringBuilder("--").append(boundary).append("\r\n");
-            part.headers().values().forEach((name, values) -> values.forEach(v -> head.append(header(name)).append(": ").append(v).append("\r\n")));
-            out.writeBytes(head.append("\r\n").toString().getBytes(StandardCharsets.UTF_8));
-            out.writeBytes(part.body());
-            out.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
-        }
+        parts.forEach(part -> out.writeBytes(part(boundary, part)));
         out.writeBytes(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        return out.toByteArray();
+    }
+
+    /** A part with its delimiter, as one item of a multipart body (the closing delimiter follows the last one). */
+    public static byte[] part(String boundary, Multipart.Part part) {
+        var out = new ByteArrayOutputStream();
+        var head = new StringBuilder("--").append(boundary).append("\r\n");
+        part.headers().values().forEach((name, values) -> values.forEach(v -> head.append(header(name)).append(": ").append(v).append("\r\n")));
+        out.writeBytes(head.append("\r\n").toString().getBytes(StandardCharsets.UTF_8));
+        out.writeBytes(part.body());
+        out.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
         return out.toByteArray();
     }
 

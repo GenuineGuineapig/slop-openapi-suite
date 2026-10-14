@@ -161,7 +161,10 @@ public final class TestRenderer {
         }
         var example = itemSchema.isPresent() ? examples.example(itemSchema.get(), direction).map(JsonArray::of).map(JsonValue.class::cast)
             : examples.example(property.schema(), direction);
+        var streamed = OperationModel.streamed(type);
         return example.map(json -> type.equals(TypeRef.STRING) ? Names.literal(json.asString().orElse(json.toJson()))
+            : streamed.isPresent() ? "mapper.readValue(" + Names.literal(json.toJson()) + ", " + ApiRenderer.token(TypeRef.LIST.of(streamed.get()), imports)
+                + ").stream()"
             : "mapper.readValue(" + Names.literal(json.toJson()) + ", " + ApiRenderer.token(type, imports) + ")");
     }
 

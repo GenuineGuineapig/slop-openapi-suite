@@ -107,7 +107,31 @@ Request and response bodies cover these media types:
 * JSON, XML (attributes, wrapping, namespaces, `nodeType`), forms and multipart (with encodings)
 * text and binary (`FilePart`)
 * sequential types (`application/jsonl`, `application/x-ndjson`, `application/json-seq`,
-  `text/event-stream`, positional `multipart/mixed`)
+  `text/event-stream`, positional `multipart/mixed`), which are streamed (see below)
+
+## Streaming
+
+Bodies of sequential media types are `java.util.stream.Stream`s of their items (the `itemSchema`,
+or the `items` of an array `schema`), and they stream end to end:
+
+```java
+// Server: items are written and flushed as the stream produces them.
+public SubscribeTripResponse subscribeTrip(SubscribeTripRequest request) {
+    return SubscribeTripResponse.ok(liveUpdates(request.id()), "no-cache", null);
+}
+
+// Client: items are decoded as they arrive; closing the stream releases the connection.
+try (var updates = ((SubscribeTripResponse.Ok) trips.subscribeTrip(request)).body()) {
+    updates.forEach(this::show);
+}
+```
+
+Request bodies stream the same way: a client sends a `Stream` item by item, and a controller
+receives a `Stream` that reads the request as it is consumed. Validation keeps up with the
+stream: the filter checks the status, headers and content type first, then each item as it
+passes, and only passes on items that are valid. When responses fail on violations, an invalid
+response becomes a 500 problem while nothing has been sent yet; later, the stream ends before the
+invalid item. An invalid request item ends the request's stream with a 400 problem.
 
 ## Validation at runtime
 
@@ -237,8 +261,12 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 * **Credentials are checked for presence and syntax, not verified.** Basic credentials must be
   base64 `user:password`, bearer tokens RFC 6750 tokens; verifying them is Spring Security's job.
   `mutualTLS` requirements count as satisfied.
-* **Sequential media types are not streamed.** JSON Lines, SSE and positional multipart bodies are
-  read and written whole (a `List`).
+* **Streams are validated item by item.** Constraints on a sequence as a whole (`maxItems`,
+  `uniqueItems`) are not checked for streamed bodies, and an item is passed on once it is complete.
+  Client request validation (`OpenApiClientValidationInterceptor`) sees whole bodies, because
+  `RestClient` buffers request bodies for interceptors; responses still stream.
+* **One Java type per body.** A response that may be JSON Lines or SSE is typed by its first
+  media type (JSON first); the other is still accepted and validated, but not typed separately.
 * **Swagger 2.0:** `collectionFormat: tsv`, and non-`csv` formats of header and path parameters,
   have no 3.0 equivalent and become `csv` with a warning.
 * **Generic records from `$dynamicRef`:** type variables are used for the template's own

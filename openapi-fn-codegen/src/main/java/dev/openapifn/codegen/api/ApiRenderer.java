@@ -284,7 +284,7 @@ public final class ApiRenderer {
             var arguments = new ArrayList<String>();
             operation.parameters().forEach(p -> arguments.add("binding.parameter(" + Names.literal(p.parameter().in().value()) + ", "
                 + Names.literal(p.parameter().name()) + ", " + token(p.property().type(), imports) + ")"));
-            operation.body().ifPresent(b -> arguments.add("binding.body(" + token(b.property().type(), imports) + ")"));
+            operation.body().ifPresent(b -> arguments.add(read("binding", b.property().type(), imports)));
             out.line("var input = new " + imports.ref(operation.request().get()) + "(\n        " + String.join(",\n        ", arguments) + ");");
             out.line("return runtime.respond(request, " + Names.literal(operation.id()) + ", api()." + operation.method() + "(input));");
         } else {
@@ -292,6 +292,12 @@ public final class ApiRenderer {
             out.line("return runtime.respond(request, " + Names.literal(operation.id()) + ", api()." + operation.method() + "());");
         }
         out.close();
+    }
+
+    /** Reads a body of {@code type} from a request binding or a client response: streamed bodies item by item. */
+    private static String read(String source, TypeRef type, Imports imports) {
+        return OperationModel.streamed(type).map(item -> source + ".items(" + token(item, imports) + ")")
+            .orElseGet(() -> source + ".body(" + token(type, imports) + ")");
     }
 
     /** A Jackson type token: {@code X.class} or {@code new TypeReference<...>() { }}. */
@@ -400,7 +406,7 @@ public final class ApiRenderer {
         if (!status.isEmpty()) {
             arguments.add(status);
         }
-        variant.body().ifPresent(body -> arguments.add("response.body(" + token(body.type(), imports) + ")"));
+        variant.body().ifPresent(body -> arguments.add(read("response", body.type(), imports)));
         variant.headers().forEach((header, property) -> arguments.add("response.header(" + Names.literal(header) + ", " + token(property.type(), imports) + ")"));
         return "new " + imports.ref(operation.response()) + "." + variant.name() + "(" + String.join(", ", arguments) + ")";
     }

@@ -5,6 +5,7 @@ import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Optional;
@@ -31,6 +32,20 @@ public final class ServletMessages {
         try {
             var source = cached != null ? cached : CachedBodyRequest.of(request);
             return withBody(source, source.body());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** {@code request} without its body, which is left unread (for streamed bodies). */
+    public static HttpRequest head(HttpServletRequest request) {
+        return withBody(request, new byte[0]);
+    }
+
+    /** The body of {@code request} as a stream. */
+    public static InputStream input(HttpServletRequest request) {
+        try {
+            return request.getInputStream();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

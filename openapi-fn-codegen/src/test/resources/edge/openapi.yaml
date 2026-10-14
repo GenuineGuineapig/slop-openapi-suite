@@ -120,6 +120,22 @@ paths:
           content:
             text/event-stream:
               itemSchema: {type: object, required: [data], properties: {data: {type: string}, id: {type: string}}}
+    post:
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            itemSchema: {type: object, properties: {n: {type: integer}}}
+      responses:
+        '200':
+          description: an unstructured stream
+          content:
+            text/event-stream: {}
+        '201':
+          description: a stream described as a whole
+          content:
+            application/json-seq: {schema: {type: object, properties: {n: {type: integer}}}}
   /search:
     get:
       operationId: search

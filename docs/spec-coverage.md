@@ -67,7 +67,7 @@ usually because the specification gives it none (descriptions, documentation lin
 | XML (`xml`: `name`, `namespace`, `prefix`, `attribute`, `wrapped`, `nodeType` 3.2) | Parsing to JSON for validation, writing from JSON |
 | `application/x-www-form-urlencoded` with `encoding` styles | Validation, binding, generated clients |
 | `multipart/form-data` with `encoding` (`contentType`, `headers`, nested) | Validation of parts (content types, headers, schemas), binding (files as `FilePart`), generated clients and tests |
-| `itemSchema`, `prefixEncoding`, `itemEncoding` (3.2): `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`, positional `multipart/mixed` | Validation per item, binding and generation as `List<T>` (buffered, not streamed) |
+| `itemSchema`, `prefixEncoding`, `itemEncoding` (3.2): `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`, positional `multipart/mixed` | Validation per item, also while streaming (`ItemFramer`, `OpenApiValidator.requestItems` / `responseItems`). Streamed in both directions by the runtime and generated code as `Stream<T>` |
 | Text and binary bodies, `format: binary`, `contentMediaType` | Validation, `FilePart` / `String` in generated code |
 | Responses by status, by range (`2XX`) and `default`; Response `summary` (3.2) | Validation, sealed response types with a record per variant |
 | Response `headers` (`required`, schema, `content`) | Validation, typed components of response records |

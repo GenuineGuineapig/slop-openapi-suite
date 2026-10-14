@@ -148,6 +148,20 @@ paths:
           content:
             application/jsonl:
               itemSchema: {$ref: '#/components/schemas/OrderEvent'}
+    post:
+      operationId: importEvents
+      tags: [orders]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: {type: array, items: {$ref: '#/components/schemas/OrderEvent'}}
+      responses:
+        '200':
+          description: The number of imported events
+          content:
+            application/json: {schema: {type: integer}}
   /health:
     get:
       operationId: health

@@ -85,7 +85,14 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi,
 
     @Override
     public OrderEventsResponse orderEvents() {
-        return OrderEventsResponse.ok(List.of(new OrderEvent("placed", ORDER), new OrderEvent("paid", ORDER)));
+        return OrderEventsResponse.ok(java.util.stream.Stream.of(new OrderEvent("placed", ORDER), new OrderEvent("paid", ORDER)));
+    }
+
+    @Override
+    public ImportEventsResponse importEvents(ImportEventsRequest request) {
+        try (var events = request.body()) {
+            return ImportEventsResponse.ok((int) events.filter(event -> event.orderId().equals(ORDER)).count());
+        }
     }
 
     @Override

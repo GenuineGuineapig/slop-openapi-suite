@@ -3,6 +3,7 @@ package dev.openapifn.spring.client;
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Headers;
+import dev.openapifn.http.ItemFramer;
 import dev.openapifn.http.Multipart;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.http.SchemaShapes;
@@ -10,7 +11,9 @@ import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.schema.SchemaRegistry;
 import dev.openapifn.spring.FilePart;
+import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.spring.JacksonJson;
+import dev.openapifn.spring.StreamedBody;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -21,6 +24,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
@@ -82,8 +86,13 @@ public final class OpenApiHttpClient {
         }
         var body = call.body();
         if (body != null) {
-            var encoded = encode(body);
-            request.header("Content-Type", encoded.contentType()).body(encoded.body());
+            var streamed = streamed(body);
+            if (streamed.isPresent()) {
+                request.header("Content-Type", streamed.get().getKey()).body(streamed.get().getValue()::writeTo);
+            } else {
+                var encoded = encode(body);
+                request.header("Content-Type", encoded.contentType()).body(encoded.body());
+            }
         }
         return request.exchange((clientRequest, response) -> {
             var headers = Headers.EMPTY;
@@ -92,9 +101,45 @@ public final class OpenApiHttpClient {
                     headers = headers.with(entry.getKey(), value);
                 }
             }
-            var content = response.getBody().readAllBytes();
-            return decoder.apply(new ClientResponse(response.getStatusCode().value(), headers, content, mapper));
-        });
+            var status = response.getStatusCode().value();
+            if (!ItemStreams.sequential(headers.first("Content-Type").orElse(null))) {
+                try (response) {
+                    return decoder.apply(new ClientResponse(status, headers, response.getBody().readAllBytes(), mapper));
+                }
+            }
+            var lazy = new ClientResponse(status, headers, response.getBody(), response::close, mapper);
+            try {
+                var result = decoder.apply(lazy);
+                lazy.release();
+                return result;
+            } catch (RuntimeException e) {
+                response.close();
+                throw e;
+            }
+        }, false);
+    }
+
+    /**
+     * A body that is a {@link Stream} of items of a sequential media type, written item by item as
+     * the stream produces them, with its content type (multipart bodies get a boundary).
+     */
+    private Optional<Map.Entry<String, StreamedBody>> streamed(ClientCall.Body body) {
+        if (!(body.value() instanceof Stream<?> items)) {
+            return Optional.empty();
+        }
+        var declared = ContentType.parse(body.contentType()).orElseThrow(() -> new IllegalArgumentException("Invalid content type " + body.contentType()));
+        var contentType = declared.type().equals("multipart") && declared.parameter("boundary").isEmpty()
+            ? body.contentType() + "; boundary=" + BodyWriter.boundary() : body.contentType();
+        var type = ContentType.parse(contentType).orElseThrow();
+        if (!ItemFramer.isSequential(type)) {
+            return Optional.empty();
+        }
+        return Optional.of(Map.entry(contentType, new StreamedBody(items, item -> streamedItem(item, type), BodyWriter.end(type))));
+    }
+
+    private byte[] streamedItem(Object value, ContentType type) {
+        return type.type().equals("multipart") ? BodyWriter.part(type.parameter("boundary").orElseThrow(), item(value))
+            : BodyWriter.item(toJson(value), type);
     }
 
     /** The absolute URI of {@code call}: base URL, serialized path parameters and query. */
@@ -135,6 +180,11 @@ public final class OpenApiHttpClient {
         var type = ContentType.parse(body.contentType()).orElseThrow(() -> new IllegalArgumentException("Invalid content type " + body.contentType()));
         var multipart = type.type().equals("multipart");
         return switch (body.value()) {
+            case Stream<?> items -> {
+                try (items) {
+                    yield encode(new ClientCall.Body(body.contentType(), items.toList()));
+                }
+            }
             case FilePart file -> new BodyWriter.MultipartBody(file.content(), multipart || body.contentType().contains("*") ? file.contentType()
                 : body.contentType());
             case byte[] bytes -> new BodyWriter.MultipartBody(bytes, body.contentType());

@@ -19,7 +19,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Parses message bodies into JSON according to their media type: JSON and {@code +json},
@@ -28,8 +27,6 @@ import java.util.Set;
  * {@code application/json-seq} and {@code text/event-stream}.
  */
 public final class BodyParser {
-
-    private static final Set<String> LINE_DELIMITED = Set.of("application/jsonl", "application/x-ndjson", "application/x-jsonlines");
 
     private final SchemaShapes shapes;
     private final ParameterParser parameters;
@@ -47,22 +44,16 @@ public final class BodyParser {
      */
     public Result<JsonValue, String> parse(byte[] body, ContentType type, MediaType mediaType) {
         var schema = mediaType.schema();
-        var itemSchema = mediaType.itemSchema();
         var charset = charset(type);
         if (charset.isErr()) {
             return Result.err(charset.failure().orElseThrow());
         }
+        var framer = ItemFramer.of(type);
+        if (framer.isPresent()) {
+            return sequence(framer.get().frames(body), type, mediaType);
+        }
         var text = new String(body, charset.toOptional().orElseThrow());
         var essence = type.essence();
-        if (LINE_DELIMITED.contains(essence)) {
-            return sequence(List.of(text.split("\r?\n")));
-        }
-        if (essence.equals("application/json-seq")) {
-            return sequence(List.of(text.split("\u001e")));
-        }
-        if (essence.equals("text/event-stream")) {
-            return Result.ok(events(text));
-        }
         if (type.isJson()) {
             return Json.parse(text).mapError(error -> "must be valid JSON: " + error);
         }
@@ -70,7 +61,7 @@ public final class BodyParser {
             return Result.ok(form(text, schema, mediaType.encoding()));
         }
         if (type.type().equals("multipart")) {
-            return multipart(body, type, schema.or(() -> itemSchema), mediaType);
+            return multipart(body, type, schema, mediaType);
         }
         if (type.isXml()) {
             return xml.parse(body, schema);
@@ -89,49 +80,74 @@ public final class BodyParser {
         return Result.attempt(() -> Charset.forName(name.get()), e -> "unsupported charset '" + name.get() + "'");
     }
 
-    private static Result<JsonValue, String> sequence(List<String> chunks) {
+    private Result<JsonValue, String> sequence(List<ItemFramer.Frame> frames, ContentType type, MediaType mediaType) {
         var items = new ArrayList<JsonValue>();
-        for (int i = 0; i < chunks.size(); i++) {
-            var chunk = chunks.get(i).trim();
-            if (chunk.isEmpty()) {
-                continue;
+        for (var frame : frames) {
+            var item = item(frame, type, mediaType, items.size());
+            if (item.isErr()) {
+                return Result.err(item.failure().orElseThrow());
             }
-            var parsed = Json.parse(chunk);
-            if (parsed.isErr()) {
-                return Result.err("item " + i + " must be valid JSON: " + parsed.failure().orElseThrow());
-            }
-            items.add(parsed.toOptional().orElseThrow());
+            item.toOptional().orElseThrow().ifPresent(items::add);
         }
         return Result.ok(new JsonArray(items));
     }
 
-    /** Server-sent events as objects with {@code event}, {@code data}, {@code id} and {@code retry}. */
-    private static JsonValue events(String text) {
-        var events = new ArrayList<JsonValue>();
-        for (var block : text.split("\r?\n\r?\n")) {
-            var event = new LinkedHashMap<String, JsonValue>();
-            var data = new ArrayList<String>();
-            for (var line : block.split("\r?\n")) {
-                if (line.isEmpty() || line.startsWith(":")) {
-                    continue;
-                }
-                var colon = line.indexOf(':');
-                var field = colon < 0 ? line : line.substring(0, colon);
-                var value = colon < 0 ? "" : line.substring(colon + 1).replaceFirst("^ ", "");
-                switch (field) {
-                    case "data" -> data.add(value);
-                    case "retry" -> event.put("retry", value.matches("[0-9]+") ? JsonNumber.of(new BigDecimal(value)) : JsonString.of(value));
-                    default -> event.put(field, JsonString.of(value));
-                }
+    /**
+     * Parses one item of a sequential body (see {@link ItemFramer}): a JSON text, an event as an
+     * object with {@code event}, {@code data}, {@code id} and {@code retry}, or a positional
+     * multipart part. Empty for frames that carry no item, such as blank lines and comments.
+     *
+     * @param index the position of the item among the items of the body, which selects its
+     *     schema and encoding
+     */
+    public Result<Optional<JsonValue>, String> item(ItemFramer.Frame frame, ContentType type, MediaType mediaType, int index) {
+        if (frame.error().isPresent()) {
+            return Result.err(frame.error().get());
+        }
+        if (type.type().equals("multipart")) {
+            if (frame.content().length == 0) {
+                return Result.ok(Optional.empty());
             }
-            if (!data.isEmpty()) {
-                event.put("data", JsonString.of(String.join("\n", data)));
+            var encoding = index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
+            var schema = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(s -> shapes.item(s, index)));
+            return Multipart.part(frame.content()).map(part -> Optional.of(partValue(part, schema, encoding)));
+        }
+        if (frame.blank()) {
+            return Result.ok(Optional.empty());
+        }
+        var charset = charset(type);
+        if (charset.isErr()) {
+            return Result.err(charset.failure().orElseThrow());
+        }
+        var text = new String(frame.content(), charset.toOptional().orElseThrow());
+        if (type.essence().equals("text/event-stream")) {
+            return Result.ok(event(text));
+        }
+        return Json.parse(text.trim()).<Optional<JsonValue>>map(Optional::of)
+            .mapError(error -> "item " + index + " must be valid JSON: " + error);
+    }
+
+    /** An event as an object with {@code event}, {@code data}, {@code id} and {@code retry}; empty when it has no fields. */
+    private static Optional<JsonValue> event(String block) {
+        var event = new LinkedHashMap<String, JsonValue>();
+        var data = new ArrayList<String>();
+        for (var line : block.split("\r?\n")) {
+            if (line.startsWith(":")) {
+                continue;
             }
-            if (!event.isEmpty()) {
-                events.add(new JsonObject(event));
+            var colon = line.indexOf(':');
+            var field = colon < 0 ? line : line.substring(0, colon);
+            var value = colon < 0 ? "" : line.substring(colon + 1).replaceFirst("^ ", "");
+            switch (field) {
+                case "data" -> data.add(value);
+                case "retry" -> event.put("retry", value.matches("[0-9]+") ? JsonNumber.of(new BigDecimal(value)) : JsonString.of(value));
+                default -> event.put(field, JsonString.of(value));
             }
         }
-        return new JsonArray(events);
+        if (!data.isEmpty()) {
+            event.put("data", JsonString.of(String.join("\n", data)));
+        }
+        return event.isEmpty() ? Optional.empty() : Optional.of(new JsonObject(event));
     }
 
     /** A form body; properties whose encoding has a JSON {@code contentType} are parsed as JSON. */
@@ -156,18 +172,7 @@ public final class BodyParser {
         if (parsed.isErr()) {
             return Result.err(parsed.failure().orElseThrow());
         }
-        var parts = parsed.toOptional().orElseThrow();
-        if (type.subtype().equals("form-data")) {
-            return Result.ok(formData(parts, schema, mediaType.encoding()));
-        }
-        var items = new ArrayList<JsonValue>();
-        for (var part : parts) {
-            var index = items.size();
-            var encoding = index < mediaType.prefixEncoding().size() ? Optional.of(mediaType.prefixEncoding().get(index)) : mediaType.itemEncoding();
-            var item = mediaType.itemSchema().or(() -> mediaType.schema().flatMap(s -> shapes.item(s, index)));
-            items.add(partValue(part, item, encoding));
-        }
-        return Result.ok(new JsonArray(items));
+        return Result.ok(formData(parsed.toOptional().orElseThrow(), schema, mediaType.encoding()));
     }
 
     private JsonValue formData(List<Multipart.Part> parts, Optional<Schema> schema, Map<String, Encoding> encodings) {

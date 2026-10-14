@@ -142,6 +142,24 @@ paths:
                 contentType: application/json, text/plain
                 headers:
                   X-Seq: {schema: {type: integer}}
+    post:
+      operationId: publishEvents
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/jsonl:
+            itemSchema: {$ref: '#/components/schemas/Event'}
+          application/x-ndjson:
+            schema: {type: array, prefixItems: [{type: object, required: [first]}], items: {$ref: '#/components/schemas/Event'}, maxItems: 1}
+          multipart/mixed:
+            itemSchema: {$ref: '#/components/schemas/Event'}
+            itemEncoding: {contentType: application/json}
+          application/json-seq: {}
+          application/json:
+            schema: {type: array}
+      responses:
+        '202': {description: Accepted}
   /matrix/{coords}:
     get:
       operationId: matrix

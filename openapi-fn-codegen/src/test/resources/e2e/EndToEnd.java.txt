@@ -55,7 +55,12 @@ public final class EndToEnd {
             + ":" + order.lines());
         var pickup = ((GetOrderResponse.Status2XX) orders.getOrder(new GetOrderRequest(EndToEndIds.ORDER, List.of(GetOrderRequest.ExpandItem.CUSTOMER)))).body();
         results.add("pickup:" + pickup.shipping());
-        results.add("events:" + ((OrderEventsResponse.Ok) orders.orderEvents()).body().stream().map(OrderEvent::type).toList());
+        try (var events = ((OrderEventsResponse.Ok) orders.orderEvents()).body()) {
+            results.add("events:" + events.map(OrderEvent::type).toList());
+        }
+        var imported = orders.importEvents(new ImportEventsRequest(java.util.stream.Stream.of(new OrderEvent("placed", EndToEndIds.ORDER),
+            new OrderEvent("shipped", EndToEndIds.ORDER))));
+        results.add("imported:" + ((ImportEventsResponse.Ok) imported).body());
         results.add("health:" + ((HealthResponse.Ok) defaults.health()).body());
 
         // Webhooks and callbacks are sent to receivers; here the same application receives them.

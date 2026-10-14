@@ -80,6 +80,40 @@ paths:
           content:
             image/*: {schema: {type: string, format: binary}}
             application/jsonl: {itemSchema: {type: object}}
+  /events:
+    get:
+      operationId: streamEvents
+      parameters:
+        - {name: format, in: query, schema: {type: string}}
+        - {name: count, in: query, schema: {type: integer}}
+        - {name: invalid, in: query, schema: {type: integer}}
+        - {name: headless, in: query, schema: {type: boolean}}
+      responses:
+        '200':
+          description: Events
+          headers:
+            X-Stream: {required: true, schema: {type: string}}
+          content:
+            application/jsonl: {itemSchema: {$ref: '#/components/schemas/Event'}}
+            text/event-stream:
+              itemSchema: {type: object, required: [data], properties: {event: {type: string}, data: {type: string}}}
+            multipart/mixed: {}
+            application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+    post:
+      operationId: publishEvents
+      parameters:
+        - {name: mode, in: query, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/jsonl: {itemSchema: {$ref: '#/components/schemas/Event'}}
+          application/x-ndjson: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+          application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}
+      responses:
+        '200':
+          description: The sum of the events
+          content:
+            application/json: {schema: {type: integer}}
   /broken:
     get:
       operationId: broken
@@ -110,5 +144,10 @@ components:
         id: {type: integer, readOnly: true}
         name: {type: string, minLength: 1}
         tag: {type: string}
+    Event:
+      type: object
+      required: [n]
+      properties:
+        n: {type: integer, minimum: 0}
   securitySchemes:
     key: {type: apiKey, name: X-Key, in: header}
