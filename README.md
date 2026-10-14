@@ -202,7 +202,9 @@ prefix.
 
 ## Without Spring, and without generated code
 
-The core (`openapi-fn-core`) depends only on snakeyaml-engine:
+The core (`openapi-fn-core`) depends only on snakeyaml-engine (descriptions, with line and column
+of every node) and jackson-core (JSON bodies, through Jackson's streaming parser and its limits on
+nesting, number and string length):
 
 ```java
 var api = OpenApiLoader.defaults().load("classpath:petstore.yaml")
@@ -267,7 +269,7 @@ because you implement interfaces rather than edit generated files.
 
 | Module | Contents |
 |---|---|
-| `openapi-fn-core` | Functional utilities (`Result`, …), JSON and YAML, multi-document loading, the OpenAPI model, JSON Schema validation, HTTP message parsing and serialization, request/response validation, example generation, Swagger 2.0 conversion |
+| `openapi-fn-core` | Functional utilities (`Result`, …), an immutable JSON model (parsed with jackson-core) and YAML, multi-document loading, the OpenAPI model, JSON Schema validation, HTTP message parsing and serialization, request/response validation, example generation, Swagger 2.0 conversion |
 | `openapi-fn-spring` | Spring Boot 4 runtime: auto-configuration, request binding and response mapping for generated controllers (independent of the web stack), the Spring MVC validation filter, problem details, `RestClient` client support |
 | `openapi-fn-spring-webflux` | Spring WebFlux: the reactive runtime of generated controllers, the validation `WebFilter`, `WebClient` client support, auto-configuration |
 | `openapi-fn-spring-test` | MockMvc matchers and `WebTestClient` assertions |

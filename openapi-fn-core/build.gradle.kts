@@ -6,6 +6,7 @@ description = "OpenAPI 3.0/3.1/3.2 model, multi-document parser, JSON Schema and
 
 dependencies {
     implementation(libs.snakeyaml.engine)
+    implementation(libs.jackson.core)
 }
 
 dependencies {
