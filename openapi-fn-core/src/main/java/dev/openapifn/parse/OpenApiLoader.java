@@ -1,7 +1,10 @@
 package dev.openapifn.parse;
 
 import dev.openapifn.fn.Result;
+import dev.openapifn.json.JsonObject;
+import dev.openapifn.json.JsonPointer;
 import dev.openapifn.load.Diagnostic;
+import dev.openapifn.load.Document;
 import dev.openapifn.load.DocumentLoader;
 import dev.openapifn.load.DocumentParser;
 import dev.openapifn.load.ResourceLoader;
@@ -68,9 +71,18 @@ public record OpenApiLoader(ResourceLoader resources) {
 
     private static Result<OpenApiDocument, List<Diagnostic>> interpret(DocumentLoader loader, URI uri) {
         var document = loader.load(uri).toOptional().orElseThrow();
+        var diagnostics = new ArrayList<Diagnostic>();
+        if (Swagger2Converter.applies(document.root())) {
+            // Swagger / OpenAPI 2.0 is converted to 3.0 first; everything else then works on 3.x.
+            var conversion = Swagger2Converter.convert((JsonObject) document.root());
+            document = new Document(document.uri(), conversion.root(), document.sourceMap());
+            loader.register(document);
+            var converted = document;
+            conversion.warnings().forEach(warning -> diagnostics.add(Diagnostic.warning(warning, converted.uri(), JsonPointer.ROOT)));
+        }
         var parser = new OpenApiParser(loader);
         var model = parser.parse(document);
-        var diagnostics = new ArrayList<>(parser.diagnostics());
+        diagnostics.addAll(parser.diagnostics());
         if (model.isEmpty()) {
             return Result.err(List.copyOf(diagnostics));
         }

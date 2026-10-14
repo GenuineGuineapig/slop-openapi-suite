@@ -177,4 +177,22 @@ class GeneratorTest {
         assertThat(summary.failures()).as(summary.describe()).isEmpty();
         assertThat(summary.succeeded()).isEqualTo(2);
     }
+
+    @Test
+    void swagger2DescriptionsAreConvertedAndGenerated() {
+        var api = Compilation.load("classpath:swagger2/petstore.yaml");
+        var compilation = Compilation.of(api, GeneratorConfig.of("legacy", "org.example.legacy"), dir, Map.of("org/example/legacy/LegacyApplication.java", """
+            package org.example.legacy;
+
+            @org.springframework.boot.autoconfigure.SpringBootApplication
+            public class LegacyApplication {
+            }
+            """));
+        assertThat(compilation.success).as(compilation.diagnostics).isTrue();
+        assertThat(compilation.diagnostics).as("warnings").isEmpty();
+        assertThat(compilation.file("META-INF/openapi-fn/legacy/petstore.yaml")).contains("\"openapi\": \"3.0.3\"");
+        var summary = Launch.tests(compilation, "org.example.legacy.api.PetsControllerTest", "org.example.legacy.api.DefaultControllerTest");
+        assertThat(summary.failures()).as(summary.describe()).isEmpty();
+        assertThat(summary.succeeded()).isGreaterThanOrEqualTo(10);
+    }
 }

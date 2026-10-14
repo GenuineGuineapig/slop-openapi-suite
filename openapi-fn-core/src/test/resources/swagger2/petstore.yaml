@@ -1,0 +1,130 @@
+swagger: '2.0'
+info: {title: Swagger Petstore, version: 1.0.0}
+host: petstore.example.com
+basePath: /v2
+schemes: [https, http]
+consumes: [application/json]
+produces: [application/json, application/xml]
+x-root: 1
+securityDefinitions:
+  basicAuth: {type: basic, description: Basic authentication}
+  apiKey: {type: apiKey, name: api_key, in: header}
+  implicitAuth: {type: oauth2, flow: implicit, authorizationUrl: 'https://auth.example.com/authorize', scopes: {read: Read pets}}
+  passwordAuth: {type: oauth2, flow: password, tokenUrl: 'https://auth.example.com/token', scopes: {}}
+  appAuth: {type: oauth2, flow: application, tokenUrl: 'https://auth.example.com/token'}
+  codeAuth: {type: oauth2, flow: accessCode, authorizationUrl: 'https://auth.example.com/authorize', tokenUrl: 'https://auth.example.com/token', scopes: {write: Write pets}, x-scheme: 1}
+security: [{apiKey: []}]
+tags: [{name: pets}]
+externalDocs: {url: 'https://docs.example.com'}
+parameters:
+  limit: {name: limit, in: query, type: integer, format: int32, maximum: 100, x-example: 10}
+  petBody: {name: pet, in: body, required: true, schema: {$ref: '#/definitions/Pet'}}
+  tagsParam: {name: tags, in: query, type: array, items: {type: string}, collectionFormat: pipes}
+  formNote: {name: note, in: formData, type: string}
+responses:
+  NotFound: {description: Not found, schema: {$ref: '#/definitions/Error'}}
+paths:
+  x-paths: {}
+  /pets:
+    parameters:
+      - {name: X-Trace, in: header, type: string}
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - $ref: '#/parameters/limit'
+        - $ref: '#/parameters/tagsParam'
+        - {name: ids, in: query, type: array, items: {type: integer}, collectionFormat: multi}
+        - {name: words, in: query, type: array, items: {type: string}, collectionFormat: ssv}
+        - {name: tabs, in: query, type: array, items: {type: string}, collectionFormat: tsv}
+        - {name: plain, in: query, type: array, items: {type: string}}
+        - $ref: '#/paths/~1pets/parameters/0'
+      responses:
+        '200':
+          description: Pets
+          headers:
+            X-Total: {type: integer, description: Total number of pets}
+          schema: {type: array, items: {$ref: '#/definitions/Pet'}}
+          examples:
+            application/json: [{name: Rex, kind: dog}]
+          x-response: 1
+        x-responses: 1
+        default: {$ref: '#/responses/NotFound'}
+    post:
+      operationId: createPet
+      consumes: [application/json, application/xml]
+      parameters: [{$ref: '#/parameters/petBody'}]
+      responses:
+        '201': {description: Created, schema: {$ref: '#/definitions/Pet'}}
+      x-operation: 1
+  /pets/{petId}:
+    parameters:
+      - {name: petId, in: path, required: true, type: integer, format: int64}
+    put:
+      operationId: updatePet
+      parameters:
+        - {name: pet, in: body, description: The pet, schema: {$ref: '#/definitions/Pet'}, x-body: 1}
+        - {name: petId, in: query, type: string, x-nullable: true}
+      responses: {'200': {description: Updated}}
+    delete:
+      operationId: deletePet
+      security: []
+      parameters:
+        - {name: petId, in: path, required: true, type: string, x-parameter: 1}
+        - {name: X-Tags, in: header, type: array, items: {type: string}, collectionFormat: pipes}
+        - {name: X-Csv, in: header, type: array, items: {type: string}}
+      responses: {'204': {description: Deleted}}
+    x-item: 1
+  /pets/{petId}/photo:
+    post:
+      operationId: uploadPhoto
+      consumes: [application/json]
+      produces: [image/png]
+      parameters:
+        - {name: petId, in: path, required: true, type: integer}
+        - {name: file, in: formData, type: file, required: true, description: The photo}
+        - $ref: '#/parameters/formNote'
+      responses: {'200': {description: The photo, schema: {type: file}}}
+  /pets/{petId}/notes:
+    parameters:
+      - {name: author, in: formData, type: string}
+    post:
+      operationId: addNote
+      consumes: [application/x-www-form-urlencoded]
+      parameters:
+        - {name: petId, in: path, required: true, type: integer}
+        - {name: text, in: formData, type: string, required: true}
+        - {name: labels, in: formData, type: array, items: {type: string}, collectionFormat: pipes}
+        - {name: many, in: formData, type: array, items: {type: string}, collectionFormat: multi}
+      responses: {'204': {description: Added}}
+  /pets/{petId}/labels:
+    post:
+      operationId: addLabels
+      consumes: [multipart/form-data]
+      parameters:
+        - {name: petId, in: path, required: true, type: integer}
+        - {name: labels, in: formData, type: array, items: {type: string}, collectionFormat: csv}
+      responses: {'204': {description: Added}}
+  /legacy:
+    $ref: 'legacy.yaml'
+definitions:
+  Pet:
+    type: object
+    required: [name, kind]
+    discriminator: kind
+    properties:
+      id: {type: integer, format: int64, readOnly: true}
+      name: {type: string, example: Rex}
+      kind: {type: string}
+      tag: {type: string, x-nullable: true}
+      owner: {$ref: '#/definitions/Owner'}
+  Dog:
+    allOf:
+      - $ref: '#/definitions/Pet'
+      - {type: object, properties: {barks: {type: boolean}}}
+  Owner:
+    type: object
+    properties: {name: {type: string}}
+    default: {$ref: not-a-reference}
+  Error: {type: object, properties: {code: {type: integer}, message: {type: string}}, x-error: {$ref: kept}}
+  Blob: {type: file}

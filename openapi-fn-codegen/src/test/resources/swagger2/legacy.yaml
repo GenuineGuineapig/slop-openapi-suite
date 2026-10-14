@@ -1,0 +1,4 @@
+get:
+  operationId: legacy
+  responses:
+    '200': {description: Legacy}
