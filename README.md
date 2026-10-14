@@ -284,19 +284,18 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 * **Credentials are checked for presence and syntax, not verified.** Basic credentials must be
   base64 `user:password`, bearer tokens RFC 6750 tokens; verifying them is Spring Security's job.
   `mutualTLS` requirements count as satisfied.
-* **Streams are validated item by item.** Constraints on a sequence as a whole (`maxItems`,
-  `uniqueItems`) are not checked for streamed bodies, and an item is passed on once it is complete.
-  Client request validation (`OpenApiClientValidationInterceptor`) sees whole bodies, because
-  `RestClient` buffers request bodies for interceptors; responses still stream.
+* **Streams are validated as they pass.** An item is passed on once it is complete and valid;
+  `uniqueItems` remembers the items seen so far. `OpenApiClientValidationInterceptor`, for
+  `RestClient`s other than the generated clients', sees whole request bodies, because Spring
+  buffers request bodies for interceptors (generated clients validate without buffering).
 * **One Java type per body.** A response that may be JSON Lines or SSE is typed by its first
   media type (JSON first); the other is still accepted and validated, but not typed separately.
-* **Swagger 2.0:** `collectionFormat: tsv`, and non-`csv` formats of header and path parameters,
-  have no 3.0 equivalent and become `csv` with a warning.
 * **Generic records from `$dynamicRef`:** type variables are used for the template's own
   properties. Inline objects nested in the template fall back to the anchor's default.
-* **Remote references are fetched while generating.** A Gradle task whose description uses them is
-  never up to date or cached, so every build fetches them again.
+* **Remote references are fetched on every build.** The Gradle task fetches them to see whether
+  they changed; it is up to date (or taken from the build cache) while they did not.
 * **Links are checked, not used.** Their target operations must exist, but links have no runtime
   behaviour.
-* **Callbacks sharing a URL expression get one receiver each.** Point the expressions at the
-  matching receiver paths.
+* **Different callbacks on one URL with the same method cannot be told apart.** The operations of
+  one webhook, or of one callback URL, share a receiver path and are told apart by method; two
+  callbacks of different names whose URL expressions and methods coincide get a receiver each.

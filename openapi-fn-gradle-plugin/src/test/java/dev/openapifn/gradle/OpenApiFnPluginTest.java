@@ -176,12 +176,13 @@ class OpenApiFnPluginTest {
     }
 
     @Test
-    void remoteDocumentsAreFetchedOnEveryBuild() throws Exception {
+    void remoteDocumentsAreFingerprinted() throws Exception {
+        var body = new java.util.concurrent.atomic.AtomicReference<>("{type: object, properties: {name: {type: string}}}");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/pet.yaml", exchange -> {
-            var body = "{type: object, properties: {name: {type: string}}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
+            var bytes = body.get().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
             exchange.close();
         });
         server.start();
@@ -190,13 +191,16 @@ class OpenApiFnPluginTest {
             write("remote.yaml", API.replace("schemas/pet.yaml", remote));
             var project = project(true);
             var task = register(project, "pets", "remote.yaml");
-            assertThat(task.bundlesRemoteDocuments()).isFalse();
-            assertThat(task.getOutputs().getUpToDateSpec().isSatisfiedBy(task)).isTrue();
+            var fingerprint = task.getRemoteFingerprint().get();
+            assertThat(fingerprint).isNotEmpty().isEqualTo(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml")));
+            body.set("{type: object, properties: {name: {type: string}, tag: {type: string}}}");
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"))).isNotEqualTo(fingerprint);
             task.generate();
-            assertThat(task.bundlesRemoteDocuments()).isTrue();
-            assertThat(task.getOutputs().getUpToDateSpec().isSatisfiedBy(task)).isFalse();
             assertThat(task.getResourcesDir().get().getAsFile().toPath().resolve("META-INF/openapi-fn/pets/remote/127.0.0.1_"
                 + server.getAddress().getPort() + "/pet.yaml")).exists();
+            write("local.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object"));
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("local.yaml"))).isEmpty();
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("missing.yaml"))).isEmpty();
         } finally {
             server.stop(0);
         }

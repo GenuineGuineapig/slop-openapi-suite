@@ -71,12 +71,12 @@ public final class EndToEnd {
         results.add("adopted:" + webhooks.petAdopted(URI.create(root + "/webhooks/petAdopted"), new PetAdoptedRequest("signed", tom)).status());
         results.add("stock:" + webhooks.postStockLow(URI.create(root + "/webhooks/postStockLow"),
             new PostStockLowRequest(new PostStockLowRequest.Body("sku-1"))).status());
-        results.add("callback:" + callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(tom))
+        results.add("callback:" + callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreated"), new PetCreatedCallbackRequest(tom))
             .status());
-        results.add("put:" + ((PetCreatedPutResponse.Ok) callbacks.petCreatedPut(URI.create(root + "/callbacks/petCreatedPut"),
+        results.add("put:" + ((PetCreatedPutResponse.Ok) callbacks.petCreatedPut(URI.create(root + "/callbacks/petCreated"),
             new PetCreatedPutRequest("hi"))).body());
         try {
-            callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreatedCallback"), new PetCreatedCallbackRequest(new Pet.Default(null, "", Kind.BIRD,
+            callbacks.petCreatedCallback(URI.create(root + "/callbacks/petCreated"), new PetCreatedCallbackRequest(new Pet.Default(null, "", Kind.BIRD,
                 null, null)));
             results.add("invalid:accepted");
         } catch (dev.openapifn.spring.client.UnexpectedResponseException e) {

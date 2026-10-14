@@ -37,9 +37,11 @@ import java.util.Set;
  * @param body the request body, if any
  * @param response the sealed response type
  * @param variants the response variants
+ * @param receiverPath the default path a receiving controller maps a webhook or callback to, such
+ *     as {@code /webhooks/newPet} (empty for path operations)
  */
 public record OperationModel(ApiOperation operation, String id, String method, String group, Optional<ClassName> request, List<ParamModel> parameters,
-                             Optional<BodyModel> body, ClassName response, List<VariantModel> variants) {
+                             Optional<BodyModel> body, ClassName response, List<VariantModel> variants, String receiverPath) {
 
     /**
      * A parameter.
@@ -140,7 +142,10 @@ public record OperationModel(ApiOperation operation, String id, String method, S
                 !requestBody.required() || mapper.nullable(schema), schema), List.copyOf(requestBody.content().keySet()));
         }));
         var request = parameters.isEmpty() && body.isEmpty() ? Optional.<ClassName>empty() : Optional.of(requestName);
-        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants(operation, mapper, responseName, stream));
+        var receiverPath = operation.kind() == ApiOperation.Kind.PATH ? ""
+            : "/" + (operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks") + "/" + method;
+        return new OperationModel(operation, id, method, group, request, parameters, body, responseName, variants(operation, mapper, responseName, stream),
+            receiverPath);
     }
 
     private static List<VariantModel> variants(ApiOperation operation, TypeMapper mapper, ClassName responseName, ClassName stream) {
@@ -228,9 +233,12 @@ public record OperationModel(ApiOperation operation, String id, String method, S
         return operation.kind() != ApiOperation.Kind.PATH;
     }
 
-    /** The default path a receiving controller maps a webhook or callback to, e.g. {@code /webhooks/newPet}. */
-    public String receiverPath() {
-        return "/" + (operation.kind() == ApiOperation.Kind.WEBHOOK ? "webhooks" : "callbacks") + "/" + method;
+    /**
+     * A copy received at {@code path}: operations of one webhook, or of one callback URL, that differ by
+     * method share their receiver path (a subscriber registers one URL).
+     */
+    public OperationModel withReceiverPath(String path) {
+        return new OperationModel(operation, id, method, group, request, parameters, body, response, variants, path);
     }
 
     /** All request record components in order. */

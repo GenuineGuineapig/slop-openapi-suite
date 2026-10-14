@@ -15,6 +15,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Generates Java sources, tests and resources from an API description. A pure function of the
@@ -41,11 +42,14 @@ public final class Generator {
         }
         // Webhooks and callbacks are sent by the API provider: they get receiving controllers and sending clients of their own.
         var groupNames = new HashSet<>(groups.keySet());
+        // Operations of one webhook, or of one callback URL, are received at one URL when they differ by method.
+        var urls = new LinkedHashMap<List<String>, List<OperationModel>>();
         var webhooks = Names.unique("Webhooks", groupNames);
         for (var operation : api.webhooks()) {
             var model = OperationModel.of(operation, operation.displayName(), webhooks, operation.method().toLowerCase(Locale.ROOT) + " "
                 + operation.path(), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(webhooks, group -> new ArrayList<>()).add(model);
+            urls.computeIfAbsent(List.of("webhooks", operation.path()), url -> new ArrayList<>()).add(model);
         }
         var callbacks = Names.unique("Callbacks", groupNames);
         for (var callback : api.callbacks()) {
@@ -54,7 +58,10 @@ public final class Generator {
             var model = OperationModel.of(callback.operation(), callback.id(), callbacks, callback.name() + (single ? "" : " "
                 + callback.operation().method().toLowerCase(Locale.ROOT)), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
+            urls.computeIfAbsent(List.of("callbacks", callback.name(), callback.owner().displayName(), callback.operation().path()), url -> new ArrayList<>())
+                .add(model);
         }
+        shareReceiverPaths(urls, groups, taken);
         var models = new ModelRenderer(mapper);
         var renderer = new ApiRenderer(mapper, models, names, config.reactive());
         var files = new ArrayList<GeneratedFile>();
@@ -87,6 +94,23 @@ public final class Generator {
             files.add(source(names.clientsConfiguration(), renderer.clientsConfiguration(List.copyOf(groups.keySet()))));
         }
         return files;
+    }
+
+    /**
+     * Gives the operations of one URL (a webhook, or a callback expression) one receiver path, named
+     * after the webhook or callback; they come from one path item, so their methods tell them apart.
+     * (Callbacks of different names sharing an expression and a method stay apart: one URL could not
+     * tell them apart.)
+     */
+    private static void shareReceiverPaths(Map<List<String>, List<OperationModel>> urls, Map<String, List<OperationModel>> groups, java.util.Set<String> taken) {
+        var names = new HashSet<>(taken);
+        urls.forEach((url, operations) -> {
+            if (operations.size() < 2) {
+                return;
+            }
+            var path = "/" + url.getFirst() + "/" + Names.unique(Names.camel(url.get(1)), names);
+            groups.values().forEach(models -> models.replaceAll(model -> operations.contains(model) ? model.withReceiverPath(path) : model));
+        });
     }
 
     /** The path of a server URL, with a leading slash and without a trailing one. */

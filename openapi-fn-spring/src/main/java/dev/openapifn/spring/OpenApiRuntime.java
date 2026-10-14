@@ -58,7 +58,7 @@ public final class OpenApiRuntime {
     private final JsonMapper mapper;
     private final boolean failOnInvalidRequest;
     private final BodyWriter writer;
-    private final Map<String, ApiOperation> receivers;
+    private final Map<String, List<ApiOperation>> receivers;
 
     public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest) {
         this(name, api, validator, mapper, failOnInvalidRequest, Map.of());
@@ -70,14 +70,24 @@ public final class OpenApiRuntime {
      */
     public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest,
                           Map<String, String> receivers) {
+        this(name, api, validator, mapper, failOnInvalidRequest, receivers.entrySet());
+    }
+
+    /**
+     * @param receivers the paths the controllers of received webhooks and callbacks are mapped to,
+     *     with their operation ids; operations that differ by method may share a path (one URL a
+     *     subscriber registers)
+     */
+    public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest,
+                          java.util.Collection<Map.Entry<String, String>> receivers) {
         this.name = name;
         this.api = api;
         this.validator = validator;
         this.mapper = mapper;
         this.failOnInvalidRequest = failOnInvalidRequest;
         this.writer = new BodyWriter(new SchemaShapes(api.schemas()));
-        var operations = new java.util.LinkedHashMap<String, ApiOperation>();
-        receivers.forEach((path, id) -> operations.put(path, operation(id)));
+        var operations = new java.util.LinkedHashMap<String, List<ApiOperation>>();
+        receivers.forEach(receiver -> operations.computeIfAbsent(receiver.getKey(), path -> new java.util.ArrayList<>()).add(operation(receiver.getValue())));
         this.receivers = Map.copyOf(operations);
     }
 
@@ -125,15 +135,17 @@ public final class OpenApiRuntime {
     }
 
     private RequestValidation validate(HttpRequest request, boolean head) {
-        var receiver = receivers.get(request.path());
-        if (receiver == null) {
+        var candidates = receivers.get(request.path());
+        if (candidates == null) {
             return head ? validator.validateRequestHead(request) : validator.validateRequest(request);
         }
-        if (!receiver.method().equals(request.method())) {
+        var found = candidates.stream().filter(candidate -> candidate.method().equals(request.method())).findFirst();
+        if (found.isEmpty()) {
             var issue = new ValidationIssue(IssueKeys.REQUEST_OPERATION_NOT_ALLOWED, Level.ERROR, request.method() + " is not allowed for "
-                + request.path() + "; allowed: [" + receiver.method() + "]", "method");
+                + request.path() + "; allowed: " + candidates.stream().map(ApiOperation::method).toList(), "method");
             return new RequestValidation(new ValidationReport(List.of(issue)), Optional.empty(), Map.of(), Optional.empty());
         }
+        var receiver = found.get();
         var match = new OperationMatch(receiver, Map.of());
         return head ? validator.validateRequestHead(match, request) : validator.validateRequest(match, request);
     }
