@@ -89,6 +89,16 @@ paths:
                   description: acknowledged
                   content:
                     text/plain: {schema: {type: string}}
+        petRejected:
+          '{$request.header.X-Callback-Url}':
+            post:
+              operationId: petRejected
+              requestBody:
+                required: true
+                content:
+                  application/json: {schema: {$ref: '#/components/schemas/Problem'}}
+              responses:
+                '204': {description: received}
     query:
       operationId: searchPets
       tags: [pets]

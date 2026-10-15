@@ -95,6 +95,7 @@ public record OpenApiLoader(ResourceLoader resources) {
         if (diagnostics.stream().anyMatch(Diagnostic::isError)) {
             return Result.err(List.copyOf(diagnostics));
         }
+        diagnostics.addAll(Receivers.ambiguities(new OpenApiDocument(uri, model.get(), registry.registry(), diagnostics)));
         return Result.ok(new OpenApiDocument(uri, model.get(), registry.registry(), diagnostics));
     }
 }

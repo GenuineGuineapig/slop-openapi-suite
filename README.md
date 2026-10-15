@@ -177,6 +177,16 @@ var client = RestClient.builder()
 (`OpenApiClientValidationInterceptor` validates too, but Spring hands interceptors buffered
 request bodies.)
 
+## Receiving webhooks and callbacks
+
+A subscriber registers one URL per webhook, and per callback URL expression of an operation, so the
+generated receivers serve the operations sent there at one path
+(`openapi-fn.specs.<api>.receivers.<method>.path`): told apart by method, and operations with the
+same method by their requests. A request goes to the first operation (in the order of the
+description) it is valid for. When the description gives such operations requests alike (same
+parameters, media types and schemas), nothing can tell them apart: loading the description warns,
+and the first receives them, as the generated tests document.
+
 ## Links and callback URLs
 
 Link Objects and callback URLs are runtime expressions (`$url`, `$method`, `$statusCode`,
@@ -394,9 +404,3 @@ because you implement interfaces rather than edit generated files.
 
 Every module is built with 100% line, branch, instruction and method coverage, enforced by
 `./gradlew check`.
-
-## Limitations
-
-* **Different callbacks on one URL with the same method cannot be told apart.** The operations of
-  one webhook, or of one callback URL, share a receiver path and are told apart by method; two
-  callbacks of different names whose URL expressions and methods coincide get a receiver each.

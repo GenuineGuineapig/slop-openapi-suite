@@ -116,6 +116,11 @@ public class ShopService implements PetsApi, OrdersApi, DefaultApi, WebhooksApi,
     }
 
     @Override
+    public Mono<PetRejectedResponse> petRejected(PetRejectedRequest request) {
+        return Mono.just(PetRejectedResponse.noContent());
+    }
+
+    @Override
     public Mono<PetCreatedPutResponse> petCreatedPut(PetCreatedPutRequest request) {
         return Mono.just(PetCreatedPutResponse.ok("ack:" + request.body()));
     }

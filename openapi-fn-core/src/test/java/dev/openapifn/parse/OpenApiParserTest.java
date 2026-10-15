@@ -521,6 +521,52 @@ class OpenApiParserTest {
     }
 
     @Test
+    void callbacksReceiversCannotTellApartAreReported() {
+        assertThat(messages(v32("""
+            paths:
+              /subscribe:
+                post:
+                  responses: {'201': {description: ok}}
+                  callbacks:
+                    created:
+                      '{$request.body#/url}':
+                        post:
+                          parameters: [{name: X-Id, in: header, required: true, schema: {type: string}}]
+                          requestBody: {description: created, content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}}
+                          responses: {'204': {description: ok}}
+                    deleted:
+                      '{$request.body#/url}':
+                        post:
+                          parameters: [{name: X-Id, in: header, required: true, schema: {type: string}}]
+                          requestBody: {description: deleted, content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}}
+                          responses: {'204': {description: ok}}
+                    renamed:
+                      '{$request.body#/url}':
+                        post:
+                          requestBody: {content: {application/json: {schema: {type: object, required: [name]}}}}
+                          responses: {'204': {description: ok}}
+                    paged:
+                      '{$request.body#/url}':
+                        post:
+                          parameters: [{name: q, in: query, content: {application/json: {schema: {type: object}}}}]
+                          requestBody: {required: true, content: {application/jsonl: {itemSchema: {type: object}}}}
+                          responses: {'204': {description: ok}}
+                        put:
+                          responses: {'204': {description: ok}}
+                    elsewhere:
+                      '{$request.body#/other}':
+                        post:
+                          parameters: [{name: X-Id, in: header, required: true, schema: {type: string}}]
+                          requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}}
+                          responses: {'204': {description: ok}}
+            components:
+              schemas:
+                Event: {type: object}
+            """))).containsExactly("Callbacks 'created' and 'deleted' of 'POST /subscribe' are sent to the same URL ({$request.body#/url}) with POST "
+            + "and requests described alike: receivers cannot tell them apart, 'created' receives both");
+    }
+
+    @Test
     void structuralRules() {
         assertThat(messages(v32("""
             paths:

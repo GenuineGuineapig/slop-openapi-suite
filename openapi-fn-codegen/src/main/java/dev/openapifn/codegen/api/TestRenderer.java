@@ -9,6 +9,7 @@ import dev.openapifn.codegen.model.ModelDef.Property;
 import dev.openapifn.example.ExampleGenerator;
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.JsonArray;
@@ -19,6 +20,8 @@ import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.SecurityScheme;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Direction;
+import dev.openapifn.validation.OpenApiValidator;
+import dev.openapifn.validation.OperationMatch;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,6 +66,7 @@ public final class TestRenderer {
     private final boolean reactive;
     private final ExampleGenerator examples;
     private final SchemaShapes shapes;
+    private final OpenApiValidator validator;
 
     /** @param reactive whether to render {@code @WebFluxTest}s with {@code WebTestClient} rather than {@code @WebMvcTest}s */
     public TestRenderer(OpenApiDocument api, GeneratorNames names, boolean reactive) {
@@ -71,6 +75,7 @@ public final class TestRenderer {
         this.reactive = reactive;
         this.examples = new ExampleGenerator(api.schemas());
         this.shapes = new SchemaShapes(api.schemas());
+        this.validator = OpenApiValidator.of(api);
     }
 
     /** The test class for {@code group}. */
@@ -88,9 +93,12 @@ public final class TestRenderer {
         out.blank().line("@" + imports.ref(AUTOWIRED)).line("private " + imports.ref(ApiRenderer.OPENAPI_RUNTIMES) + " runtimes;");
         out.blank().line("@" + imports.ref(AUTOWIRED)).line("private " + imports.ref(JSON_MAPPER) + " mapper;");
         out.blank().line("@" + imports.ref(MOCKITO_BEAN)).line("private " + imports.ref(names.api(group)) + " api;");
+        var receivers = receivers(operations);
         for (var operation : operations) {
-            exchangeTest(operation, out, imports);
-            rejectionTest(operation, out, imports);
+            exchangeTest(operation, receivers.getOrDefault(operation.id(), operation), out, imports);
+            if (!receivedByAnother(operation, operations)) {
+                rejectionTest(operation, out, imports);
+            }
         }
         out.close();
         var mockito = List.of("import static org.mockito.ArgumentMatchers.any;", "import static org.mockito.BDDMockito.given;",
@@ -105,21 +113,74 @@ public final class TestRenderer {
     // ---------------------------------------------------------------------------------------------
     // The exchange test
 
-    private void exchangeTest(OperationModel operation, Source out, Imports imports) {
-        var variant = stubbedVariant(operation);
+    /**
+     * The webhooks and callbacks whose example requests another one receives: one sent to the same
+     * URL with the same method, declared earlier, for which the request is valid too (by operation id).
+     */
+    private Map<String, OperationModel> receivers(List<OperationModel> operations) {
+        var shared = new LinkedHashMap<List<String>, List<OperationModel>>();
+        operations.stream().filter(OperationModel::outbound)
+            .forEach(op -> shared.computeIfAbsent(List.of(op.receiverPath(), op.operation().method()), key -> new ArrayList<>()).add(op));
+        var receivers = new java.util.HashMap<String, OperationModel>();
+        shared.values().forEach(group -> {
+            for (int i = 1; i < group.size(); i++) {
+                var earlier = group.subList(0, i);
+                var operation = group.get(i);
+                requestExpression(operation, true).flatMap(TestRenderer::message).flatMap(message -> earlier.stream()
+                        .filter(op -> !validator.validateRequest(new OperationMatch(op.operation(), Map.of()), message).report().hasErrors()).findFirst())
+                    .ifPresent(receiver -> receivers.put(operation.id(), receiver));
+            }
+        });
+        return receivers;
+    }
+
+    /**
+     * Whether a request of {@code operation} lacking its required input is a valid request of
+     * another webhook or callback sent to the same URL with the same method, which then receives it.
+     */
+    private boolean receivedByAnother(OperationModel operation, List<OperationModel> operations) {
+        // A group holds either webhooks and callbacks or path operations.
+        var others = operations.stream().filter(other -> other != operation && other.outbound() && other.receiverPath().equals(operation.receiverPath())
+            && other.operation().method().equals(operation.operation().method())).toList();
+        return !others.isEmpty() && requestExpression(operation, false).flatMap(TestRenderer::message).filter(message -> others.stream()
+            .anyMatch(other -> !validator.validateRequest(new OperationMatch(other.operation(), Map.of()), message).report().hasErrors())).isPresent();
+    }
+
+    /** {@code request} as a message to validate, unless its body is binary or multipart (whose examples are placeholders). */
+    private static Optional<HttpRequest> message(ExampleRequest request) {
+        var message = HttpRequest.of(request.method(), request.uri());
+        for (var header : request.headers().entrySet()) {
+            message = message.withHeader(header.getKey(), header.getValue());
+        }
+        if (!request.cookies().isEmpty()) {
+            message = message.withHeader("Cookie", ParameterSerializer.cookieHeader(request.cookies()));
+        }
+        var body = request.body();
+        if (body.isEmpty()) {
+            return Optional.of(message);
+        }
+        return body.get() instanceof TextBody text ? Optional.of(message.withBody(text.contentType(), text.text())) : Optional.empty();
+    }
+
+    /** The exchange of {@code operation}'s example request, which {@code receiver} receives (another webhook or callback, when it cannot tell them apart). */
+    private void exchangeTest(OperationModel operation, OperationModel receiver, Source out, Imports imports) {
+        var variant = stubbedVariant(receiver);
         var status = variant.fixedStatus() ? Integer.parseInt(variant.key()) : variant.key().equals("default") ? 200
             : Integer.parseInt(variant.key().charAt(0) + "00");
-        var stub = responseExpression(operation, variant, status, imports);
+        var stub = responseExpression(receiver, variant, status, imports);
         var request = requestExpression(operation, true);
         out.blank().line("@" + imports.ref(TEST));
         if (stub.isEmpty() || request.isEmpty()) {
             out.line("@" + imports.ref(DISABLED) + "(\"No valid example could be derived; add examples to the API description\")");
         }
         out.open("void " + operation.method() + "() throws Exception");
-        var call = operation.method() + "(" + (operation.request().isPresent() ? "any()" : "") + ")";
+        if (receiver != operation) {
+            out.line("// Sent to the URL of " + receiver.method() + " with its method, and valid for it too: " + receiver.method() + " receives it.");
+        }
+        var call = receiver.method() + "(" + (receiver.request().isPresent() ? "any()" : "") + ")";
         var stubbed = reactive ? stub.map(response -> imports.ref(TypeRef.MONO) + ".just(" + response + ")") : stub;
         out.line("given(api." + call + ").willReturn(" + stubbed.orElse("null") + ");");
-        var conforms = "conformsTo(runtimes.get(" + imports.ref(names.spec()) + ".NAME)" + (operation.outbound() ? ", " + Names.literal(operation.id()) : "") + ")";
+        var conforms = "conformsTo(runtimes.get(" + imports.ref(names.spec()) + ".NAME)" + (receiver.outbound() ? ", " + Names.literal(receiver.id()) : "") + ")";
         var example = request.orElse(ExampleRequest.ROOT);
         if (reactive) {
             perform(example, out, imports);

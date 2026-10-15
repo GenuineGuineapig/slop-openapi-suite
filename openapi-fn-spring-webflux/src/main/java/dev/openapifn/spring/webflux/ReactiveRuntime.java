@@ -65,6 +65,21 @@ public final class ReactiveRuntime {
     }
 
     /**
+     * Which of {@code operationIds} (webhooks or callbacks a controller receives at one path with one
+     * method) the request of {@code exchange} is, see {@link OpenApiRuntime#receiver}. The body is
+     * read once: the binding reuses it.
+     */
+    public Mono<String> receiver(ServerWebExchange exchange, String... operationIds) {
+        var request = exchange.getRequest();
+        var streamed = ItemStreams.sequential(request.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+        var read = exchange.<Object>getAttribute(MESSAGE_ATTRIBUTE);
+        var message = streamed ? Mono.just(ReactiveMessages.head(request))
+            : read instanceof HttpRequest cached ? Mono.just(cached) : ReactiveMessages.read(request).doOnNext(m -> exchange.getAttributes().put(MESSAGE_ATTRIBUTE, m));
+        var validated = exchange.<Object>getAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE);
+        return message.map(m -> runtime.receiver(m, validated, streamed, java.util.List.of(operationIds)));
+    }
+
+    /**
      * Writes {@code response} of operation {@code operationId} to the exchange. A {@link Publisher}
      * (or {@link Stream}) body of a sequential media type is written item by item, flushing each;
      * other publishers are collected and written whole.

@@ -209,6 +209,11 @@ paths:
             post:
               responses:
                 '204': {description: received}
+        pang:
+          '{$request.body#/url}':
+            post:
+              responses:
+                '204': {description: 'received too'}
       responses:
         '201': {description: subscribed}
     delete:

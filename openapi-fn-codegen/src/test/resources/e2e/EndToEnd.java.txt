@@ -90,6 +90,9 @@ public final class EndToEnd {
         results.add("adopted:" + webhooks.petAdopted(URI.create(root + "/webhooks/petAdopted"), new PetAdoptedRequest("signed", tom)).status());
         results.add("stock:" + webhooks.postStockLow(URI.create(root + "/webhooks/postStockLow"),
             new PostStockLowRequest(new PostStockLowRequest.Body("sku-1"))).status());
+        // Sent to the same URL with the same method as petCreatedCallback, and told apart by its body.
+        results.add("rejected:" + callbacks.petRejected(callbacks.petRejectedUrl(createRequest), new PetRejectedRequest(new Problem("Rejected", 422,
+            "no more cats"))).status());
         results.add("callback:" + callbacks.petCreatedCallback(callbacks.petCreatedCallbackUrl(createRequest), new PetCreatedCallbackRequest(tom))
             .status());
         results.add("put:" + ((PetCreatedPutResponse.Ok) callbacks.petCreatedPut(URI.create(root + "/callbacks/petCreated"),

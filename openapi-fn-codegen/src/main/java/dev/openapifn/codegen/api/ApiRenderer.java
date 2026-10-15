@@ -244,16 +244,42 @@ public final class ApiRenderer {
             + imports.ref(apiName) + "> api)");
         out.line("this.runtime = new " + imports.ref(runtime) + "(runtimes.get(" + imports.ref(names.spec()) + ".NAME));").line("this.api = api;").close();
         var custom = new LinkedHashMap<String, List<OperationModel>>();
+        // Webhooks and callbacks received at one path with one method are told apart by their requests.
+        var received = new LinkedHashMap<List<String>, List<OperationModel>>();
         for (var operation : operations) {
             var method = operation.operation().method();
-            if (MAPPABLE_METHODS.contains(method)) {
-                out.blank().line("@" + imports.ref(REQUEST_MAPPING) + "(method = " + imports.ref(REQUEST_METHOD) + "." + method + ", path = "
-                    + Names.literal(mappingPath(operation, names)) + ")");
-                handler(operation, "public", out, imports);
-            } else {
+            if (!MAPPABLE_METHODS.contains(method)) {
                 custom.computeIfAbsent(operation.operation().path(), path -> new ArrayList<>()).add(operation);
+            } else if (operation.outbound()) {
+                received.computeIfAbsent(List.of(operation.receiverPath(), method), key -> new ArrayList<>()).add(operation);
+            } else {
+                mapped(operation, out, imports);
             }
         }
+        received.values().forEach(receivers -> {
+            if (receivers.size() == 1) {
+                mapped(receivers.getFirst(), out, imports);
+                return;
+            }
+            var first = receivers.getFirst();
+            out.blank().javadoc("Receives " + receivers.stream().map(op -> "{@code " + op.method() + "}").collect(Collectors.joining(", "))
+                + ", sent to one URL with one method: told apart by their requests (the first one receives requests valid for several).");
+            out.line("@" + imports.ref(REQUEST_MAPPING) + "(method = " + imports.ref(REQUEST_METHOD) + "." + first.operation().method() + ", path = "
+                + Names.literal(mappingPath(first, names)) + ")");
+            out.open("public " + handlerType(imports) + " " + first.method() + "Dispatch(" + handlerParameter(imports) + ")");
+            var ids = receivers.stream().map(op -> Names.literal(op.id())).collect(Collectors.joining(", "));
+            var argument = reactive ? "exchange" : "request";
+            out.open(reactive ? "return runtime.receiver(exchange, " + ids + ").flatMap(id -> switch (id)" : "return switch (runtime.receiver(request, " + ids + "))");
+            for (int i = 0; i < receivers.size(); i++) {
+                var op = receivers.get(i);
+                out.line((i + 1 < receivers.size() ? "case " + Names.literal(op.id()) : "default") + " -> " + op.method() + "(" + argument + ");");
+            }
+            out.close(reactive ? ");" : ";").close();
+            receivers.forEach(op -> {
+                out.blank();
+                handler(op, "private", out, imports);
+            });
+        });
         custom.forEach((path, pathOperations) -> {
             out.blank().javadoc("Dispatches the methods Spring cannot map by annotation.");
             out.line("@" + imports.ref(REQUEST_MAPPING) + "(path = " + Names.literal(mappingPath(pathOperations.getFirst(), names)) + ")");
@@ -303,6 +329,13 @@ public final class ApiRenderer {
 
     private String handlerParameter(Imports imports) {
         return reactive ? imports.ref(SERVER_WEB_EXCHANGE) + " exchange" : imports.ref(SERVLET_REQUEST) + " request";
+    }
+
+    /** A handler mapped by annotation. */
+    private void mapped(OperationModel operation, Source out, Imports imports) {
+        out.blank().line("@" + imports.ref(REQUEST_MAPPING) + "(method = " + imports.ref(REQUEST_METHOD) + "." + operation.operation().method() + ", path = "
+            + Names.literal(mappingPath(operation, names)) + ")");
+        handler(operation, "public", out, imports);
     }
 
     private void handler(OperationModel operation, String visibility, Source out, Imports imports) {

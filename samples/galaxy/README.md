@@ -12,8 +12,10 @@
   falls back to the document and logs a warning.
 * `mock/` implements the generated interfaces. `PlanetNotifier` is the provider side of the
   `planetCreated`, `planetCreationFailed` and `planetExploded` callbacks and the `newPlanet`
-  webhook, using the generated `CallbacksClient` and `WebhooksClient`. `Receivers` is the
-  consumer side.
+  webhook, using the generated `CallbacksClient` and `WebhooksClient` (callback URLs computed from
+  the creation request). `Receivers` is the consumer side. `planetCreated` and `planetExploded`
+  are both sent to the `successCallbackUrl` with `POST` and a planet: the description does not tell
+  them apart, so loading it warns and `planetCreated` receives both.
 * `GalaxyApiIntegrationTest` covers these through the generated clients (with an API key):
   * planet CRUD, including callbacks and webhooks sent to the application itself
   * multipart image upload

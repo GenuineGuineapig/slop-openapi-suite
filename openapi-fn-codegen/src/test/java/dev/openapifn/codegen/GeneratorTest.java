@@ -91,6 +91,7 @@ class GeneratorTest {
                 "health:UP",
                 "adopted:202",
                 "stock:204",
+                "rejected:204",
                 "callback:204",
                 "put:ack:hi",
                 "invalid:400");
@@ -155,6 +156,7 @@ class GeneratorTest {
                 "health:UP",
                 "adopted:202",
                 "stock:204",
+                "rejected:204",
                 "callback:204",
                 "put:ack:hi",
                 "invalid:400");

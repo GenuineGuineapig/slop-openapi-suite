@@ -135,9 +135,7 @@ class GalaxyApiIntegrationTest {
         assertThat(update.planetId()).isEqualTo(planet.id());
         assertThat(update.body().name()).isEqualTo("Kepler-22b");
 
-        // planetCreated and planetExploded are both sent to the successCallbackUrl; point it at the other receiver now.
-        var renamed = planets.updatePlanet(new UpdatePlanetRequest(planet.id(), draft.withName("Kepler-22c")
-            .withSuccessCallbackUrl(local("/callbacks/planetExploded"))));
+        var renamed = planets.updatePlanet(new UpdatePlanetRequest(planet.id(), draft.withName("Kepler-22c")));
         assertThat(renamed).isInstanceOfSatisfying(UpdatePlanetResponse.Ok.class, ok -> assertThat(ok.body().name()).isEqualTo("Kepler-22c"));
         assertThat(planets.getPlanet(new GetPlanetRequest(planet.id()))).isInstanceOfSatisfying(GetPlanetResponse.Ok.class,
             ok -> assertThat(ok.eTag()).isEqualTo("\"planet-" + planet.id() + "\""));
@@ -149,8 +147,10 @@ class GalaxyApiIntegrationTest {
             assertThat(ok.body().mimeType()).isEqualTo("image/png");
         });
 
+        // planetExploded is sent to the successCallbackUrl too, with the same method and a planet like planetCreated: the
+        // description does not tell them apart, so the receiver of planetCreated gets it (the generator warns about it).
         assertThat(planets.deletePlanet(new DeletePlanetRequest(planet.id()))).isEqualTo(DeletePlanetResponse.noContent());
-        assertThat(receivers.received()).contains("exploded:Kepler-22c");
+        assertThat(receivers.received()).contains("created:Kepler-22c");
         assertThat(planets.getPlanet(new GetPlanetRequest(planet.id()))).isInstanceOf(GetPlanetResponse.NotFound.class);
     }
 

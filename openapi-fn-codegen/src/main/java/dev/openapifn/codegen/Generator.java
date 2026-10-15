@@ -43,14 +43,16 @@ public final class Generator {
         }
         // Webhooks and callbacks are sent by the API provider: they get receiving controllers and sending clients of their own.
         var groupNames = new HashSet<>(groups.keySet());
-        // Operations of one webhook, or of one callback URL, are received at one URL when they differ by method.
+        // Operations of one webhook, or of one callback URL, are received at one URL (and told apart by method, then by content).
         var urls = new LinkedHashMap<List<String>, List<OperationModel>>();
+        var urlNames = new LinkedHashMap<List<String>, String>();
         var webhooks = Names.unique("Webhooks", groupNames);
         for (var operation : api.webhooks()) {
             var model = OperationModel.of(operation, operation.displayName(), webhooks, operation.method().toLowerCase(Locale.ROOT) + " "
                 + operation.path(), names.apiPackage(), mapper, taken, stream);
             groups.computeIfAbsent(webhooks, group -> new ArrayList<>()).add(model);
             urls.computeIfAbsent(List.of("webhooks", operation.path()), url -> new ArrayList<>()).add(model);
+            urlNames.putIfAbsent(List.of("webhooks", operation.path()), operation.path());
         }
         var callbacks = Names.unique("Callbacks", groupNames);
         var owners = new LinkedHashMap<String, OperationModel>();
@@ -62,10 +64,12 @@ public final class Generator {
             groups.computeIfAbsent(callbacks, group -> new ArrayList<>()).add(model);
             owners.put(model.id(), groups.values().stream().flatMap(List::stream).filter(owner -> owner.operation().equals(callback.owner())).findFirst()
                 .orElseThrow());
-            urls.computeIfAbsent(List.of("callbacks", callback.name(), callback.owner().displayName(), callback.operation().path()), url -> new ArrayList<>())
-                .add(model);
+            // Callbacks with one URL expression are sent to one URL, whatever their names.
+            var url = List.of("callbacks", callback.owner().displayName(), callback.operation().path());
+            urls.computeIfAbsent(url, key -> new ArrayList<>()).add(model);
+            urlNames.putIfAbsent(url, callback.name());
         }
-        shareReceiverPaths(urls, groups, taken);
+        shareReceiverPaths(urls, urlNames, groups, taken);
         var models = new ModelRenderer(mapper);
         var renderer = new ApiRenderer(mapper, models, names, config.reactive());
         var files = new ArrayList<GeneratedFile>();
@@ -104,18 +108,24 @@ public final class Generator {
     }
 
     /**
-     * Gives the operations of one URL (a webhook, or a callback expression) one receiver path, named
-     * after the webhook or callback; they come from one path item, so their methods tell them apart.
-     * (Callbacks of different names sharing an expression and a method stay apart: one URL could not
-     * tell them apart.)
+     * Gives the operations of one URL (a webhook, or a callback expression of one operation) one
+     * receiver path, named after the (first) webhook or callback: a subscriber registers one URL.
+     * Their methods tell them apart, and the requests of operations with one method their content.
      */
-    private static void shareReceiverPaths(Map<List<String>, List<OperationModel>> urls, Map<String, List<OperationModel>> groups, java.util.Set<String> taken) {
-        var names = new HashSet<>(taken);
+    private static void shareReceiverPaths(Map<List<String>, List<OperationModel>> urls, Map<List<String>, String> urlNames,
+                                           Map<String, List<OperationModel>> groups, java.util.Set<String> taken) {
+        var chosen = new HashSet<String>();
         urls.forEach((url, operations) -> {
             if (operations.size() < 2) {
                 return;
             }
-            var path = "/" + url.getFirst() + "/" + Names.unique(Names.camel(url.get(1)), names);
+            // Single receivers are received at /<kind>/<method>: avoid those of other operations, and the names of other shared paths.
+            var avoided = new HashSet<>(taken);
+            operations.forEach(operation -> avoided.remove(operation.method()));
+            avoided.addAll(chosen);
+            var name = Names.unique(Names.camel(urlNames.get(url)), avoided);
+            chosen.add(name);
+            var path = "/" + url.getFirst() + "/" + name;
             groups.values().forEach(models -> models.replaceAll(model -> operations.contains(model) ? model.withReceiverPath(path) : model));
         });
     }

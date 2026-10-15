@@ -1,6 +1,7 @@
 package dev.openapifn.spring.servlet;
 
 import dev.openapifn.http.BodyWriter;
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ItemFramer;
 import dev.openapifn.spring.ApiResponse;
 import dev.openapifn.spring.ItemStreams;
@@ -9,6 +10,7 @@ import dev.openapifn.spring.OpenApiValidationException;
 import dev.openapifn.spring.RequestBinding;
 import dev.openapifn.spring.StreamedBody;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +21,9 @@ import org.springframework.web.servlet.HandlerMapping;
  * and answer with {@link ResponseEntity}s through it.
  */
 public final class ServletRuntime {
+
+    /** Request attribute holding the request as it was read, with its body, for its binding. */
+    public static final String MESSAGE_ATTRIBUTE = ServletRuntime.class.getName() + ".message";
 
     private final OpenApiRuntime runtime;
 
@@ -39,10 +44,28 @@ public final class ServletRuntime {
      */
     public RequestBinding bind(HttpServletRequest request, String operationId) {
         var streamed = ItemStreams.sequential(request.getContentType());
-        var message = streamed ? ServletMessages.head(request) : ServletMessages.toHttpRequest(request);
+        var message = streamed ? ServletMessages.head(request) : request.getAttribute(MESSAGE_ATTRIBUTE) instanceof HttpRequest read ? read
+            : ServletMessages.toHttpRequest(request);
         var pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
         return runtime.bind(message, operationId, pattern == null ? null : pattern.toString(), request.getAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE),
             streamed ? () -> ServletMessages.input(request) : null);
+    }
+
+    /**
+     * Which of {@code operationIds} (webhooks or callbacks a controller receives at one path with one
+     * method) {@code request} is, see {@link OpenApiRuntime#receiver}. The request is read once: its
+     * binding reuses it.
+     */
+    public String receiver(HttpServletRequest request, String... operationIds) {
+        var streamed = ItemStreams.sequential(request.getContentType());
+        HttpRequest message;
+        if (streamed) {
+            message = ServletMessages.head(request);
+        } else {
+            message = ServletMessages.toHttpRequest(request);
+            request.setAttribute(MESSAGE_ATTRIBUTE, message);
+        }
+        return runtime.receiver(message, request.getAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE), streamed, List.of(operationIds));
     }
 
     /**

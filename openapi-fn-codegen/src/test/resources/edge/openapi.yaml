@@ -176,6 +176,19 @@ paths:
         onHeader:
           '{$response.header.X-Hook}':
             post: {responses: {'204': {description: ok}}}
+        uploadText:
+          '{$request.query.hook}':
+            post:
+              requestBody: {required: true, content: {text/plain: {schema: {type: string}}}}
+              responses: {'204': {description: ok}}
+        uploadFile:
+          '{$request.query.hook}':
+            post:
+              parameters:
+                - {name: X-Sig, in: header, required: true, schema: {type: string}}
+                - {name: session, in: cookie, required: true, schema: {type: string}}
+              requestBody: {required: true, content: {application/octet-stream: {}}}
+              responses: {'204': {description: ok}}
 components:
   schemas:
     GetThingResponse:

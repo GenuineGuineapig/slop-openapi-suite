@@ -89,6 +89,9 @@ public final class OpenApiRuntime {
         this.writer = new BodyWriter(new SchemaShapes(api.schemas()));
         var operations = new java.util.LinkedHashMap<String, List<ApiOperation>>();
         receivers.forEach(receiver -> operations.computeIfAbsent(receiver.getKey(), path -> new java.util.ArrayList<>()).add(operation(receiver.getValue())));
+        // Operations sharing a path and a method are tried in the order the description declares them.
+        var declared = api.allOperations();
+        operations.values().forEach(shared -> shared.sort(java.util.Comparator.comparingInt(declared::indexOf)));
         this.receivers = Map.copyOf(operations);
     }
 
@@ -158,15 +161,38 @@ public final class OpenApiRuntime {
         if (candidates == null) {
             return head ? validator.validateRequestHead(request) : validator.validateRequest(request);
         }
-        var found = candidates.stream().filter(candidate -> candidate.method().equals(request.method())).findFirst();
+        var found = candidates.stream().filter(candidate -> candidate.method().equals(request.method())).toList();
         if (found.isEmpty()) {
             var issue = new ValidationIssue(IssueKeys.REQUEST_OPERATION_NOT_ALLOWED, Level.ERROR, request.method() + " is not allowed for "
                 + request.path() + "; allowed: " + candidates.stream().map(ApiOperation::method).toList(), "method");
             return new RequestValidation(new ValidationReport(List.of(issue)), Optional.empty(), Map.of(), Optional.empty());
         }
-        var receiver = found.get();
-        var match = new OperationMatch(receiver, Map.of());
-        return head ? validator.validateRequestHead(match, request) : validator.validateRequest(match, request);
+        return received(found, request, head);
+    }
+
+    /**
+     * The validation of a request as the first of {@code operations} (received at one path with one
+     * method) it is valid for, else as the first of them.
+     */
+    private RequestValidation received(List<ApiOperation> operations, HttpRequest request, boolean head) {
+        var validations = operations.stream().map(operation -> new OperationMatch(operation, Map.of()))
+            .map(match -> head ? validator.validateRequestHead(match, request) : validator.validateRequest(match, request)).toList();
+        return validations.stream().filter(validation -> !validation.report().hasErrors()).findFirst().orElse(validations.getFirst());
+    }
+
+    /**
+     * Which of the operations {@code operationIds} (webhooks or callbacks received at one path with
+     * one method) a request is: the one an earlier validation matched, else the first the request is
+     * valid for, else the first. Requests the description does not tell apart go to the first.
+     *
+     * @param validated an earlier validation, typically the validation filter's request attribute
+     * @param head whether only the head of the request can be inspected, its body being streamed
+     */
+    public String receiver(HttpRequest message, @Nullable Object validated, boolean head, List<String> operationIds) {
+        var operations = operationIds.stream().map(this::operation).toList();
+        var validation = validated instanceof RequestValidation earlier && earlier.match().filter(match -> operations.contains(match.operation())).isPresent()
+            ? earlier : received(operations, message, head);
+        return operationIds.get(operations.indexOf(validation.match().orElseThrow().operation()));
     }
 
     /**

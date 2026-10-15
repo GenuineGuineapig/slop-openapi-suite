@@ -15,8 +15,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.springframework.stereotype.Component;
 
 /**
- * The consumer side: receives the callbacks (at {@code /callbacks/<name>}) and the webhook (at
- * {@code /webhooks/postNewPlanet}) and records what arrived.
+ * The consumer side: receives the callbacks and the webhook (at {@code /webhooks/postNewPlanet})
+ * and records what arrived. {@code planetCreated} and {@code planetExploded} are sent to one URL
+ * (the {@code successCallbackUrl}), received at {@code /callbacks/planetCreated}; their requests are
+ * described alike, so {@code planetCreated} receives both. {@code planetCreationFailed} is received
+ * at {@code /callbacks/planetCreationFailed}.
  */
 @Component
 public class Receivers implements CallbacksApi, WebhooksApi {
