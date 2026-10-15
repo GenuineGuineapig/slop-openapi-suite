@@ -2,9 +2,12 @@ package dev.openapifn.parse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.json.Json;
+import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.Diagnostic;
 import dev.openapifn.load.ResourceLoaders;
@@ -44,7 +47,7 @@ class Swagger2ConverterTest {
         assertThat(API.operations()).extracting(operation -> operation.displayName())
             .containsExactly("listPets", "createPet", "updatePet", "deletePet", "uploadPhoto", "getBatch", "addNote", "addLabels", "legacy");
         // Collection formats OpenAPI 3 cannot express are kept as an extension, not lost.
-        assertThat(API.warnings()).extracting(dev.openapifn.load.Diagnostic::message).containsExactly("definition 'Blob' uses type 'file', which "
+        assertThat(API.warnings()).extracting(Diagnostic::message).containsExactly("definition 'Blob' uses type 'file', which "
             + "Swagger 2.0 allows for parameters and responses only; it is converted to a binary string");
     }
 
@@ -173,16 +176,16 @@ class Swagger2ConverterTest {
             .extracting(issue -> issue.key()).containsExactly("response.header.schema.type");
 
         var tabs = API.operation("listPets").orElseThrow().parameters().stream().filter(p -> p.name().equals("tabs")).findFirst().orElseThrow();
-        assertThat(dev.openapifn.http.ParameterSerializer.query(dev.openapifn.http.ParameterSerializer.Spec.of(tabs), json("[\"a\",\"b\"]")))
+        assertThat(ParameterSerializer.query(ParameterSerializer.Spec.of(tabs), json("[\"a\",\"b\"]")))
             .containsExactly(Map.entry("tabs", "a%09b"));
         var tags = API.operation("deletePet").orElseThrow().parameters().get(1);
-        assertThat(dev.openapifn.http.ParameterSerializer.header(dev.openapifn.http.ParameterSerializer.Spec.of(tags), json("[\"a\",\"b\"]")))
+        assertThat(ParameterSerializer.header(ParameterSerializer.Spec.of(tags), json("[\"a\",\"b\"]")))
             .isEqualTo("a|b");
         var ids = API.operation("getBatch").orElseThrow().parameters().getFirst();
-        assertThat(dev.openapifn.http.ParameterSerializer.path(dev.openapifn.http.ParameterSerializer.Spec.of(ids), json("[1,2]"))).isEqualTo("1%092");
+        assertThat(ParameterSerializer.path(ParameterSerializer.Spec.of(ids), json("[1,2]"))).isEqualTo("1%092");
         var form = API.operation("addNote").orElseThrow().operation().requestBody().orElseThrow().content().get("application/x-www-form-urlencoded");
-        assertThat(dev.openapifn.http.BodyWriter.form(json("{\"labels\":[\"a\",\"b\"],\"tabbed\":[\"x\",\"y\"],\"many\":[\"1\",\"2\"]}"),
-            dev.openapifn.http.BodyWriter.formSpecs(form.encoding()))).isEqualTo("labels=a%7Cb&tabbed=x%09y&many=1&many=2");
+        assertThat(BodyWriter.form(json("{\"labels\":[\"a\",\"b\"],\"tabbed\":[\"x\",\"y\"],\"many\":[\"1\",\"2\"]}"),
+            BodyWriter.formSpecs(form.encoding()))).isEqualTo("labels=a%7Cb&tabbed=x%09y&many=1&many=2");
 
         var unusual = parse("""
             swagger: '2.0'
@@ -201,7 +204,7 @@ class Swagger2ConverterTest {
 
     @Test
     void warnsAboutFileTypesInDefinitions() {
-        var source = (dev.openapifn.json.JsonObject) dev.openapifn.json.Json.parse("""
+        var source = (JsonObject) Json.parse("""
             {"swagger": "2.0", "info": {"title": "t", "version": "v"}, "paths": {}, "definitions": {
               "Nested": {"type": "object", "properties": {"file": {"type": "file"}}},
               "Listed": {"allOf": [{"type": "file"}]},

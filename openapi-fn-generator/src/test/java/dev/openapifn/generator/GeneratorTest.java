@@ -2,6 +2,8 @@ package dev.openapifn.generator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -245,8 +247,8 @@ class GeneratorTest {
                   unit: {$ref: 'unit.yaml'}
                 """,
             URI.create("https://schemas.example.com/common/unit.yaml"), "{type: string, enum: [mm, cm]}\n");
-        var loader = new dev.openapifn.parse.OpenApiLoader(dev.openapifn.load.ResourceLoaders.withSchemes(dev.openapifn.load.ResourceLoaders.defaults(),
-            Map.of("https", dev.openapifn.load.ResourceLoaders.inMemory(remote))));
+        var loader = new OpenApiLoader(ResourceLoaders.withSchemes(ResourceLoaders.defaults(),
+            Map.of("https", ResourceLoaders.inMemory(remote))));
         var api = loader.parse(dir.resolve("api.yaml").toUri(), """
             openapi: 3.1.0
             info: {title: Remote, version: 1.0.0}

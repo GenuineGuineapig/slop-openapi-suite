@@ -9,12 +9,16 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import dev.openapifn.http.Headers;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.spring.FilePart;
+import dev.openapifn.validation.IssueKeys;
+import dev.openapifn.validation.Level;
+import dev.openapifn.validation.LevelPolicy;
 import dev.openapifn.validation.OpenApiValidator;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -252,20 +256,20 @@ class ClientTest {
 
     @Test
     void streamsItems() throws Exception {
-        var lines = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), "{\"a\":1}\n".getBytes(StandardCharsets.UTF_8),
+        var lines = new ClientResponse(200, Headers.of("Content-Type", "application/jsonl"), "{\"a\":1}\n".getBytes(StandardCharsets.UTF_8),
             MAPPER);
         try (var items = lines.items(new TypeReference<Map<String, Integer>>() { })) {
             assertThat(items).containsExactly(Map.of("a", 1));
         }
-        var array = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/json"), "[1,2]".getBytes(StandardCharsets.UTF_8), MAPPER);
+        var array = new ClientResponse(200, Headers.of("Content-Type", "application/json"), "[1,2]".getBytes(StandardCharsets.UTF_8), MAPPER);
         assertThat(array.items(Integer.class)).containsExactly(1, 2);
-        assertThat(new ClientResponse(204, dev.openapifn.http.Headers.EMPTY, new byte[0], MAPPER).items(Integer.class)).isEmpty();
+        assertThat(new ClientResponse(204, Headers.EMPTY, new byte[0], MAPPER).items(Integer.class)).isEmpty();
         var closed = new AtomicInteger();
-        var broken = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"),
+        var broken = new ClientResponse(200, Headers.of("Content-Type", "application/jsonl"),
             new ByteArrayInputStream("{\n".getBytes(StandardCharsets.UTF_8)), closed::incrementAndGet, MAPPER);
         assertThatThrownBy(() -> broken.items(Object.class).toList()).isInstanceOf(IllegalStateException.class)
             .hasMessageStartingWith("Cannot decode application/jsonl content: item 0 must be valid JSON");
-        var unreadable = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), new InputStream() {
+        var unreadable = new ClientResponse(200, Headers.of("Content-Type", "application/jsonl"), new InputStream() {
             @Override
             public int read() throws IOException {
                 throw new IOException("broken");
@@ -361,11 +365,11 @@ class ClientTest {
         assertThat(call.body().encodings()).containsOnlyKeys("tags");
         var client = setup(RestClient.builder()).client();
         assertThat(new String(client.encode(call.body()).body(), StandardCharsets.UTF_8)).isEqualTo("tags=a%7Cb");
-        var typed = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "text/plain; charset=UTF-8"), new byte[0], MAPPER);
+        var typed = new ClientResponse(200, Headers.of("Content-Type", "text/plain; charset=UTF-8"), new byte[0], MAPPER);
         assertThat(typed.hasContentType("text/plain")).isTrue();
         assertThat(typed.hasContentType("text/*")).isTrue();
         assertThat(typed.hasContentType("application/json")).isFalse();
-        var response = new ClientResponse(200, dev.openapifn.http.Headers.of("X-Codes", "1 2"), new byte[0], MAPPER);
+        var response = new ClientResponse(200, Headers.of("X-Codes", "1 2"), new byte[0], MAPPER);
         assertThat(response.hasContentType("text/plain")).isFalse();
         assertThat(response.header("X-Codes", Integer[].class, " ")).containsExactly(1, 2);
         assertThat(response.header("X-Codes", new TypeReference<List<Integer>>() { }, " ")).containsExactly(1, 2);
@@ -384,8 +388,8 @@ class ClientTest {
                   responses: {'200': {description: ok}}
             """).orElseThrow(d -> new AssertionError(d.toString()));
         // Unknown paths are tolerated: requests to them match no operation, so nothing of them is validated.
-        var lenient = OpenApiValidator.of(api, OpenApiValidator.Options.DEFAULT.withLevels(dev.openapifn.validation.LevelPolicy.DEFAULT
-            .with(dev.openapifn.validation.IssueKeys.REQUEST_PATH_MISSING, dev.openapifn.validation.Level.IGNORE)));
+        var lenient = OpenApiValidator.of(api, OpenApiValidator.Options.DEFAULT.withLevels(LevelPolicy.DEFAULT
+            .with(IssueKeys.REQUEST_PATH_MISSING, Level.IGNORE)));
         var builder = RestClient.builder();
         var server = MockRestServiceServer.bindTo(builder).build();
         var client = new OpenApiHttpClient(builder.build(), "https://api.example.com", MAPPER, new ClientValidator(lenient, true));

@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.model.ParameterLocation;
+import dev.openapifn.spring.FilePart;
+import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.client.ClientCall;
 import dev.openapifn.spring.client.ClientValidationException;
 import dev.openapifn.spring.webflux.app.ReactiveTestApplication;
@@ -47,7 +49,7 @@ class ReactiveClientTest {
     OpenApiWebClients clients;
 
     @Autowired
-    dev.openapifn.spring.OpenApiRuntimes runtimes;
+    OpenApiRuntimes runtimes;
 
     private OpenApiWebClient plain() {
         return new OpenApiWebClient(WebClient.create(), "http://localhost:" + port + "/api/", MAPPER);
@@ -137,7 +139,7 @@ class ReactiveClientTest {
     void coversTheEdgesOfSending() {
         assertThat(clients.http("configured", "http://default.example.com").baseUrl()).isEqualTo("http://configured.example.com");
         var mixed = plain().exchange(ClientCall.of("POST", "/events").body("multipart/mixed", Flux.just(Map.of("n", 1),
-            dev.openapifn.spring.FilePart.of("f.png", "image/png", new byte[] {65}))), response -> response.buffered().map(buffered -> buffered.status()))
+            FilePart.of("f.png", "image/png", new byte[] {65}))), response -> response.buffered().map(buffered -> buffered.status()))
             .block();
         assertThat(mixed).isEqualTo(415);
         assertThatThrownBy(() -> new OpenApiWebClient(WebClient.create(), "http://localhost:1", MAPPER).exchange(ClientCall.of("GET", "/x"),

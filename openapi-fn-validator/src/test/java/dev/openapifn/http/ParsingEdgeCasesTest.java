@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.model.Encoding;
 import dev.openapifn.model.MediaType;
 import dev.openapifn.model.Parameter;
+import dev.openapifn.model.ParameterLocation;
+import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.schema.Schema;
@@ -111,8 +114,8 @@ class ParsingEdgeCasesTest {
 
     @Test
     void querystringWithoutContentIsAForm() {
-        var parameter = new Parameter("qs", dev.openapifn.model.ParameterLocation.QUERYSTRING, Optional.empty(), false, false, false,
-            dev.openapifn.model.ParameterStyle.FORM, true, false, Optional.empty(), Optional.empty(), Map.of(), Map.of(), Map.of());
+        var parameter = new Parameter("qs", ParameterLocation.QUERYSTRING, Optional.empty(), false, false, false,
+            ParameterStyle.FORM, true, false, Optional.empty(), Optional.empty(), Map.of(), Map.of(), Map.of());
         var parser = new ParameterParser(new SchemaShapes(api("/p", "[]", "{}").schemas()));
         assertThat(parser.parse(parameter, ParameterParser.Sources.of(HttpRequest.of("GET", "/p?a=1"), Map.of()), Set.of()).toOptional().orElseThrow())
             .contains(json("{\"a\":\"1\"}"));
@@ -194,7 +197,7 @@ class ParsingEdgeCasesTest {
         var latin = parser.parse(new byte[] {(byte) 0xe9}, ContentType.parse("text/plain; charset=ISO-8859-1").orElseThrow(), media(Optional.empty()));
         assertThat(latin.toOptional().orElseThrow()).isEqualTo(json("\"é\""));
         var form = parser.parse("a=1&b=%7B".getBytes(StandardCharsets.UTF_8), ContentType.parse("application/x-www-form-urlencoded").orElseThrow(),
-            new MediaType(Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), Map.of("b", new dev.openapifn.model.Encoding(
+            new MediaType(Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), Map.of("b", new Encoding(
                 Optional.of("application/json"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(), List.of(), Optional.empty(), Map.of())),
                 List.of(), Optional.empty(), Map.of()));
         assertThat(form.toOptional().orElseThrow()).isEqualTo(json("{\"a\":\"1\",\"b\":\"{\"}"));

@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.openapifn.json.Json;
+import dev.openapifn.json.JsonPointer;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.model.Encoding;
 import dev.openapifn.model.MediaType;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
+import dev.openapifn.schema.Dialect;
 import dev.openapifn.schema.Schema;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -71,7 +74,7 @@ class BodyWriterTest {
         assertThat(cdata).endsWith("<![CDATA[a]]]]><![CDATA[>b]]></o:order>");
         assertThat(new XmlWriter(SHAPES).write(json("{\"a\":\"x\\\"y\"}"), Optional.empty(), "r")).endsWith("<r><a>x&quot;y</a></r>");
         var namespaced = new XmlWriter(SHAPES).write(json("1"), Optional.of(Schema.at(json("{\"xml\":{\"namespace\":\"urn:x\"}}"),
-            URI.create("mem:/x"), dev.openapifn.json.JsonPointer.ROOT, URI.create("mem:/x"), dev.openapifn.schema.Dialect.DRAFT_2020_12)), "v");
+            URI.create("mem:/x"), JsonPointer.ROOT, URI.create("mem:/x"), Dialect.DRAFT_2020_12)), "v");
         assertThat(namespaced).endsWith("<v xmlns=\"urn:x\">1</v>");
         assertThat(new XmlWriter(SHAPES).write(json("{\"list\":[1,2]}"), Optional.empty(), "r")).endsWith("<r><list>1</list><list>2</list></r>");
         assertThat(new XmlWriter(SHAPES).write(json("{\"customer\":[1]}"), Optional.of(schema("Order")), "r"))
@@ -151,9 +154,9 @@ class BodyWriterTest {
         var tuple = writer.write(json("[1,true,2.5,{\"a\":1},[2]]"), mixed, Optional.empty());
         assertThat(parser.parse(tuple, mixed, media(Optional.of(schema("Tuple")))).toOptional()).contains(json("[1,true,2.5,{\"a\":1},[2]]"));
         var encoded = new MediaType(Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), Map.of(),
-            List.of(new dev.openapifn.model.Encoding(Optional.of("application/json"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
+            List.of(new Encoding(Optional.of("application/json"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
                 List.of(), Optional.empty(), Map.of())),
-            Optional.of(new dev.openapifn.model.Encoding(Optional.of("text/csv"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
+            Optional.of(new Encoding(Optional.of("text/csv"), Map.of(), Optional.empty(), Optional.empty(), false, Map.of(),
                 List.of(), Optional.empty(), Map.of())), Map.of());
         var unlabelled = "--m\r\n\r\n[1]\r\n--m\n\na,b\r\n--m--\r\n";
         assertThat(parser.parse(unlabelled.getBytes(StandardCharsets.UTF_8), mixed, encoded).toOptional()).contains(json("[[1],\"a,b\"]"));

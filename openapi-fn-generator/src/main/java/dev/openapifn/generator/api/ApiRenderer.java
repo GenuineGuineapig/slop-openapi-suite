@@ -14,8 +14,11 @@ import dev.openapifn.http.CollectionFormat;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
+import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.ApiOperation;
+import dev.openapifn.model.Parameter;
 import dev.openapifn.model.ParameterLocation;
+import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.schema.Dialect;
 import dev.openapifn.schema.Schema;
 import java.net.URI;
@@ -315,7 +318,7 @@ public final class ApiRenderer {
         }
         var path = operation.operation().path();
         for (var parameter : operation.operation().parameters()) {
-            if (parameter.in() == ParameterLocation.PATH && parameter.style() == dev.openapifn.model.ParameterStyle.MATRIX) {
+            if (parameter.in() == ParameterLocation.PATH && parameter.style() == ParameterStyle.MATRIX) {
                 path = path.replace("{" + parameter.name() + "}", "*");
             }
         }
@@ -500,7 +503,7 @@ public final class ApiRenderer {
         }
     }
 
-    private static String linkValue(dev.openapifn.json.JsonValue json, TypeRef type, Imports imports) {
+    private static String linkValue(JsonValue json, TypeRef type, Imports imports) {
         return "values.value(" + Names.literal(json.toJson()) + ", " + token(type, imports) + ")";
     }
 
@@ -667,7 +670,7 @@ public final class ApiRenderer {
     }
 
     /** A parameter spec as a constructor call (with the Swagger 2.0 collection format's delimiter, if any). */
-    private static String spec(dev.openapifn.model.Parameter parameter, Imports imports) {
+    private static String spec(Parameter parameter, Imports imports) {
         var delimiter = CollectionFormat.delimiter(parameter.extensions());
         var contentType = parameter.content().keySet().stream().findFirst();
         var optional = imports.ref(OPTIONAL);

@@ -10,6 +10,7 @@ import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.model.Encoding;
 import dev.openapifn.model.MediaType;
+import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.schema.Schema;
 import java.math.BigDecimal;
 import java.nio.charset.Charset;
@@ -46,16 +47,13 @@ public final class BodyParser {
      * schema used for coercion is the media type's {@code schema} (or its {@code itemSchema}).
      */
     public Result<JsonValue, String> parse(byte[] body, ContentType type, MediaType mediaType) {
+        return charset(type).flatMap(charset -> ItemFramer.of(type).map(framer -> sequence(framer.frames(body), type, mediaType))
+            .orElseGet(() -> document(body, new String(body, charset), type, mediaType)));
+    }
+
+    /** A body that is one document (rather than a sequence of items), with its text. */
+    private Result<JsonValue, String> document(byte[] body, String text, ContentType type, MediaType mediaType) {
         var schema = mediaType.schema();
-        var charset = charset(type);
-        if (charset.isErr()) {
-            return Result.err(charset.failure().orElseThrow());
-        }
-        var framer = ItemFramer.of(type);
-        if (framer.isPresent()) {
-            return sequence(framer.get().frames(body), type, mediaType);
-        }
-        var text = new String(body, charset.toOptional().orElseThrow());
         var essence = type.essence();
         if (type.isJson()) {
             return Json.parse(text).mapError(error -> "must be valid JSON: " + error);
@@ -86,11 +84,13 @@ public final class BodyParser {
     private Result<JsonValue, String> sequence(List<ItemFramer.Frame> frames, ContentType type, MediaType mediaType) {
         var items = new ArrayList<JsonValue>();
         for (var frame : frames) {
-            var item = item(frame, type, mediaType, items.size());
-            if (item.isErr()) {
-                return Result.err(item.failure().orElseThrow());
+            // The index of an item counts the items before it, not the frames (some carry none).
+            switch (item(frame, type, mediaType, items.size())) {
+                case Result.Ok(var item) -> item.ifPresent(items::add);
+                case Result.Err(var error) -> {
+                    return Result.err(error);
+                }
             }
-            item.toOptional().orElseThrow().ifPresent(items::add);
         }
         return Result.ok(new JsonArray(items));
     }
@@ -118,16 +118,9 @@ public final class BodyParser {
         if (frame.blank()) {
             return Result.ok(Optional.empty());
         }
-        var charset = charset(type);
-        if (charset.isErr()) {
-            return Result.err(charset.failure().orElseThrow());
-        }
-        var text = new String(frame.content(), charset.toOptional().orElseThrow());
-        if (type.essence().equals("text/event-stream")) {
-            return Result.ok(event(text));
-        }
-        return Json.parse(text.trim()).<Optional<JsonValue>>map(Optional::of)
-            .mapError(error -> "item " + index + " must be valid JSON: " + error);
+        return charset(type).map(charset -> new String(frame.content(), charset)).flatMap(text -> type.essence().equals("text/event-stream")
+            ? Result.ok(event(text))
+            : Json.parse(text.trim()).<Optional<JsonValue>>map(Optional::of).mapError(error -> "item " + index + " must be valid JSON: " + error));
     }
 
     /** An event as an object with {@code event}, {@code data}, {@code id} and {@code retry}; empty when it has no fields. */
@@ -183,7 +176,7 @@ public final class BodyParser {
                 return;
             }
             var parameter = encoding.asParameter(name, schema.flatMap(s -> shapes.property(s, name)));
-            if (parameter.style() == dev.openapifn.model.ParameterStyle.DEEP_OBJECT) {
+            if (parameter.style() == ParameterStyle.DEEP_OBJECT) {
                 members.keySet().removeIf(key -> key.startsWith(name + "["));
             }
             var others = new HashSet<>(names);
@@ -195,15 +188,8 @@ public final class BodyParser {
     }
 
     private Result<JsonValue, String> multipart(byte[] body, ContentType type, Optional<Schema> schema, MediaType mediaType) {
-        var boundary = type.parameter("boundary");
-        if (boundary.isEmpty()) {
-            return Result.err("multipart content type has no boundary");
-        }
-        var parsed = Multipart.parse(body, boundary.get());
-        if (parsed.isErr()) {
-            return Result.err(parsed.failure().orElseThrow());
-        }
-        return Result.ok(formData(parsed.toOptional().orElseThrow(), schema, mediaType.encoding()));
+        return type.parameter("boundary").map(boundary -> Multipart.parse(body, boundary).map(parts -> formData(parts, schema, mediaType.encoding())))
+            .orElseGet(() -> Result.err("multipart content type has no boundary"));
     }
 
     private JsonValue formData(List<Multipart.Part> parts, Optional<Schema> schema, Map<String, Encoding> encodings) {

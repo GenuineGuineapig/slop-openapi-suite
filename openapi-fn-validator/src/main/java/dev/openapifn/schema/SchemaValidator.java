@@ -548,12 +548,10 @@ public final class SchemaValidator {
             if (!content.json()) {
                 return;
             }
-            var parsed = Json.parse(decoded);
-            if (parsed.isErr()) {
-                out.errors.add(error(path, schema, "contentMediaType", "must contain valid JSON"));
-                return;
+            switch (Json.parse(decoded)) {
+                case Result.Err(var invalid) -> out.errors.add(error(path, schema, "contentMediaType", "must contain valid JSON"));
+                case Result.Ok(var parsed) -> content.schema().ifPresent(contentSchema -> out.errors.addAll(evaluate(contentSchema, parsed, path).errors()));
             }
-            content.schema().ifPresent(contentSchema -> out.errors.addAll(evaluate(contentSchema, parsed.toOptional().orElseThrow(), path).errors()));
         }
 
         // -----------------------------------------------------------------------------------------

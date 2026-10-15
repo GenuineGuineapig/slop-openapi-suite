@@ -4,6 +4,7 @@ import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.json.JsonWriter;
+import dev.openapifn.model.Encoding;
 import dev.openapifn.schema.Schema;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -113,7 +114,7 @@ public final class BodyWriter {
     }
 
     /** The specs of the form properties whose encodings say how they are serialized (see {@link dev.openapifn.model.Encoding#serializes()}). */
-    public static Map<String, ParameterSerializer.Spec> formSpecs(Map<String, dev.openapifn.model.Encoding> encodings) {
+    public static Map<String, ParameterSerializer.Spec> formSpecs(Map<String, Encoding> encodings) {
         var specs = new LinkedHashMap<String, ParameterSerializer.Spec>();
         encodings.forEach((name, encoding) -> {
             if (encoding.serializes()) {

@@ -1,5 +1,6 @@
 package dev.openapifn.parse;
 
+import dev.openapifn.fn.Result;
 import dev.openapifn.http.RuntimeExpressions;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonBoolean;
@@ -768,32 +769,15 @@ final class OpenApiParser {
         }
     }
 
+    /** The value a reference points to, or empty when it cannot be resolved (which is reported). */
     private Optional<Cursor> resolveRef(Cursor from, String ref) {
-        var uri = Uris.resolve(from.document().baseUri(), ref);
-        if (uri.isErr()) {
-            error(from, uri.failure().orElseThrow());
-            return Optional.empty();
-        }
-        var target = uri.toOptional().orElseThrow();
-        var document = loader.load(target);
-        if (document.isErr()) {
-            error(from, "Cannot resolve reference '" + ref + "': " + document.failure().orElseThrow().message());
-            return Optional.empty();
-        }
-        var fragment = Uris.fragment(target);
-        var pointer = JsonPointer.parse(fragment);
-        if (pointer.isErr()) {
-            error(from, "Reference '" + ref + "' must use a JSON pointer fragment");
-            return Optional.empty();
-        }
-        var doc = document.toOptional().orElseThrow();
-        var resolvedPointer = pointer.toOptional().orElseThrow();
-        var value = resolvedPointer.resolve(doc.root());
-        if (value.isEmpty()) {
-            error(from, "Reference target '" + ref + "' does not exist");
-            return Optional.empty();
-        }
-        return Optional.of(new Cursor(doc, resolvedPointer, value.get()));
+        return Uris.resolve(from.document().baseUri(), ref)
+            .flatMap(target -> loader.load(target).mapError(problem -> "Cannot resolve reference '" + ref + "': " + problem.message())
+                .flatMap(document -> JsonPointer.parse(Uris.fragment(target)).mapError(invalid -> "Reference '" + ref + "' must use a JSON pointer fragment")
+                    .flatMap(pointer -> Result.fromOptional(pointer.resolve(document.root()), () -> "Reference target '" + ref + "' does not exist")
+                        .map(value -> new Cursor(document, pointer, value)))))
+            .peekError(message -> error(from, message))
+            .toOptional();
     }
 
     // ---------------------------------------------------------------------------------------------

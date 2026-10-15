@@ -9,6 +9,7 @@ import dev.openapifn.spring.servlet.ServletRuntime;
 import dev.openapifn.validation.IssueKeys;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.ValidationIssue;
+import dev.openapifn.validation.ValidationReport;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -92,8 +93,8 @@ class ReceiverDispatchTest {
         var unrelated = RUNTIME.validate(HttpRequest.of("DELETE", "/hooks/orders"));
         assertThat(RUNTIME.receiver(post("{\"trackingId\": \"T1\"}"), unrelated, false, ids)).isEqualTo("orderShipped");
         assertThat(RUNTIME.receiver(post("{\"trackingId\": \"T1\"}"), "not a validation", false, ids)).isEqualTo("orderShipped");
-        assertThat(RUNTIME.receiver(post("{}"), new dev.openapifn.validation.OpenApiValidator.RequestValidation(
-            dev.openapifn.validation.ValidationReport.EMPTY, Optional.empty(), Map.of(), Optional.empty()), false, ids))
+        assertThat(RUNTIME.receiver(post("{}"), new OpenApiValidator.RequestValidation(
+            ValidationReport.EMPTY, Optional.empty(), Map.of(), Optional.empty()), false, ids))
             .isEqualTo("orderShipped");
         // Streamed bodies cannot be inspected: their heads decide.
         assertThat(RUNTIME.receiver(HttpRequest.of("POST", "/hooks/orders").withHeader("Content-Type", "application/json"), null, true, ids))

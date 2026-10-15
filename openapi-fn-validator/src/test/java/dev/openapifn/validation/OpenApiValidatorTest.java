@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import dev.openapifn.http.ItemFramer;
 import dev.openapifn.json.Json;
+import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import java.net.URI;
@@ -78,7 +80,7 @@ class OpenApiValidatorTest {
 
     @Test
     void securitySchemesOfEveryKind() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.1.0
             info: {title: t, version: v}
             paths:
@@ -104,7 +106,7 @@ class OpenApiValidatorTest {
 
     @Test
     void credentialsMustBeWellFormed() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.1.0
             info: {title: t, version: v}
             paths:
@@ -152,7 +154,7 @@ class OpenApiValidatorTest {
 
     @Test
     void emptyValuesStandForUnusedParametersWhereAllowed() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.2.0
             info: {title: t, version: v}
             paths:
@@ -350,7 +352,7 @@ class OpenApiValidatorTest {
     private static List<String> items(OpenApiValidator.ItemValidator validator, String body) {
         var framer = validator.framer();
         var bytes = body.getBytes(StandardCharsets.UTF_8);
-        var frames = new ArrayList<dev.openapifn.http.ItemFramer.Frame>();
+        var frames = new ArrayList<ItemFramer.Frame>();
         for (int i = 0; i < bytes.length; i += 3) {
             frames.addAll(framer.feed(bytes, i, Math.min(3, bytes.length - i)));
         }

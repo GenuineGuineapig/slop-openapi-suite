@@ -4,7 +4,9 @@ import static dev.openapifn.schema.Schemas.json;
 import static dev.openapifn.schema.Schemas.messages;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.json.JsonPointer;
 import dev.openapifn.json.JsonString;
+import dev.openapifn.load.Diagnostic;
 import dev.openapifn.parse.OpenApiDocument;
 import java.net.URI;
 import java.util.List;
@@ -146,7 +148,7 @@ class SchemaValidatorTest {
                        "unloadable": {"$id": "mem:/unloadable.json", "$schema": "mem:/missing.json", "type": "string"},
                        "plain": {"$id": "mem:/plain.json", "$schema": "mem:/plain-meta.json", "type": "string"}}}
             """, D, Map.of("meta.json", metaschema, "plain-meta.json", "{\"$schema\": \"https://json-schema.org/draft/2020-12/schema\"}"));
-        assertThat(build.diagnostics()).extracting(dev.openapifn.load.Diagnostic::message).containsExactlyInAnyOrder(
+        assertThat(build.diagnostics()).extracting(Diagnostic::message).containsExactlyInAnyOrder(
             "The metaschema 'mem:/meta.json' requires the unknown vocabulary 'https://example.com/vocab/required'",
             "Cannot load the metaschema 'mem:/missing.json'; the keywords of the dialect apply");
         var registry = build.registry();
@@ -160,7 +162,7 @@ class SchemaValidatorTest {
         assertThat(validator.validate(registry.resolve(URI.create("mem:/again.json")).orElseThrow(), json("1"))).isEmpty();
         assertThat(validator.validate(registry.resolve(URI.create("mem:/unloadable.json")).orElseThrow(), json("1"))).isNotEmpty();
         assertThat(validator.validate(registry.resolve(URI.create("mem:/plain.json")).orElseThrow(), json("1"))).isNotEmpty();
-        var detached = Schema.at(json("{\"minimum\": 10}"), URI.create("mem:/elsewhere.json"), dev.openapifn.json.JsonPointer.ROOT,
+        var detached = Schema.at(json("{\"minimum\": 10}"), URI.create("mem:/elsewhere.json"), JsonPointer.ROOT,
             URI.create("mem:/elsewhere.json"), D);
         assertThat(validator.validate(detached, json("1"))).isNotEmpty();
     }

@@ -7,6 +7,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
+import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.parse.OpenApiLoader;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.Map;
@@ -196,7 +198,7 @@ class SchemaViewTest {
         assertThat(registry.resolveMapping(pet, "Cat")).isPresent();
         assertThat(registry.resolveMapping(pet, "Fish").orElseThrow().baseUri()).isEqualTo(URI.create("https://example.com/fish"));
         assertThat(api.warnings()).isEmpty();
-        var invalid = new dev.openapifn.parse.OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"), """
+        var invalid = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/api.yaml"), """
             openapi: 3.1.0
             info: {title: t, version: v}
             components:

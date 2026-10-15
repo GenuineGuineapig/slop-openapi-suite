@@ -10,11 +10,15 @@ import dev.openapifn.generator.model.ModelDef.RecordDef;
 import dev.openapifn.generator.model.ModelDef.UnionDef;
 import dev.openapifn.generator.model.ModelDef.WrapperDef;
 import dev.openapifn.json.JsonArray;
+import dev.openapifn.json.JsonBoolean;
 import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.model.ApiOperation;
+import dev.openapifn.model.MediaType;
 import dev.openapifn.parse.OpenApiDocument;
+import dev.openapifn.schema.Discriminator;
 import dev.openapifn.schema.Schema;
 import dev.openapifn.schema.SchemaRegistry;
 import java.math.BigDecimal;
@@ -82,10 +86,10 @@ public final class TypeMapper {
     }
 
     /** The schemas an operation uses directly: parameters, bodies, sequential items and headers. */
-    private static List<Schema> operationSchemas(dev.openapifn.model.ApiOperation operation) {
+    private static List<Schema> operationSchemas(ApiOperation operation) {
         var schemas = new ArrayList<Schema>();
         operation.parameters().forEach(parameter -> parameter.effectiveSchema().ifPresent(schemas::add));
-        var mediaTypes = new ArrayList<dev.openapifn.model.MediaType>();
+        var mediaTypes = new ArrayList<MediaType>();
         operation.operation().requestBody().ifPresent(body -> mediaTypes.addAll(body.content().values()));
         var responses = new ArrayList<>(operation.operation().responses().byStatus().values());
         operation.operation().responses().defaultResponse().ifPresent(responses::add);
@@ -137,7 +141,7 @@ public final class TypeMapper {
 
     /** The generated class a discriminator's {@code defaultMapping} (OpenAPI 3.2) names, if it is one. */
     public Optional<ClassName> defaultMapping(Schema schema) {
-        return schema.discriminator().flatMap(dev.openapifn.schema.Discriminator::defaultMapping).flatMap(value -> registry.resolveMapping(schema, value))
+        return schema.discriminator().flatMap(Discriminator::defaultMapping).flatMap(value -> registry.resolveMapping(schema, value))
             .flatMap(target -> Optional.ofNullable(named.get(registry.deref(target).location()))).filter(ClassName.class::isInstance)
             .map(ClassName.class::cast);
     }
@@ -528,7 +532,7 @@ public final class TypeMapper {
 
     private RecordDef recordDef(Schema schema, ClassName name) {
         return new RecordDef(name, schema, properties(schema, name), additional(schema).map(value -> type(value, name, "AdditionalProperty"))
-            .or(() -> closure(schema).stream().anyMatch(s -> s.keyword("additionalProperties").filter(v -> v.equals(dev.openapifn.json.JsonBoolean.TRUE)).isPresent())
+            .or(() -> closure(schema).stream().anyMatch(s -> s.keyword("additionalProperties").filter(v -> v.equals(JsonBoolean.TRUE)).isPresent())
                 ? Optional.of(TypeRef.OBJECT) : Optional.empty()), typeParameters(schema, name));
     }
 

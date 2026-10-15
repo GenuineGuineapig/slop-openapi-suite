@@ -45,7 +45,7 @@ public record OpenApiLoader(ResourceLoader resources) {
     public Result<OpenApiDocument, List<Diagnostic>> load(String location) {
         if (location.startsWith(Uris.CLASSPATH_SCHEME + ":") || location.matches("^[a-zA-Z][a-zA-Z0-9+.-]+://.*")) {
             return Uris.parse(location)
-                .mapError(message -> List.of(Diagnostic.error(message, URI.create("about:invalid"), dev.openapifn.json.JsonPointer.ROOT)))
+                .mapError(message -> List.of(Diagnostic.error(message, URI.create("about:invalid"), JsonPointer.ROOT)))
                 .flatMap(this::load);
         }
         return load(Path.of(location));
@@ -57,7 +57,7 @@ public record OpenApiLoader(ResourceLoader resources) {
 
     public Result<OpenApiDocument, List<Diagnostic>> load(URI uri) {
         var loader = new DocumentLoader(resources);
-        return loader.load(uri).mapError(List::of).flatMap(document -> interpret(loader, document.uri()));
+        return loader.load(uri).mapError(List::of).flatMap(document -> interpret(loader, document));
     }
 
     /** Parses {@code content} as the root document at {@code uri}; references are loaded through {@link #resources()}. */
@@ -65,12 +65,12 @@ public record OpenApiLoader(ResourceLoader resources) {
         var loader = new DocumentLoader(resources);
         return DocumentParser.parse(uri, content).mapError(List::of).flatMap(document -> {
             loader.register(document);
-            return interpret(loader, uri);
+            return interpret(loader, document);
         });
     }
 
-    private static Result<OpenApiDocument, List<Diagnostic>> interpret(DocumentLoader loader, URI uri) {
-        var document = loader.load(uri).toOptional().orElseThrow();
+    private static Result<OpenApiDocument, List<Diagnostic>> interpret(DocumentLoader loader, Document root) {
+        var document = root;
         var diagnostics = new ArrayList<Diagnostic>();
         if (Swagger2Converter.applies(document.root())) {
             // Swagger / OpenAPI 2.0 is converted to 3.0 first; everything else then works on 3.x.
@@ -95,7 +95,7 @@ public record OpenApiLoader(ResourceLoader resources) {
         if (diagnostics.stream().anyMatch(Diagnostic::isError)) {
             return Result.err(List.copyOf(diagnostics));
         }
-        diagnostics.addAll(Receivers.ambiguities(new OpenApiDocument(uri, model.get(), registry.registry(), diagnostics)));
-        return Result.ok(new OpenApiDocument(uri, model.get(), registry.registry(), diagnostics));
+        diagnostics.addAll(Receivers.ambiguities(new OpenApiDocument(root.uri(), model.get(), registry.registry(), diagnostics)));
+        return Result.ok(new OpenApiDocument(root.uri(), model.get(), registry.registry(), diagnostics));
     }
 }

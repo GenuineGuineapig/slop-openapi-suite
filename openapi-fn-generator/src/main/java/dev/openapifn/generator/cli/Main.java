@@ -1,9 +1,11 @@
 package dev.openapifn.generator.cli;
 
+import dev.openapifn.fn.Result;
 import dev.openapifn.generator.GeneratedFile;
 import dev.openapifn.generator.Generator;
 import dev.openapifn.generator.GeneratorConfig;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -57,14 +59,19 @@ public final class Main {
                 return 2;
             }
         }
-        var api = new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(Path.of(options.get("--spec")));
-        if (api.isErr()) {
-            api.failure().orElseThrow().forEach(err::println);
-            return 1;
-        }
-        api.toOptional().orElseThrow().warnings().forEach(warning -> err.println(warning));
+        return switch (new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(Path.of(options.get("--spec")))) {
+            case Result.Err(var diagnostics) -> {
+                diagnostics.forEach(err::println);
+                yield 1;
+            }
+            case Result.Ok(var api) -> generate(api, options, out, err);
+        };
+    }
+
+    private static int generate(OpenApiDocument api, Map<String, String> options, PrintStream out, PrintStream err) {
+        api.warnings().forEach(err::println);
         var config = config(options);
-        var files = Generator.generate(api.toOptional().orElseThrow(), config);
+        var files = Generator.generate(api, config);
         var output = Path.of(options.get("--output"));
         try {
             GeneratedFile.write(files, output, Path.of(options.getOrDefault("--test-output", output.toString())),

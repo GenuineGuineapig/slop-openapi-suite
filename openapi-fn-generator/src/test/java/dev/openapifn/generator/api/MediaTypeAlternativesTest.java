@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.TypeMapper;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import java.net.URI;
 import java.util.HashSet;
@@ -14,7 +15,7 @@ import org.junit.jupiter.api.Test;
 /** Media types whose bodies have different Java types get a response variant, or a request component, each. */
 class MediaTypeAlternativesTest {
 
-    private static final dev.openapifn.parse.OpenApiDocument API = new OpenApiLoader(ResourceLoaders.inMemory(Map.of()))
+    private static final OpenApiDocument API = new OpenApiLoader(ResourceLoaders.inMemory(Map.of()))
         .parse(URI.create("mem:/api.yaml"), """
             openapi: 3.2.0
             info: {title: t, version: v}

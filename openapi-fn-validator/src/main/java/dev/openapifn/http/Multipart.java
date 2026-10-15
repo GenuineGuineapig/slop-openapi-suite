@@ -65,11 +65,12 @@ public final class Multipart {
                 return Result.err("multipart body is not terminated by the closing boundary");
             }
             int end = body[next - 1] != '\n' ? next : body[next - 2] == '\r' ? next - 2 : next - 1;
-            var part = part(Arrays.copyOfRange(body, position, Math.max(position, end)));
-            if (part.isErr()) {
-                return Result.err(part.failure().orElseThrow());
+            switch (part(Arrays.copyOfRange(body, position, Math.max(position, end)))) {
+                case Result.Ok(var part) -> parts.add(part);
+                case Result.Err(var error) -> {
+                    return Result.err(error);
+                }
             }
-            parts.add(part.toOptional().orElseThrow());
             position = next + delimiter.length;
         }
     }

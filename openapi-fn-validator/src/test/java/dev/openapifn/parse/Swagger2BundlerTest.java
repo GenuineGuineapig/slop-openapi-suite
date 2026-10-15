@@ -8,6 +8,7 @@ import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.Diagnostic;
+import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.validation.OpenApiValidator;
 import java.net.URI;
 import java.util.Map;
@@ -96,7 +97,7 @@ class Swagger2BundlerTest {
                      "plain": {"$ref": "#/definitions/plain"}, "anchor": {"$ref": "plain#anchor"}, "invalid": {"$ref": "%zz"}}}}}}}},
              "definitions": {"plain": {"type": "string"}}}
             """).toJson());
-        var loaded = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(root, """
+        var loaded = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(root, """
             swagger: '2.0'
             info: {title: t, version: v}
             paths:

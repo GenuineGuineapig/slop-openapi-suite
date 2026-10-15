@@ -3,10 +3,13 @@ package dev.openapifn.spring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.openapifn.fn.Result;
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
+import dev.openapifn.security.Credential;
 import dev.openapifn.spring.servlet.OpenApiExceptionHandler;
 import dev.openapifn.spring.servlet.ServletRuntime;
 import dev.openapifn.validation.Level;
@@ -94,8 +97,8 @@ class RuntimeTest {
         var runtimes = new OpenApiRuntimes(List.of(RUNTIME));
         assertThatThrownBy(() -> runtimes.get("other")).isInstanceOf(IllegalArgumentException.class)
             .hasMessage("No OpenAPI description named 'other'; known: [items]");
-        assertThat(runtimes.routing(dev.openapifn.http.HttpRequest.of("GET", "/items/1"))).contains(RUNTIME);
-        assertThat(runtimes.routing(dev.openapifn.http.HttpRequest.of("GET", "/other"))).isEmpty();
+        assertThat(runtimes.routing(HttpRequest.of("GET", "/items/1"))).contains(RUNTIME);
+        assertThat(runtimes.routing(HttpRequest.of("GET", "/other"))).isEmpty();
     }
 
     @Test
@@ -116,9 +119,9 @@ class RuntimeTest {
         assertThatThrownBy(() -> SERVLET.bind(request("GET", "/items/x"), "getItem")).isInstanceOf(OpenApiValidationException.class);
         assertThat(new ServletRuntime(runtime(false)).bind(request("GET", "/items/x"), "getItem").validation().report().hasErrors()).isTrue();
         var cached = request("GET", "/items/8");
-        cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, RUNTIME.validator().validateRequest(dev.openapifn.http.HttpRequest.of("GET", "/items/9")));
+        cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, RUNTIME.validator().validateRequest(HttpRequest.of("GET", "/items/9")));
         assertThat(SERVLET.bind(cached, "getItem").parameter("path", "id", Integer.class)).isEqualTo(9);
-        cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, RUNTIME.validator().validateRequest(dev.openapifn.http.HttpRequest.of("POST", "/items/9")));
+        cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, RUNTIME.validator().validateRequest(HttpRequest.of("POST", "/items/9")));
         assertThat(SERVLET.bind(cached, "getItem").parameter("path", "id", Integer.class)).isEqualTo(8);
         cached.setAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE, "not a validation");
         assertThat(SERVLET.bind(cached, "getItem").parameter("path", "id", Integer.class)).isEqualTo(8);
@@ -252,12 +255,12 @@ class RuntimeTest {
     @Test
     void verifiersCanBeAddedPerRequest() {
         var runtime = runtime(true);
-        var verifying = runtime.withVerifier(credential -> Optional.of(dev.openapifn.fn.Result.err("nope")));
+        var verifying = runtime.withVerifier(credential -> Optional.of(Result.err("nope")));
         assertThat(verifying.name()).isEqualTo(runtime.name());
         assertThat(verifying.api()).isSameAs(runtime.api());
         assertThat(verifying.mapper()).isSameAs(runtime.mapper());
-        assertThat(verifying.validator().options().verifier().verify(new dev.openapifn.security.Credential.ApiKey("key", "k")))
+        assertThat(verifying.validator().options().verifier().verify(new Credential.ApiKey("key", "k")))
             .hasValueSatisfying(result -> assertThat(result.failure()).contains("nope"));
-        assertThat(runtime.validator().options().verifier().verify(new dev.openapifn.security.Credential.ApiKey("key", "k"))).isEmpty();
+        assertThat(runtime.validator().options().verifier().verify(new Credential.ApiKey("key", "k"))).isEmpty();
     }
 }

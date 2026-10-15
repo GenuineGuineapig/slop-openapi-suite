@@ -7,6 +7,7 @@ import dev.openapifn.generator.java.Source;
 import dev.openapifn.generator.java.TypeRef.ClassName;
 import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelDef.Property;
+import dev.openapifn.generator.model.ModelRenderer;
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.HttpRequest;
@@ -15,11 +16,14 @@ import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
+import dev.openapifn.model.Encoding;
 import dev.openapifn.model.Parameter;
 import dev.openapifn.model.ParameterLocation;
+import dev.openapifn.model.SecurityRequirement;
 import dev.openapifn.model.SecurityScheme;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Direction;
+import dev.openapifn.schema.Schema;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import java.nio.charset.StandardCharsets;
@@ -86,7 +90,7 @@ public final class TestRenderer {
         var imports = new Imports(name, Set.of());
         var out = new Source();
         out.javadoc("Contract tests of the generated {@code " + names.controller(group).simpleName() + "}.");
-        out.line("@" + imports.ref(dev.openapifn.generator.model.ModelRenderer.GENERATED) + "(\"openapi-fn\")");
+        out.line("@" + imports.ref(ModelRenderer.GENERATED) + "(\"openapi-fn\")");
         out.line("@SuppressWarnings(\"deprecation\")");
         out.line("@" + imports.ref(reactive ? WEB_FLUX_TEST : WEB_MVC_TEST) + "(" + imports.ref(names.controller(group)) + ".class)");
         out.open("class " + name.simpleName());
@@ -235,7 +239,7 @@ public final class TestRenderer {
     }
 
     /** A Java expression producing an example of {@code property}'s type (a list of item examples for sequential media types). */
-    private Optional<String> value(Property property, Optional<dev.openapifn.schema.Schema> itemSchema, Direction direction, Imports imports,
+    private Optional<String> value(Property property, Optional<Schema> itemSchema, Direction direction, Imports imports,
                                    String mediaType) {
         var type = property.type();
         if (type.equals(ApiRenderer.FILE_PART)) {
@@ -415,7 +419,7 @@ public final class TestRenderer {
             var array = member.getValue() instanceof JsonArray;
             var itemSchema = array ? property.flatMap(shapes::items) : property;
             var binary = itemSchema.map(s -> shapes.closure(s).stream().anyMatch(c -> c.format().filter("binary"::equals).isPresent())).orElse(false);
-            var encoded = Optional.ofNullable(body.mediaType().encoding().get(member.getKey())).flatMap(dev.openapifn.model.Encoding::contentType)
+            var encoded = Optional.ofNullable(body.mediaType().encoding().get(member.getKey())).flatMap(Encoding::contentType)
                 .map(types -> concrete(types.split(",")[0].trim()));
             var values = member.getValue() instanceof JsonArray items ? items.values() : List.of(member.getValue());
             for (var value : values) {
@@ -429,7 +433,7 @@ public final class TestRenderer {
     }
 
     /** Credentials for the first security requirement. */
-    private void security(List<dev.openapifn.model.SecurityRequirement> requirements, Map<String, String> headers, List<Map.Entry<String, String>> query,
+    private void security(List<SecurityRequirement> requirements, Map<String, String> headers, List<Map.Entry<String, String>> query,
                           List<Map.Entry<String, String>> cookies) {
         var schemes = api.model().components().securitySchemes();
         requirements.stream().findFirst().ifPresent(requirement -> requirement.schemes().keySet().forEach(name -> {

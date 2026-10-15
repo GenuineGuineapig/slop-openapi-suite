@@ -3,14 +3,18 @@ package dev.openapifn.parse;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.openapifn.fn.Result;
+import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonString;
 import dev.openapifn.load.Diagnostic;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.model.ApiOperation;
 import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.SecurityScheme;
 import dev.openapifn.model.SpecVersion;
 import dev.openapifn.schema.Dialect;
+import dev.openapifn.schema.Direction;
+import dev.openapifn.schema.SchemaValidator;
 import dev.openapifn.validation.OpenApiValidator;
 import java.net.URI;
 import java.util.HashMap;
@@ -116,7 +120,7 @@ class OpenApiParserTest {
         assertThat(doc.operation("listPets").orElseThrow().operation().responses().forStatus(500).orElseThrow().description())
             .contains("Not found");
         assertThat(doc.webhooks()).singleElement().satisfies(w -> {
-            assertThat(w.kind()).isEqualTo(dev.openapifn.model.ApiOperation.Kind.WEBHOOK);
+            assertThat(w.kind()).isEqualTo(ApiOperation.Kind.WEBHOOK);
             assertThat(w.path()).isEqualTo("newPet");
         });
         assertThat(doc.operation("newPetWebhook")).isPresent();
@@ -449,8 +453,8 @@ class OpenApiParserTest {
         var schema = doc.operations().getFirst().operation().responses().forStatus(200).orElseThrow().content().get("application/json").schema()
             .orElseThrow();
         assertThat(doc.schemas().deref(schema).required()).containsExactly("name");
-        var validator = new dev.openapifn.schema.SchemaValidator(doc.schemas());
-        assertThat(validator.validate(schema, dev.openapifn.json.JsonObject.EMPTY, dev.openapifn.schema.Direction.RESPONSE)).isNotEmpty();
+        var validator = new SchemaValidator(doc.schemas());
+        assertThat(validator.validate(schema, JsonObject.EMPTY, Direction.RESPONSE)).isNotEmpty();
         assertThat(doc.schemas().resolve(schema, "#nowhere")).isEmpty();
     }
 
@@ -705,7 +709,7 @@ class OpenApiParserTest {
         assertThat(doc.callbacks()).satisfiesExactly(event -> {
             assertThat(event.owner()).isEqualTo(doc.operations().getFirst());
             assertThat(event.name()).isEqualTo("onEvent");
-            assertThat(event.operation().kind()).isEqualTo(dev.openapifn.model.ApiOperation.Kind.CALLBACK);
+            assertThat(event.operation().kind()).isEqualTo(ApiOperation.Kind.CALLBACK);
             assertThat(event.operation().path()).isEqualTo("{$request.body#/url}");
             assertThat(event.operation().security()).isEmpty();
         }, ack -> {
@@ -715,8 +719,8 @@ class OpenApiParserTest {
         });
         assertThat(doc.operations().getFirst().security()).hasSize(1);
         assertThat(doc.webhooks().getFirst().security()).isEmpty();
-        assertThat(doc.allOperations()).extracting(dev.openapifn.model.ApiOperation::kind).containsExactly(dev.openapifn.model.ApiOperation.Kind.PATH,
-            dev.openapifn.model.ApiOperation.Kind.WEBHOOK, dev.openapifn.model.ApiOperation.Kind.CALLBACK, dev.openapifn.model.ApiOperation.Kind.CALLBACK);
+        assertThat(doc.allOperations()).extracting(ApiOperation::kind).containsExactly(ApiOperation.Kind.PATH,
+            ApiOperation.Kind.WEBHOOK, ApiOperation.Kind.CALLBACK, ApiOperation.Kind.CALLBACK);
         assertThat(doc.operation("eventHappened")).contains(doc.callbacks().getFirst().operation());
         var ack = doc.callbacks().get(1);
         assertThat(doc.callbacks().getFirst().id()).isEqualTo("eventHappened");
@@ -727,9 +731,9 @@ class OpenApiParserTest {
         assertThat(doc.operation("PUT {$request.header.X-Ack}")).isEmpty();
         var path = doc.operations().getFirst();
         assertThat(List.of(path.requestDirection(), path.responseDirection()))
-            .containsExactly(dev.openapifn.schema.Direction.REQUEST, dev.openapifn.schema.Direction.RESPONSE);
+            .containsExactly(Direction.REQUEST, Direction.RESPONSE);
         assertThat(List.of(ack.operation().requestDirection(), ack.operation().responseDirection()))
-            .containsExactly(dev.openapifn.schema.Direction.RESPONSE, dev.openapifn.schema.Direction.REQUEST);
+            .containsExactly(Direction.RESPONSE, Direction.REQUEST);
         var callback = doc.operations().getFirst().operation().callbacks().get("onEvent");
         assertThat(callback.expressions()).containsOnlyKeys("{$request.body#/url}");
         assertThat(callback.extensions()).containsKey("x-ext");

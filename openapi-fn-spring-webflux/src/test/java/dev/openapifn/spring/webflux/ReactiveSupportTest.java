@@ -3,6 +3,7 @@ package dev.openapifn.spring.webflux;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.spring.OpenApiRuntime;
@@ -58,7 +59,7 @@ class ReactiveSupportTest {
         RUNTIME = new OpenApiRuntime("events", api, OpenApiValidator.of(api), JsonMapper.builder().build(), true);
     }
 
-    private static final OperationMatch MATCH = RUNTIME.validator().validateRequest(dev.openapifn.http.HttpRequest.of("GET", "/events")).match()
+    private static final OperationMatch MATCH = RUNTIME.validator().validateRequest(HttpRequest.of("GET", "/events")).match()
         .orElseThrow();
 
     private final List<ValidationReport> logged = new ArrayList<>();

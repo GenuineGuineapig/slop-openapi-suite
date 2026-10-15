@@ -15,6 +15,7 @@ import dev.openapifn.generator.example.ExampleGenerator;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpResponse;
 import dev.openapifn.http.UrlCodec;
+import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
@@ -129,7 +130,7 @@ class AtlassianDifferentialTest {
                     }
                 }
                 jsonBody(operation).ifPresent(schema -> {
-                    var body = message.body().map(text -> dev.openapifn.json.Json.parse(text).toOptional().orElseThrow());
+                    var body = message.body().map(text -> Json.parse(text).toOptional().orElseThrow());
                     var object = body.filter(JsonObject.class::isInstance).map(JsonObject.class::cast);
                     var required = api.schemas().deref(schema).required();
                     object.flatMap(o -> required.stream().filter(o::has).findFirst()).ifPresent(property -> cases.add(request(name + " body without "

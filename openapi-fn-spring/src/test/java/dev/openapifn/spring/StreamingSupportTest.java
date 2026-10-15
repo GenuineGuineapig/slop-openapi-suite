@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.openapifn.http.ContentType;
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ItemFramer;
+import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
@@ -110,9 +112,9 @@ class StreamingSupportTest {
         // An undescribed sequential type is parsed without validation; unparseable items are skipped.
         assertThat(lenient.bind(request("application/x-ndjson", "{\"a\":1}\n{\n"), "publish").items(new TypeReference<Map<String, Integer>>() { }))
             .containsExactly(Map.of("a", 1));
-        assertThat(runtime.runtime().validateHead(dev.openapifn.http.HttpRequest.of("POST", "/hooks/events").withHeader("Content-Type", "application/jsonl"))
+        assertThat(runtime.runtime().validateHead(HttpRequest.of("POST", "/hooks/events").withHeader("Content-Type", "application/jsonl"))
             .report().isEmpty()).isTrue();
-        assertThat(runtime.runtime().validateHead(dev.openapifn.http.HttpRequest.of("GET", "/hooks/events")).report().hasErrors()).isTrue();
+        assertThat(runtime.runtime().validateHead(HttpRequest.of("GET", "/hooks/events")).report().hasErrors()).isTrue();
     }
 
     @Test
@@ -189,7 +191,7 @@ class StreamingSupportTest {
         var parsed = new ArrayList<String>();
         try (var items = ItemStreams.read(new ByteArrayInputStream("1\n\n2".getBytes(StandardCharsets.UTF_8)), framer, frame -> {
             parsed.add(new String(frame.content(), StandardCharsets.UTF_8));
-            return frame.blank() ? Optional.empty() : Optional.of(JsonValue.class.cast(dev.openapifn.json.JsonNumber.of(new BigDecimal(parsed.size()))));
+            return frame.blank() ? Optional.empty() : Optional.of(JsonValue.class.cast(JsonNumber.of(new BigDecimal(parsed.size()))));
         })) {
             var iterator = items.iterator();
             assertThat(iterator.next()).isNotNull();

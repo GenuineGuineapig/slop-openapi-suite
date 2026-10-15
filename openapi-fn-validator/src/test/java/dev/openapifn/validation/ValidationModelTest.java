@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.openapifn.model.Server;
+import dev.openapifn.model.ServerVariable;
 import dev.openapifn.schema.SchemaValidator;
 import java.util.List;
 import java.util.Map;
@@ -59,12 +60,12 @@ class ValidationModelTest {
         assertThat(Router.prefix(new Server("https://example.com/api?x=1", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/api");
         assertThat(Router.prefix(new Server("v1", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/v1");
         // Variables for the scheme, the host, or the whole origin.
-        var scheme = new dev.openapifn.model.ServerVariable(List.of("https", "http"), "https", Optional.empty(), Map.of());
+        var scheme = new ServerVariable(List.of("https", "http"), "https", Optional.empty(), Map.of());
         assertThat(Router.prefix(new Server("{scheme}://developer.uspto.gov/ds-api", Optional.empty(), Optional.empty(), Map.of("scheme", scheme), Map.of())))
             .isEqualTo("/ds-api");
         assertThat(Router.prefix(new Server("https://{host}/v{major}", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/v{major}");
-        var origin = new dev.openapifn.model.ServerVariable(List.of(), "https://api.example.com", Optional.empty(), Map.of());
-        var segment = new dev.openapifn.model.ServerVariable(List.of(), "v1", Optional.empty(), Map.of());
+        var origin = new ServerVariable(List.of(), "https://api.example.com", Optional.empty(), Map.of());
+        var segment = new ServerVariable(List.of(), "v1", Optional.empty(), Map.of());
         assertThat(Router.prefix(new Server("{base}/pets", Optional.empty(), Optional.empty(), Map.of("base", origin), Map.of()))).isEqualTo("/pets");
         assertThat(Router.prefix(new Server("{version}/pets", Optional.empty(), Optional.empty(), Map.of("version", segment), Map.of())))
             .isEqualTo("/{version}/pets");

@@ -3,6 +3,8 @@ package dev.openapifn.http;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.openapifn.json.Json;
+import dev.openapifn.json.JsonArray;
+import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.model.ParameterLocation;
@@ -71,8 +73,8 @@ class ParameterStylesTest {
 
     private static OpenApiDocument api(String in, String style, boolean explode, JsonValue value) {
         var type = switch (value) {
-            case dev.openapifn.json.JsonArray ignored -> "{type: array, items: {type: string}}";
-            case dev.openapifn.json.JsonObject ignored -> "{type: object, properties: {R: {type: integer}, G: {type: integer}, B: {type: integer}}}";
+            case JsonArray ignored -> "{type: array, items: {type: string}}";
+            case JsonObject ignored -> "{type: object, properties: {R: {type: integer}, G: {type: integer}, B: {type: integer}}}";
             default -> "{type: string}";
         };
         var yaml = """

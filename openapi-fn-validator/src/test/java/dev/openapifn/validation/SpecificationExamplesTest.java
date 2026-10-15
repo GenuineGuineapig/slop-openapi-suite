@@ -2,8 +2,10 @@ package dev.openapifn.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.ParameterSerializer;
+import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonNumber;
 import dev.openapifn.json.JsonObject;
@@ -269,13 +271,13 @@ class SpecificationExamplesTest {
         var icon = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAABGdBTUEAALGPC_xhBQAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAAqADAAQAAAABAAAAAgAAAADO0J6QAAAAEElEQVQIHWP8zwACTGCSAQANHQEDqtPptQAAAABJRU5ErkJggg";
         var withBinary = "name=example&icon=" + icon + "%3D%3D";
         assertThat(text).contains(withJson, withBinary);
-        var jsonData = dev.openapifn.json.Json.parse("""
+        var jsonData = Json.parse("""
             {"id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
              "address": {"streetAddress": "123 Example Dr.", "city": "Somewhere", "state": "CA", "zip": "99999+1234"}}
             """).orElseThrow(e -> new AssertionError(e.toString()));
         var binaryData = JsonObject.builder().put("name", "example").put("icon", icon + "==").build();
-        assertThat(dev.openapifn.http.BodyWriter.form(jsonData)).isEqualTo(withJson);
-        assertThat(dev.openapifn.http.BodyWriter.form(binaryData)).isEqualTo(withBinary);
+        assertThat(BodyWriter.form(jsonData)).isEqualTo(withJson);
+        assertThat(BodyWriter.form(binaryData)).isEqualTo(withBinary);
         var api = new OpenApiLoader(ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/forms.yaml"), """
             openapi: 3.2.0
             info: {title: t, version: v}

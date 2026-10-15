@@ -2,6 +2,7 @@ package dev.openapifn.spring.servlet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.http.HttpRequest;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.validation.OpenApiValidator;
@@ -34,7 +35,7 @@ class ValidatingResponseWrapperTest {
                         application/jsonl: {itemSchema: {type: object, required: [n]}}
                         text/plain: {schema: {type: string}}
             """).orElseThrow(d -> new AssertionError(d.toString())));
-    private static final OperationMatch MATCH = VALIDATOR.validateRequest(dev.openapifn.http.HttpRequest.of("GET", "/events")).match().orElseThrow();
+    private static final OperationMatch MATCH = VALIDATOR.validateRequest(HttpRequest.of("GET", "/events")).match().orElseThrow();
 
     private final List<ValidationReport> logged = new ArrayList<>();
 

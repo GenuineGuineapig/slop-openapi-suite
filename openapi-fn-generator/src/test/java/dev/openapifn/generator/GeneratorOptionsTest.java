@@ -2,6 +2,8 @@ package dev.openapifn.generator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.openapifn.load.Document;
+import dev.openapifn.load.DocumentParser;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,9 +55,9 @@ class GeneratorOptionsTest {
     @Test
     void bundlesDocumentsOfOtherHostsAsRemote() {
         var root = URI.create("https://api.example.com/v1/openapi.yaml");
-        var documents = new LinkedHashMap<URI, dev.openapifn.load.Document>();
+        var documents = new LinkedHashMap<URI, Document>();
         for (var uri : List.of(root, URI.create("https://api.example.com/v1/schemas/pet.yaml"), URI.create("https://schemas.example.com/x.yaml"))) {
-            documents.put(uri, dev.openapifn.load.DocumentParser.parse(uri, "{}").orElseThrow(e -> new AssertionError(e.toString())));
+            documents.put(uri, DocumentParser.parse(uri, "{}").orElseThrow(e -> new AssertionError(e.toString())));
         }
         var bundle = Bundle.of("api", root, documents, Optional.empty(), List.of(new Bundle.Receiver("hook", "POST hook", "/webhooks/hook")));
         assertThat(bundle.location()).isEqualTo("classpath:META-INF/openapi-fn/api/openapi.yaml");

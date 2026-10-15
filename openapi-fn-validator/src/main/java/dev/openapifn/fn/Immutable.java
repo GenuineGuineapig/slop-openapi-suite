@@ -14,7 +14,7 @@ public final class Immutable {
 
     /** An unmodifiable copy of {@code map} that keeps its iteration order. */
     public static <K, V> Map<K, V> map(Map<K, V> map) {
-        return Collections.unmodifiableMap(new LinkedHashMap<>(map));
+        return map.isEmpty() ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(map));
     }
 
     /** An unmodifiable copy of {@code list}; unlike {@link List#copyOf}, it permits {@code null} elements. */

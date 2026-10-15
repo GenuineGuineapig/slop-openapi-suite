@@ -313,32 +313,33 @@ public final class SchemaRegistry {
         void resolvePending() {
             while (!pending.isEmpty()) {
                 var entry = pending.poll();
-                var from = entry.getKey();
-                var ref = entry.getValue();
-                var target = Uris.resolve(from.baseUri(), ref);
-                if (target.isErr()) {
-                    report(from, target.failure().orElseThrow());
-                    continue;
+                switch (Uris.resolve(entry.getKey().baseUri(), entry.getValue())) {
+                    case Result.Err(var error) -> report(entry.getKey(), error);
+                    case Result.Ok(var uri) -> resolve(entry.getKey(), entry.getValue(), uri);
                 }
-                var uri = target.toOptional().orElseThrow();
-                loader.loaded(uri).ifPresent(this::visitDocument);
-                var resolved = live.lookup(uri);
-                if (resolved.isEmpty() && !resources.containsKey(Uris.withoutFragment(uri))) {
-                    var document = loader.load(uri);
-                    if (document.isErr()) {
-                        report(from, "Cannot resolve '" + ref + "': " + document.failure().orElseThrow().message());
-                        continue;
-                    }
-                    visitDocument(document.toOptional().orElseThrow());
-                    resolved = live.lookup(uri);
-                }
-                if (resolved.isEmpty()) {
-                    resolved = documentFallback(from, ref).flatMap(live::lookup);
-                    resolved.ifPresent(fallback -> warn(from, "'" + ref + "' does not exist in the schema resource " + Uris.withoutFragment(uri)
-                        + "; resolved against the document instead"));
-                }
-                resolved.ifPresentOrElse(this::visit, () -> report(from, "Cannot resolve '" + ref + "': target not found"));
             }
+        }
+
+        /** Visits the schema {@code ref} (resolved to {@code uri}) refers to, loading its document if need be. */
+        private void resolve(Schema from, String ref, URI uri) {
+            loader.loaded(uri).ifPresent(this::visitDocument);
+            var resolved = live.lookup(uri);
+            if (resolved.isEmpty() && !resources.containsKey(Uris.withoutFragment(uri))) {
+                switch (loader.load(uri)) {
+                    case Result.Err(var problem) -> {
+                        report(from, "Cannot resolve '" + ref + "': " + problem.message());
+                        return;
+                    }
+                    case Result.Ok(var document) -> visitDocument(document);
+                }
+                resolved = live.lookup(uri);
+            }
+            if (resolved.isEmpty()) {
+                resolved = documentFallback(from, ref).flatMap(live::lookup);
+                resolved.ifPresent(fallback -> warn(from, "'" + ref + "' does not exist in the schema resource " + Uris.withoutFragment(uri)
+                    + "; resolved against the document instead"));
+            }
+            resolved.ifPresentOrElse(this::visit, () -> report(from, "Cannot resolve '" + ref + "': target not found"));
         }
 
         /**

@@ -1,7 +1,8 @@
 package dev.openapifn.generator.model;
 
-import dev.openapifn.generator.java.TypeRef;
+import dev.openapifn.fn.Immutable;
 import dev.openapifn.generator.java.TypeRef.ClassName;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.schema.Schema;
 import java.util.List;
@@ -77,7 +78,7 @@ public sealed interface ModelDef {
         implements ModelDef {
 
         public EnumDef {
-            constants = dev.openapifn.fn.Immutable.map(constants);
+            constants = Immutable.map(constants);
             descriptions = Map.copyOf(descriptions);
         }
     }
@@ -96,7 +97,7 @@ public sealed interface ModelDef {
                     boolean exactlyOne) implements ModelDef {
         public UnionDef {
             members = List.copyOf(members);
-            names = dev.openapifn.fn.Immutable.map(names);
+            names = Immutable.map(names);
         }
     }
 
@@ -125,7 +126,7 @@ public sealed interface ModelDef {
         implements ModelDef {
         public ParentDef {
             properties = List.copyOf(properties);
-            subtypes = dev.openapifn.fn.Immutable.map(subtypes);
+            subtypes = Immutable.map(subtypes);
         }
 
         public ClassName defaultName() {

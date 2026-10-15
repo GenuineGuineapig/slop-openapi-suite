@@ -12,6 +12,7 @@ import dev.openapifn.http.ParameterParser;
 import dev.openapifn.http.SchemaShapes;
 import dev.openapifn.http.UrlCodec;
 import dev.openapifn.json.JsonArray;
+import dev.openapifn.json.JsonDigest;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonPointer;
 import dev.openapifn.json.JsonString;
@@ -408,23 +409,22 @@ public final class OpenApiValidator {
             var location = parameter.in().value() + "." + parameter.name();
             var others = new LinkedHashSet<>(queryNames);
             others.remove(parameter.name());
-            var parsed = parameters.parse(parameter, sources, others);
-            if (parsed.isErr()) {
-                issues.add(prefix + ".invalid", parsed.failure().orElseThrow(), location);
-                continue;
+            switch (parameters.parse(parameter, sources, others)) {
+                case Result.Err(var error) -> issues.add(prefix + ".invalid", error, location);
+                // With allowEmptyValue, an empty query value stands for a parameter that is not used.
+                case Result.Ok(var parsed) -> parsed
+                    .filter(value -> !(parameter.in() == ParameterLocation.QUERY && parameter.allowEmptyValue() && value.equals(JsonString.of(""))))
+                    .ifPresentOrElse(value -> {
+                        values.put(location, value);
+                        claimQuery(parameter, value, claimed);
+                        parameter.effectiveSchema().ifPresent(schema -> issues.schema(prefix + ".schema", location, schemas.validate(schema, value)));
+                    }, () -> {
+                        if (parameter.required()) {
+                            issues.add(prefix + ".missing", "required " + parameter.in().value() + " parameter '" + parameter.name() + "' is missing",
+                                location);
+                        }
+                    });
             }
-            // With allowEmptyValue, an empty query value stands for a parameter that is not used.
-            var value = parsed.toOptional().orElseThrow()
-                .filter(v -> !(parameter.in() == ParameterLocation.QUERY && parameter.allowEmptyValue() && v.equals(JsonString.of(""))));
-            if (value.isEmpty()) {
-                if (parameter.required()) {
-                    issues.add(prefix + ".missing", "required " + parameter.in().value() + " parameter '" + parameter.name() + "' is missing", location);
-                }
-                continue;
-            }
-            values.put(location, value.get());
-            claimQuery(parameter, value.get(), claimed);
-            parameter.effectiveSchema().ifPresent(schema -> issues.schema(prefix + ".schema", location, schemas.validate(schema, value.get())));
         }
         sources.query().stream().map(Map.Entry::getKey).filter(name -> !claimed.contains(name)).distinct()
             .forEach(name -> issues.add(IssueKeys.REQUEST_QUERY_UNKNOWN, "query parameter '" + name + "' is not described", "query." + name));
@@ -466,22 +466,21 @@ public final class OpenApiValidator {
         return Optional.empty();
     }
 
+    /** Checks that one of the media types the operation responds with is acceptable, when the request says what is. */
     private void accept(ApiOperation operation, HttpRequest request, Issues issues) {
-        var accept = request.headers().first("Accept");
-        var produced = new LinkedHashSet<String>();
-        var responses = operation.operation().responses();
-        responses.byStatus().values().forEach(response -> produced.addAll(response.content().keySet()));
-        responses.defaultResponse().ifPresent(response -> produced.addAll(response.content().keySet()));
-        if (accept.isEmpty() || produced.isEmpty()) {
-            return;
-        }
-        var ranges = acceptRanges(accept.get());
-        var acceptable = produced.stream().flatMap(type -> ContentType.parse(type).stream())
-            .anyMatch(type -> ranges.stream().anyMatch(range -> range.includes(type) || type.includes(range)));
-        if (!acceptable) {
-            issues.add(IssueKeys.REQUEST_ACCEPT_NOT_ACCEPTABLE, "none of the response media types " + produced + " is acceptable for '"
-                + accept.get() + "'", "header.Accept");
-        }
+        request.headers().first("Accept").ifPresent(accept -> {
+            var produced = new LinkedHashSet<String>();
+            var responses = operation.operation().responses();
+            responses.byStatus().values().forEach(response -> produced.addAll(response.content().keySet()));
+            responses.defaultResponse().ifPresent(response -> produced.addAll(response.content().keySet()));
+            var ranges = acceptRanges(accept);
+            var acceptable = produced.isEmpty() || produced.stream().flatMap(type -> ContentType.parse(type).stream())
+                .anyMatch(type -> ranges.stream().anyMatch(range -> range.includes(type) || type.includes(range)));
+            if (!acceptable) {
+                issues.add(IssueKeys.REQUEST_ACCEPT_NOT_ACCEPTABLE, "none of the response media types " + produced + " is acceptable for '"
+                    + accept + "'", "header.Accept");
+            }
+        });
     }
 
     private static List<ContentType> acceptRanges(String accept) {
@@ -561,19 +560,16 @@ public final class OpenApiValidator {
             }
             var location = locationPrefix + name;
             var parameter = header.asParameter(name);
-            var value = parameters.parse(parameter, new ParameterParser.Sources(Map.of(), List.of(), "", headers, List.of()), Set.of());
-            if (value.isErr()) {
-                issues.add(key + ".invalid", value.failure().orElseThrow(), location);
-                return;
+            switch (parameters.parse(parameter, new ParameterParser.Sources(Map.of(), List.of(), "", headers, List.of()), Set.of())) {
+                case Result.Err(var error) -> issues.add(key + ".invalid", error, location);
+                case Result.Ok(var parsed) -> parsed.ifPresentOrElse(
+                    value -> parameter.effectiveSchema().ifPresent(schema -> issues.schema(key + ".schema", location, schemas.validate(schema, value))),
+                    () -> {
+                        if (header.required()) {
+                            issues.add(key + ".missing", "required header '" + name + "' is missing", location);
+                        }
+                    });
             }
-            var parsed = value.toOptional().orElseThrow();
-            if (parsed.isEmpty()) {
-                if (header.required()) {
-                    issues.add(key + ".missing", "required header '" + name + "' is missing", location);
-                }
-                return;
-            }
-            parameter.effectiveSchema().ifPresent(schema -> issues.schema(key + ".schema", location, schemas.validate(schema, parsed.get())));
         });
     }
 
@@ -584,13 +580,14 @@ public final class OpenApiValidator {
      * and {@code itemEncoding}.
      */
     private void parts(byte[] content, ContentType type, MediaType mediaType, String side, Issues issues) {
+        // The body parsed as multipart already, so its parts do.
         if (type.subtype().equals("form-data")) {
-            Multipart.parse(content, type.parameter("boundary").orElseThrow()).toOptional().orElseThrow()
+            type.parameter("boundary").stream().flatMap(boundary -> Multipart.parse(content, boundary).stream()).flatMap(List::stream)
                 .forEach(part -> part(part, part.name().map(mediaType.encoding()::get), "body." + part.name().orElse(""), side, issues));
             return;
         }
-        var parts = ItemFramer.of(type).orElseThrow().frames(content).stream().filter(frame -> frame.content().length > 0)
-            .map(frame -> Multipart.part(frame.content()).toOptional().orElseThrow()).toList();
+        var parts = ItemFramer.of(type).stream().flatMap(framer -> framer.frames(content).stream()).filter(frame -> frame.content().length > 0)
+            .flatMap(frame -> Multipart.part(frame.content()).stream()).toList();
         for (int i = 0; i < parts.size(); i++) {
             part(parts.get(i), positionalEncoding(mediaType, i), "body." + i, side, issues);
         }
@@ -644,12 +641,13 @@ public final class OpenApiValidator {
         }
         var contentType = described.get().getKey();
         var mediaType = described.get().getValue();
-        var parsed = bodies.parse(content, contentType, mediaType);
-        if (parsed.isErr()) {
-            issues.add(side + ".body.invalid", parsed.failure().orElseThrow(), "body");
-            return Optional.empty();
-        }
-        var value = parsed.toOptional().orElseThrow();
+        var parsed = bodies.parse(content, contentType, mediaType).peekError(error -> issues.add(side + ".body.invalid", error, "body")).toOptional();
+        parsed.ifPresent(value -> conform(value, content, contentType, mediaType, direction, side, issues));
+        return parsed;
+    }
+
+    /** Checks a parsed body: the parts of multipart bodies, the items of sequences and the whole against the schemas. */
+    private void conform(JsonValue value, byte[] content, ContentType contentType, MediaType mediaType, Direction direction, String side, Issues issues) {
         if (contentType.type().equals("multipart")) {
             parts(content, contentType, mediaType, side, issues);
         }
@@ -662,7 +660,6 @@ public final class OpenApiValidator {
             }
         }
         mediaType.schema().ifPresent(schema -> issues.schema(key, "body", schemas.validate(schema, value, direction)));
-        return Optional.of(value);
     }
 
     /**
@@ -694,7 +691,7 @@ public final class OpenApiValidator {
         private final String side;
         private final List<Schema> sequence;
         private final boolean unique;
-        private final Set<dev.openapifn.json.JsonDigest> seen = new HashSet<>();
+        private final Set<JsonDigest> seen = new HashSet<>();
         private final Map<Schema, Integer> contained = new LinkedHashMap<>();
         private int index;
 
@@ -721,12 +718,14 @@ public final class OpenApiValidator {
         /** Parses and validates the item of the next frame. */
         public Item validate(ItemFramer.Frame frame) {
             var issues = new Issues();
-            var parsed = bodies.item(frame, type, mediaType, index);
-            if (parsed.isErr()) {
-                issues.add(side + ".body.invalid", parsed.failure().orElseThrow(), "body");
-                return new Item(Optional.empty(), issues.report());
+            Optional<JsonValue> value;
+            switch (bodies.item(frame, type, mediaType, index)) {
+                case Result.Err(var error) -> {
+                    issues.add(side + ".body.invalid", error, "body");
+                    return new Item(Optional.empty(), issues.report());
+                }
+                case Result.Ok(var item) -> value = item;
             }
-            var value = parsed.toOptional().orElseThrow();
             if (value.isPresent()) {
                 var position = index++;
                 if (type.type().equals("multipart")) {
@@ -749,7 +748,7 @@ public final class OpenApiValidator {
         /** The constraints on the sequence that an item can violate as it arrives. */
         private void sequenceItem(JsonValue value, int position, Issues issues) {
             var location = "body/" + position;
-            var duplicate = unique && !seen.add(dev.openapifn.json.JsonDigest.of(value));
+            var duplicate = unique && !seen.add(JsonDigest.of(value));
             for (var schema : sequence) {
                 var key = side + ".body.schema.";
                 schema.number("maxItems").filter(max -> position == max.intValue())

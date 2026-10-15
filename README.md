@@ -414,6 +414,16 @@ in 3.0. Each sample also builds and passes its tests as a project outside this r
 openapi-fn taken from the local Maven repository (`tools/consumer.sh`). See
 [docs/spec-coverage.md](docs/spec-coverage.md#how-this-is-verified).
 
+## Performance
+
+The validator reads each schema's keywords once into an immutable plan, keeps schemas, references
+and operations in indexes, and builds paths and headers without copying. `tools/benchmark.sh`
+validates example requests and responses of the Train Travel, Scalar Galaxy and Redocly Museum
+descriptions (routing, credentials, parameters and JSON bodies) in a loop: on an Apple silicon
+laptop, about 140,000 request/response pairs per second on one thread. The Train Travel sample
+application serves about 43,000 validated requests per second (requests and responses validated,
+32 concurrent connections).
+
 ## Modules
 
 The runtime and the build are served by separate libraries: the validator, with the Spring

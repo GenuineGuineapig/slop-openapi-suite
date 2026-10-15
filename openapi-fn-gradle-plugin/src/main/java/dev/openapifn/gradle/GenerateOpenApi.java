@@ -3,9 +3,11 @@ package dev.openapifn.gradle;
 import dev.openapifn.generator.GeneratedFile;
 import dev.openapifn.generator.Generator;
 import dev.openapifn.generator.GeneratorConfig;
+import dev.openapifn.json.JsonWriter;
 import dev.openapifn.load.Diagnostic;
 import dev.openapifn.load.ResourceLoader;
 import dev.openapifn.load.ResourceLoaders;
+import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -120,14 +122,14 @@ public abstract class GenerateOpenApi extends DefaultTask {
      * (generation then reports why).
      */
     public static String fingerprint(Path spec, ResourceLoader loader) {
-        var loaded = new OpenApiLoader(loader).load(spec);
-        if (loaded.isErr()) {
-            return "";
-        }
+        return new OpenApiLoader(loader).load(spec).map(GenerateOpenApi::fingerprint).orElse("");
+    }
+
+    private static String fingerprint(OpenApiDocument api) {
         var remote = new TreeMap<String, String>();
-        loaded.toOptional().orElseThrow().schemas().documents().forEach((uri, document) -> {
+        api.schemas().documents().forEach((uri, document) -> {
             if (Set.of("http", "https").contains(uri.getScheme())) {
-                remote.put(uri.toString(), dev.openapifn.json.JsonWriter.compact(document.root()));
+                remote.put(uri.toString(), JsonWriter.compact(document.root()));
             }
         });
         if (remote.isEmpty()) {
@@ -142,9 +144,8 @@ public abstract class GenerateOpenApi extends DefaultTask {
     @TaskAction
     public void generate() throws IOException {
         var location = getSpec().get().getAsFile().toPath();
-        var loaded = new OpenApiLoader(loader(getRemoteCache().get().getAsFile().toPath(), getRemoteMaxAge().get(), getOffline().get())).load(location);
-        var api = loaded.toOptional().orElseThrow(() -> new GradleException("Invalid OpenAPI description " + location + ":\n"
-            + describe(loaded.failure().orElseThrow())));
+        var api = new OpenApiLoader(loader(getRemoteCache().get().getAsFile().toPath(), getRemoteMaxAge().get(), getOffline().get())).load(location)
+            .orElseThrow(diagnostics -> new GradleException("Invalid OpenAPI description " + location + ":\n" + describe(diagnostics)));
         api.warnings().forEach(warning -> getLogger().warn("openapi-fn: {}", warning));
         var config = GeneratorConfig.of(getApiName().get(), getPackageName().get())
             .withServer(getServer().get())
