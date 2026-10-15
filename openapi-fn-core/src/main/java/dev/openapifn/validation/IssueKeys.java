@@ -10,6 +10,8 @@ public final class IssueKeys {
     public static final String REQUEST_OPERATION_NOT_ALLOWED = "request.operation.notAllowed";
     public static final String REQUEST_SECURITY_MISSING = "request.security.missing";
     public static final String REQUEST_SECURITY_INVALID = "request.security.invalid";
+    /** Verified credentials that lack scopes (or roles) the operation requires. */
+    public static final String REQUEST_SECURITY_FORBIDDEN = "request.security.forbidden";
     /** Followed by the parameter location, e.g. {@code request.parameter.query}. */
     public static final String REQUEST_PARAMETER = "request.parameter";
     public static final String REQUEST_QUERY_UNKNOWN = "request.parameter.query.unknown";
@@ -36,14 +38,15 @@ public final class IssueKeys {
 
     /**
      * The HTTP status a failed request validation should be answered with, based on the first
-     * error key: 404 for unknown paths, 405 for unsupported methods, 401 for missing
-     * credentials, 415 and 406 for content negotiation and 400 otherwise.
+     * error key: 404 for unknown paths, 405 for unsupported methods, 401 for missing or rejected
+     * credentials, 403 for missing scopes, 415 and 406 for content negotiation and 400 otherwise.
      */
     public static int status(String key) {
         return switch (key) {
             case REQUEST_PATH_MISSING -> 404;
             case REQUEST_OPERATION_NOT_ALLOWED -> 405;
             case REQUEST_SECURITY_MISSING, REQUEST_SECURITY_INVALID -> 401;
+            case REQUEST_SECURITY_FORBIDDEN -> 403;
             case REQUEST_CONTENT_TYPE_NOT_ALLOWED -> 415;
             case REQUEST_ACCEPT_NOT_ACCEPTABLE -> 406;
             default -> 400;

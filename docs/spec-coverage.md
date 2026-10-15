@@ -44,7 +44,7 @@ usually because the specification gives it none (descriptions, documentation lin
 | `HEAD` falling back to `GET` | Validation (configurable) |
 | `operationId` (unique; duplicates are errors) | Names Java methods. Synthesized as `METHOD path` when missing |
 | `deprecated` | Codegen: `@Deprecated` on operations, models and properties |
-| `security` (operation, global, empty) | Validation: credentials present for one alternative (API key header/query/cookie, HTTP schemes, OAuth 2 and OpenID Connect bearer tokens; `mutualTLS` counts as satisfied). Generated tests send credentials |
+| `security` (operation, global, empty), scopes and (3.1+) roles | Validation: one alternative's credentials must be present, well formed (API key header/query/cookie, HTTP schemes, OAuth 2 and OpenID Connect bearer tokens, `mutualTLS` client certificates), verified (`CredentialVerifier`, or Spring Security's authentication) and grant the required scopes or roles (401 / 403). Generated tests send credentials |
 | `callbacks` | Validation (by operation); codegen generates receivers, senders, and methods computing the callback URL from the subscribing request (and response). Callback ids are unique (`<owner> <name> METHOD`) |
 | `links` | Load-time checks (targets exist, runtime expressions are well-formed). Codegen: a client method per link builds the linked operation's request from a request and its response (`operationId`, or `operationRef` to a path or webhook operation); `server` is noted in its Javadoc |
 | Runtime expressions | `RuntimeExpressions` (core) parses and evaluates every form of the ABNF, including `{…}` templates; generated callback URL methods use them |
@@ -94,7 +94,7 @@ usually because the specification gives it none (descriptions, documentation lin
 
 | Feature | Support |
 |---|---|
-| `apiKey` (header, query, cookie), `http` (basic, bearer, others), `oauth2` (all flows including `deviceAuthorization` 3.2, `oauth2MetadataUrl`), `openIdConnect`, `mutualTLS`, `deprecated` (3.2) | Model; validation checks credentials are present (see above). Verifying credentials is left to Spring Security |
+| `apiKey` (header, query, cookie), `http` (basic, bearer, others), `oauth2` (all flows including `deviceAuthorization` 3.2, `oauth2MetadataUrl`), `openIdConnect`, `mutualTLS`, `deprecated` (3.2) | Validation extracts each scheme's credential and verifies it (see above): with `CredentialVerifier`s, or with what Spring Security authenticated the request as |
 
 ## Specification extensions
 

@@ -217,4 +217,19 @@ class ServletSupportTest {
         assertThatThrownBy(() -> ServletMessages.toHttpRequest(throwing)).isInstanceOf(UncheckedIOException.class).hasRootCauseMessage("closed");
         assertThat(List.of(dir)).isNotEmpty();
     }
+
+    @Test
+    void clientCertificatesAreKnownWhereTlsEnds() throws Exception {
+        java.security.cert.X509Certificate certificate;
+        try (var pem = ServletSupportTest.class.getResourceAsStream("/security/client.pem")) {
+            certificate = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(pem);
+        }
+        var plain = new MockHttpServletRequest("GET", "/x");
+        assertThat(ServletMessages.toHttpRequest(plain).clientCertificates()).isEmpty();
+        var secure = new MockHttpServletRequest("GET", "/x");
+        secure.setSecure(true);
+        assertThat(ServletMessages.toHttpRequest(secure).clientCertificates()).contains(List.of());
+        secure.setAttribute("jakarta.servlet.request.X509Certificate", new java.security.cert.X509Certificate[] {certificate});
+        assertThat(ServletMessages.head(secure).clientCertificates()).contains(List.of(certificate));
+    }
 }

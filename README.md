@@ -223,7 +223,7 @@ operation (or webhook/callback receiver):
 
 * parameters in every style
 * request bodies of every media type, against JSON Schema
-* security requirements (credentials present)
+* security requirements: credentials present, verified, and granting the required scopes or roles
 * the `Accept` header
 * the response, as it leaves the application
 
@@ -244,7 +244,7 @@ openapi-fn:
       location: classpath:other.yaml  # or register a description that was not generated
       receivers.newPet.path: /hooks/pets
   validation:
-    request.enabled: true             # reject invalid requests (400/401/404/405/406/415)
+    request.enabled: true             # reject invalid requests (400/401/403/404/405/406/415)
     response.enabled: true
     response.mode: LOG                # or FAIL: replace invalid responses with a 500 problem
     reject-unknown-paths: false       # 404 for paths no description covers
@@ -262,6 +262,37 @@ openapi-fn:
 Issue keys are stable and hierarchical, for example `request.body.schema.required`,
 `response.header.missing` or `request.security.missing`. `levels` downgrades or ignores them by
 prefix.
+
+### Credentials
+
+Every security requirement is checked: the credentials of one alternative must be present and
+well formed, and they are verified:
+
+* **With Spring Security**, the validation filters run after its filter chain and use what it
+  authenticated the request as (Spring MVC and WebFlux). Unauthenticated requests are rejected with
+  401; the operation's scopes or roles must be among the authorities (`SCOPE_pets:write` grants
+  `pets:write`, `ROLE_admin` grants `admin`), or the request is rejected with 403. Turn this off
+  with `openapi-fn.security.spring-security: false`.
+* **`CredentialVerifier` beans** verify credentials themselves, before Spring Security. They get the
+  credential as presented (API key, basic user and password, bearer token, other `Authorization`
+  credentials, TLS client certificate chain) and return what it grants, a rejection, or nothing for
+  credentials they leave to the next verifier:
+
+  ```java
+  @Bean
+  CredentialVerifier partnerKeys(PartnerRepository partners) {
+      return CredentialVerifier.forScheme("apiKey", credential -> partners.byKey(((Credential.ApiKey) credential).value())
+          .map(partner -> Result.<Grant, String>ok(new Grant(partner.name(), partner.roles())))
+          .orElseGet(() -> Result.err("unknown API key")));
+  }
+  ```
+
+* **`mutualTLS`** requires a client certificate when the application terminates TLS itself; the
+  servlet container or Netty has already validated it against the trust store, and a verifier can
+  check its subject. Behind a proxy that terminates TLS, the proxy is responsible for it.
+
+Without Spring Security or verifiers, credentials are checked for being present and well formed,
+which is what a gateway in front of the application needs.
 
 ## Without Spring, and without generated code
 
@@ -344,9 +375,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 
 ## Limitations
 
-* **Credentials are checked for presence and syntax, not verified.** Basic credentials must be
-  base64 `user:password`, bearer tokens RFC 6750 tokens; verifying them is Spring Security's job.
-  `mutualTLS` requirements count as satisfied.
 * **Streams are validated as they pass.** An item is passed on once it is complete and valid;
   `uniqueItems` remembers the items seen so far. `OpenApiClientValidationInterceptor`, for
   `RestClient`s other than the generated clients', sees whole request bodies, because Spring

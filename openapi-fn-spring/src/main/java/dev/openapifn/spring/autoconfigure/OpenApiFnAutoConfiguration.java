@@ -4,10 +4,12 @@ import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.load.Uris;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.schema.SchemaValidator;
+import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.spring.OpenApiRuntime;
 import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.StreamedBodyConverter;
 import dev.openapifn.spring.client.OpenApiClients;
+import dev.openapifn.spring.security.SpringSecurityCredentials;
 import dev.openapifn.spring.servlet.OpenApiExceptionHandler;
 import dev.openapifn.spring.servlet.OpenApiValidationFilter;
 import dev.openapifn.validation.LevelPolicy;
@@ -23,11 +25,14 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.converter.HttpMessageConverters;
 import org.springframework.web.client.RestClient;
@@ -45,7 +50,8 @@ public class OpenApiFnAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public OpenApiRuntimes openApiRuntimes(OpenApiFnProperties properties, ObjectProvider<JsonMapper> mapper, ResourceLoader resourceLoader) {
+    public OpenApiRuntimes openApiRuntimes(OpenApiFnProperties properties, ObjectProvider<JsonMapper> mapper, ResourceLoader resourceLoader,
+                                           ObjectProvider<CredentialVerifier> verifiers) {
         var classLoader = Objects.requireNonNullElse(resourceLoader.getClassLoader(), OpenApiFnAutoConfiguration.class.getClassLoader());
         var documents = ResourceLoaders.bySchemes(Map.of("file", ResourceLoaders.fileSystem(), Uris.CLASSPATH_SCHEME, ResourceLoaders.classpath(classLoader)));
         var jsonMapper = mapper.getIfAvailable(JsonMapper::new);
@@ -54,6 +60,8 @@ public class OpenApiFnAutoConfiguration {
         for (var level : validation.levels().entrySet()) {
             levels = levels.with(level.getKey(), level.getValue());
         }
+        // The application's verifiers in order; each verifies the credentials the ones before it decline.
+        var verifier = verifiers.orderedStream().reduce(CredentialVerifier::orElse).orElse(CredentialVerifier.NONE);
         var runtimes = new ArrayList<OpenApiRuntime>();
         var specs = SpecDescriptors.merge(SpecDescriptors.discover(classLoader), properties.specs());
         for (var spec : specs.entrySet()) {
@@ -69,7 +77,8 @@ public class OpenApiFnAutoConfiguration {
             var basePath = spec.getValue().basePath();
             var options = OpenApiValidator.Options.DEFAULT.withLevels(levels)
                 .withSchema(SchemaValidator.Options.DEFAULT.withAssertFormats(validation.assertFormats()))
-                .withBasePaths(basePath == null ? List.of() : List.of(basePath));
+                .withBasePaths(basePath == null ? List.of() : List.of(basePath))
+                .withVerifier(verifier);
             var receivers = new ArrayList<java.util.Map.Entry<String, String>>();
             spec.getValue().receivers().values().forEach(receiver -> receivers.add(java.util.Map.entry(receiver.path(), receiver.operation())));
             runtimes.add(new OpenApiRuntime(name, api, OpenApiValidator.of(api, options), jsonMapper, validation.request().enabled(), receivers));
@@ -114,6 +123,20 @@ public class OpenApiFnAutoConfiguration {
                     builder.addCustomConverter(new StreamedBodyConverter());
                 }
             };
+        }
+    }
+
+    /** Spring MVC with Spring Security: credentials are verified by what it authenticated the request as, after the application's own verifiers. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
+    @ConditionalOnProperty(prefix = "openapi-fn.security", name = "spring-security", matchIfMissing = true)
+    static class ServletSpringSecurity {
+
+        @Bean
+        @Order(Ordered.LOWEST_PRECEDENCE)
+        CredentialVerifier springSecurityCredentialVerifier() {
+            return SpringSecurityCredentials.current();
         }
     }
 

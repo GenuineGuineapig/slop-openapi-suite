@@ -245,4 +245,16 @@ class RuntimeTest {
         assertThat(response.getHeaders().getFirst("Content-Type")).isEqualTo(Problems.MEDIA_TYPE);
         assertThat(response.getBody()).contains("\"instance\":\"/x\"");
     }
+
+    @Test
+    void verifiersCanBeAddedPerRequest() {
+        var runtime = runtime(true);
+        var verifying = runtime.withVerifier(credential -> java.util.Optional.of(dev.openapifn.fn.Result.err("nope")));
+        assertThat(verifying.name()).isEqualTo(runtime.name());
+        assertThat(verifying.api()).isSameAs(runtime.api());
+        assertThat(verifying.mapper()).isSameAs(runtime.mapper());
+        assertThat(verifying.validator().options().verifier().verify(new dev.openapifn.security.Credential.ApiKey("key", "k")))
+            .hasValueSatisfying(result -> assertThat(result.failure()).contains("nope"));
+        assertThat(runtime.validator().options().verifier().verify(new dev.openapifn.security.Credential.ApiKey("key", "k"))).isEmpty();
+    }
 }

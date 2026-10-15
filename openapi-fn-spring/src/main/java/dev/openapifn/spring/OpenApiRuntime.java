@@ -17,6 +17,7 @@ import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Schema;
 import dev.openapifn.validation.IssueKeys;
 import dev.openapifn.validation.Level;
+import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
 import dev.openapifn.validation.OperationMatch;
@@ -89,6 +90,24 @@ public final class OpenApiRuntime {
         var operations = new java.util.LinkedHashMap<String, List<ApiOperation>>();
         receivers.forEach(receiver -> operations.computeIfAbsent(receiver.getKey(), path -> new java.util.ArrayList<>()).add(operation(receiver.getValue())));
         this.receivers = Map.copyOf(operations);
+    }
+
+    private OpenApiRuntime(OpenApiRuntime runtime, OpenApiValidator validator) {
+        this.name = runtime.name;
+        this.api = runtime.api;
+        this.validator = validator;
+        this.mapper = runtime.mapper;
+        this.failOnInvalidRequest = runtime.failOnInvalidRequest;
+        this.writer = runtime.writer;
+        this.receivers = runtime.receivers;
+    }
+
+    /**
+     * This runtime, verifying credentials with {@code verifier} first, such as one knowing whom
+     * the current request was authenticated as (see {@link OpenApiValidator#withVerifier}).
+     */
+    public OpenApiRuntime withVerifier(CredentialVerifier verifier) {
+        return new OpenApiRuntime(this, validator.withVerifier(verifier));
     }
 
     public String name() {

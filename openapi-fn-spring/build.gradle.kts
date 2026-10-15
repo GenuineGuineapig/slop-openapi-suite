@@ -15,9 +15,12 @@ dependencies {
     compileOnly("org.springframework:spring-webmvc")
     compileOnly("jakarta.servlet:jakarta.servlet-api")
     compileOnly("org.springframework.boot:spring-boot-jackson")
+    // With Spring Security, credentials are verified by what it authenticated a request as.
+    compileOnly("org.springframework.security:spring-security-core")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc")
     testImplementation("org.springframework.boot:spring-boot-starter-restclient")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
+    testImplementation("org.springframework.security:spring-security-core")
 }

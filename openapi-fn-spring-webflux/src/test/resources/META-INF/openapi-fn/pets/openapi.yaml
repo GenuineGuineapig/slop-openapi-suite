@@ -23,7 +23,7 @@ paths:
               schema: {type: array, xml: {name: pets}, items: {$ref: '#/components/schemas/Pet'}}
     post:
       operationId: createPet
-      security: [{key: []}]
+      security: [{key: [writer]}]
       requestBody:
         required: true
         content:

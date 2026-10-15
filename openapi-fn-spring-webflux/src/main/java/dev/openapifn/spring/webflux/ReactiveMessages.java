@@ -3,6 +3,8 @@ package dev.openapifn.spring.webflux;
 import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
+import java.security.cert.X509Certificate;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -45,7 +47,20 @@ public final class ReactiveMessages {
 
     private static HttpRequest withBody(ServerHttpRequest request, byte[] body) {
         return new HttpRequest(request.getMethod().name(), path(request), Optional.ofNullable(request.getURI().getRawQuery()).orElse(""),
-            headers(request.getHeaders()), body.length == 0 ? Optional.empty() : Optional.of(body));
+            headers(request.getHeaders()), body.length == 0 ? Optional.empty() : Optional.of(body), clientCertificates(request));
+    }
+
+    /**
+     * The certificates the client presented when the request came over TLS the application
+     * terminated; unknown otherwise (TLS ended at a proxy, or there was none).
+     */
+    static Optional<List<X509Certificate>> clientCertificates(ServerHttpRequest request) {
+        var ssl = request.getSslInfo();
+        if (ssl == null) {
+            return Optional.empty();
+        }
+        var chain = ssl.getPeerCertificates();
+        return Optional.of(chain == null ? List.of() : List.of(chain));
     }
 
     /** The response as it is about to be written, with {@code body}. */

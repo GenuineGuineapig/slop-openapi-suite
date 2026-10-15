@@ -7,7 +7,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.security.cert.X509Certificate;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 import org.springframework.web.util.WebUtils;
@@ -59,7 +61,20 @@ public final class ServletMessages {
             }
         }
         return new HttpRequest(request.getMethod(), path(request), Optional.ofNullable(request.getQueryString()).orElse(""), headers,
-            body.length == 0 ? Optional.empty() : Optional.of(body));
+            body.length == 0 ? Optional.empty() : Optional.of(body), clientCertificates(request));
+    }
+
+    /**
+     * The certificates the client presented when the request came over TLS the application
+     * terminated; unknown otherwise (TLS ended at a proxy, or there was none).
+     */
+    static Optional<List<X509Certificate>> clientCertificates(HttpServletRequest request) {
+        if (!request.isSecure()) {
+            return Optional.empty();
+        }
+        var chain = request.getAttribute("jakarta.servlet.request.X509Certificate") instanceof X509Certificate[] certificates ? certificates
+            : new X509Certificate[0];
+        return Optional.of(List.of(chain));
     }
 
     /** The response captured by {@code wrapper}. */

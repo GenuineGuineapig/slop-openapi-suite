@@ -1,5 +1,6 @@
 package dev.openapifn.validation;
 
+import dev.openapifn.fn.Result;
 import dev.openapifn.http.BodyParser;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.Headers;
@@ -25,6 +26,8 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.Response;
 import dev.openapifn.model.SecurityRequirement;
 import dev.openapifn.model.SecurityScheme;
+import dev.openapifn.security.Credential;
+import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Direction;
 import dev.openapifn.schema.Schema;
@@ -65,34 +68,41 @@ public final class OpenApiValidator {
      *     no {@code HEAD} operation is described
      * @param basePaths additional path prefixes (such as the path an application mounts the API
      *     on) accepted in front of every operation path
+     * @param verifier verifies the credentials requests present (by default none is: credentials are
+     *     checked for being present and well formed)
      */
     public record Options(LevelPolicy levels, SchemaValidator.Options schema, boolean requireServerPrefix, boolean headFallsBackToGet,
-                          List<String> basePaths) {
+                          List<String> basePaths, CredentialVerifier verifier) {
 
-        public static final Options DEFAULT = new Options(LevelPolicy.DEFAULT, SchemaValidator.Options.DEFAULT, false, true, List.of());
+        public static final Options DEFAULT = new Options(LevelPolicy.DEFAULT, SchemaValidator.Options.DEFAULT, false, true, List.of(),
+            CredentialVerifier.NONE);
 
         public Options {
             basePaths = List.copyOf(basePaths);
         }
 
         public Options withLevels(LevelPolicy value) {
-            return new Options(value, schema, requireServerPrefix, headFallsBackToGet, basePaths);
+            return new Options(value, schema, requireServerPrefix, headFallsBackToGet, basePaths, verifier);
         }
 
         public Options withSchema(SchemaValidator.Options value) {
-            return new Options(levels, value, requireServerPrefix, headFallsBackToGet, basePaths);
+            return new Options(levels, value, requireServerPrefix, headFallsBackToGet, basePaths, verifier);
         }
 
         public Options withRequireServerPrefix(boolean value) {
-            return new Options(levels, schema, value, headFallsBackToGet, basePaths);
+            return new Options(levels, schema, value, headFallsBackToGet, basePaths, verifier);
         }
 
         public Options withHeadFallsBackToGet(boolean value) {
-            return new Options(levels, schema, requireServerPrefix, value, basePaths);
+            return new Options(levels, schema, requireServerPrefix, value, basePaths, verifier);
         }
 
         public Options withBasePaths(List<String> value) {
-            return new Options(levels, schema, requireServerPrefix, headFallsBackToGet, value);
+            return new Options(levels, schema, requireServerPrefix, headFallsBackToGet, value, verifier);
+        }
+
+        public Options withVerifier(CredentialVerifier value) {
+            return new Options(levels, schema, requireServerPrefix, headFallsBackToGet, basePaths, value);
         }
     }
 
@@ -131,6 +141,16 @@ public final class OpenApiValidator {
         this.bodies = new BodyParser(shapes);
     }
 
+    private OpenApiValidator(OpenApiValidator validator, Options options) {
+        this.api = validator.api;
+        this.options = options;
+        this.router = validator.router;
+        this.schemas = validator.schemas;
+        this.shapes = validator.shapes;
+        this.parameters = validator.parameters;
+        this.bodies = validator.bodies;
+    }
+
     public static OpenApiValidator of(OpenApiDocument api) {
         return of(api, Options.DEFAULT);
     }
@@ -145,6 +165,15 @@ public final class OpenApiValidator {
 
     public Options options() {
         return options;
+    }
+
+    /**
+     * This validator, verifying credentials with {@code verifier} first (and with the configured
+     * verifier for those it declines), such as one knowing who the current request authenticated
+     * as. Cheap: everything else is shared.
+     */
+    public OpenApiValidator withVerifier(CredentialVerifier verifier) {
+        return new OpenApiValidator(this, options.withVerifier(verifier.orElse(options.verifier())));
     }
 
     public Route route(HttpRequest request) {
@@ -225,46 +254,85 @@ public final class OpenApiValidator {
             .flatMap(type -> ContentType.bestMatch(content.keySet(), type).map(range -> new ItemValidator(type, content.get(range), direction, side)));
     }
 
-    /** Whether a request carries a credential for a security scheme, and whether it is well formed. */
-    private enum Credential {
-        PRESENT,
-        MALFORMED,
-        MISSING
+    /** How well a request meets a security requirement, from best to worst. */
+    private enum Standing {
+        SATISFIED(""),
+        /** Verified credentials lacking required scopes or roles. */
+        FORBIDDEN(IssueKeys.REQUEST_SECURITY_FORBIDDEN),
+        /** Credentials the verifier rejected. */
+        REJECTED(IssueKeys.REQUEST_SECURITY_INVALID),
+        MALFORMED(IssueKeys.REQUEST_SECURITY_INVALID),
+        MISSING(IssueKeys.REQUEST_SECURITY_MISSING);
+
+        private final String key;
+
+        Standing(String key) {
+            this.key = key;
+        }
+    }
+
+    /** A standing, with what explains it. */
+    private record Check(Standing standing, String detail) {
+        static final Check SATISFIED = new Check(Standing.SATISFIED, "");
+
+        Check worse(Check other) {
+            return other.standing.compareTo(standing) > 0 ? other : this;
+        }
     }
 
     /** RFC 6750 bearer tokens (token68). */
     private static final java.util.regex.Pattern TOKEN68 = java.util.regex.Pattern.compile("[A-Za-z0-9._~+/-]+=*");
 
     /**
-     * Checks that one of the security requirements is met by well-formed credentials. Verifying
-     * them (passwords, token signatures, scopes, client certificates) is left to authentication.
+     * Checks that one of the security requirements is met: by credentials that are present and well
+     * formed, that the {@link CredentialVerifier} accepts, and that grant the required scopes (or
+     * roles). Missing and rejected credentials answer 401, missing scopes 403.
      */
     private void security(ApiOperation operation, HttpRequest request, Issues issues) {
         var requirements = operation.security();
         if (requirements.isEmpty()) {
             return;
         }
-        var results = requirements.stream().map(requirement -> credentials(requirement, request)).toList();
-        if (results.contains(Credential.PRESENT)) {
-            return;
-        }
+        var best = requirements.stream().map(requirement -> requirement(requirement, request)).min(java.util.Comparator.comparing(Check::standing))
+            .orElseThrow();
         var alternatives = requirements.stream().map(r -> String.join(" + ", r.schemes().keySet())).collect(Collectors.joining(" or "));
-        if (results.contains(Credential.MALFORMED)) {
-            issues.add(IssueKeys.REQUEST_SECURITY_INVALID, "malformed credentials; requires " + alternatives, "security");
-        } else {
-            issues.add(IssueKeys.REQUEST_SECURITY_MISSING, "missing credentials; requires " + alternatives, "security");
+        if (best.standing() != Standing.SATISFIED) {
+            issues.add(best.standing().key, best.detail() + "; requires " + alternatives, "security");
         }
     }
 
-    /** All schemes of a requirement: missing if one is missing, else malformed if one is malformed. */
-    private Credential credentials(SecurityRequirement requirement, HttpRequest request) {
+    /** Every scheme of a requirement must be met: the requirement stands as its worst scheme. */
+    private Check requirement(SecurityRequirement requirement, HttpRequest request) {
         var schemes = api.model().components().securitySchemes();
-        var results = requirement.schemes().keySet().stream()
-            .map(name -> Optional.ofNullable(schemes.get(name)).map(scheme -> credential(scheme, request)).orElse(Credential.PRESENT)).toList();
-        return results.contains(Credential.MISSING) ? Credential.MISSING : results.contains(Credential.MALFORMED) ? Credential.MALFORMED : Credential.PRESENT;
+        var check = Check.SATISFIED;
+        for (var entry : requirement.schemes().entrySet()) {
+            var scheme = schemes.get(entry.getKey());
+            if (scheme != null) {
+                check = check.worse(scheme(entry.getKey(), scheme, entry.getValue(), request));
+            }
+        }
+        return check;
     }
 
-    private static Credential credential(SecurityScheme scheme, HttpRequest request) {
+    private Check scheme(String name, SecurityScheme scheme, List<String> scopes, HttpRequest request) {
+        if (scheme instanceof SecurityScheme.MutualTls && request.clientCertificates().isEmpty()) {
+            return Check.SATISFIED; // TLS was terminated before the application (by a proxy), which checked the client certificate.
+        }
+        return credential(name, scheme, request).fold(credential -> verify(credential, scopes),
+            standing -> new Check(standing, standing == Standing.MISSING ? "missing credentials" : "malformed credentials"));
+    }
+
+    /** What the verifier says of {@code credential}; credentials it declines are accepted as they are. */
+    private Check verify(Credential credential, List<String> scopes) {
+        return options.verifier().verify(credential).map(result -> result.fold(
+                grant -> grant.scopes().containsAll(scopes) ? Check.SATISFIED : new Check(Standing.FORBIDDEN, "insufficient scopes: '"
+                    + credential.scheme() + "' grants " + new java.util.TreeSet<>(grant.scopes()) + " but " + scopes + " are required"),
+                reason -> new Check(Standing.REJECTED, "credentials for '" + credential.scheme() + "' rejected: " + reason)))
+            .orElse(Check.SATISFIED);
+    }
+
+    /** The credential a request presents for a scheme, or whether it is missing or malformed. */
+    private static Result<Credential, Standing> credential(String name, SecurityScheme scheme, HttpRequest request) {
         return switch (scheme) {
             case SecurityScheme.ApiKey key -> {
                 var value = switch (key.in()) {
@@ -273,38 +341,43 @@ public final class OpenApiValidator {
                         .map(Map.Entry::getValue).findFirst();
                     default -> UrlCodec.parseQuery(request.query()).stream().filter(q -> q.getKey().equals(key.name())).map(Map.Entry::getValue).findFirst();
                 };
-                yield value.map(v -> v.isBlank() ? Credential.MALFORMED : Credential.PRESENT).orElse(Credential.MISSING);
+                yield value.map(v -> v.isBlank() ? Result.<Credential, Standing>err(Standing.MALFORMED) : Result.<Credential, Standing>ok(new Credential.ApiKey(name, v)))
+                    .orElse(Result.err(Standing.MISSING));
             }
-            case SecurityScheme.Http http -> authorization(request, http.scheme());
-            case SecurityScheme.OAuth2 ignored -> authorization(request, "bearer");
-            case SecurityScheme.OpenIdConnect ignored -> authorization(request, "bearer");
-            case SecurityScheme.MutualTls ignored -> Credential.PRESENT;
+            case SecurityScheme.Http http -> authorization(name, request, http.scheme());
+            case SecurityScheme.OAuth2 ignored -> authorization(name, request, "bearer");
+            case SecurityScheme.OpenIdConnect ignored -> authorization(name, request, "bearer");
+            case SecurityScheme.MutualTls ignored -> {
+                var chain = request.clientCertificates().orElseThrow();
+                yield chain.isEmpty() ? Result.err(Standing.MISSING) : Result.ok(new Credential.ClientCertificate(name, chain));
+            }
         };
     }
 
     /** An {@code Authorization} header of {@code scheme} with well-formed credentials (RFC 7617 basic, RFC 6750 bearer, others non-empty). */
-    private static Credential authorization(HttpRequest request, String scheme) {
+    private static Result<Credential, Standing> authorization(String name, HttpRequest request, String scheme) {
         var header = request.headers().first("Authorization").map(String::strip).orElse("");
         var space = header.indexOf(' ');
-        var name = space < 0 ? header : header.substring(0, space);
-        if (!name.equalsIgnoreCase(scheme)) {
-            return Credential.MISSING;
+        var authScheme = space < 0 ? header : header.substring(0, space);
+        if (!authScheme.equalsIgnoreCase(scheme)) {
+            return Result.err(Standing.MISSING);
         }
         var credentials = space < 0 ? "" : header.substring(space + 1).strip();
-        var wellFormed = switch (scheme.toLowerCase(Locale.ROOT)) {
-            case "basic" -> basicCredentials(credentials);
-            case "bearer" -> TOKEN68.matcher(credentials).matches();
-            default -> !credentials.isEmpty();
+        return switch (scheme.toLowerCase(Locale.ROOT)) {
+            case "basic" -> basic(name, credentials);
+            case "bearer" -> TOKEN68.matcher(credentials).matches() ? Result.ok(new Credential.Bearer(name, credentials)) : Result.err(Standing.MALFORMED);
+            default -> credentials.isEmpty() ? Result.err(Standing.MALFORMED) : Result.ok(new Credential.Authorization(name, scheme, credentials));
         };
-        return wellFormed ? Credential.PRESENT : Credential.MALFORMED;
     }
 
     /** RFC 7617: base64 of {@code user-id ":" password}. */
-    private static boolean basicCredentials(String credentials) {
+    private static Result<Credential, Standing> basic(String name, String credentials) {
         try {
-            return new String(java.util.Base64.getDecoder().decode(credentials), java.nio.charset.StandardCharsets.UTF_8).contains(":");
+            var decoded = new String(java.util.Base64.getDecoder().decode(credentials), java.nio.charset.StandardCharsets.UTF_8);
+            var colon = decoded.indexOf(':');
+            return colon < 0 ? Result.err(Standing.MALFORMED) : Result.ok(new Credential.Basic(name, decoded.substring(0, colon), decoded.substring(colon + 1)));
         } catch (IllegalArgumentException e) {
-            return false;
+            return Result.err(Standing.MALFORMED);
         }
     }
 

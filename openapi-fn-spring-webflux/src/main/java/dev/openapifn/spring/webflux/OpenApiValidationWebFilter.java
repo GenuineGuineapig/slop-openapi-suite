@@ -69,11 +69,18 @@ public final class OpenApiValidationWebFilter implements WebFilter, Ordered {
 
     private final OpenApiRuntimes runtimes;
     private final Settings settings;
+    private final ExchangeCredentials credentials;
     private final List<PathPattern> excluded;
 
     public OpenApiValidationWebFilter(OpenApiRuntimes runtimes, Settings settings) {
+        this(runtimes, settings, ExchangeCredentials.NONE);
+    }
+
+    /** @param credentials the verifier of each exchange's credentials, used before the application's verifiers */
+    public OpenApiValidationWebFilter(OpenApiRuntimes runtimes, Settings settings, ExchangeCredentials credentials) {
         this.runtimes = runtimes;
         this.settings = settings;
+        this.credentials = credentials;
         this.excluded = settings.excludedPaths().stream().map(PathPatternParser.defaultInstance::parse).toList();
     }
 
@@ -99,13 +106,15 @@ public final class OpenApiValidationWebFilter implements WebFilter, Ordered {
             }
             return chain.filter(exchange);
         }
-        var runtime = routed.get();
         var streamed = ItemStreams.sequential(request.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
         if (!streamed && request.getHeaders().getContentLength() > settings.maxBodySize()) {
             return chain.filter(exchange);
         }
         var message = streamed ? Mono.just(ReactiveMessages.head(request)) : ReactiveMessages.read(request);
-        return message.flatMap(read -> {
+        var verifying = credentials.verifier(exchange).map(routed.get()::withVerifier).defaultIfEmpty(routed.get());
+        return verifying.zipWith(message).flatMap(pair -> {
+            var runtime = pair.getT1();
+            var read = pair.getT2();
             var validation = streamed ? runtime.validateHead(read) : runtime.validate(read);
             var forwarded = streamed ? exchange : exchange.mutate().request(cached(request, read)).build();
             forwarded.getAttributes().put(OpenApiRuntime.VALIDATION_ATTRIBUTE, validation);

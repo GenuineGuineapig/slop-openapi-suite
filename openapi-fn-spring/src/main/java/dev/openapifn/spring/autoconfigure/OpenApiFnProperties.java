@@ -16,9 +16,23 @@ import org.springframework.util.unit.DataSize;
  *     registers under {@code META-INF/openapi-fn/<name>/spec.properties})
  * @param validation validation settings
  * @param clients settings of generated clients by API name
+ * @param security how the credentials of requests are verified
  */
 @ConfigurationProperties("openapi-fn")
-public record OpenApiFnProperties(@DefaultValue Map<String, Spec> specs, @DefaultValue Validation validation, @DefaultValue Map<String, Client> clients) {
+public record OpenApiFnProperties(@DefaultValue Map<String, Spec> specs, @DefaultValue Validation validation, @DefaultValue Map<String, Client> clients,
+                                  @DefaultValue Security security) {
+
+    /**
+     * Credential verification. Credentials are verified by the application's
+     * {@code CredentialVerifier} beans and, with Spring Security, by what it authenticated the
+     * request as; the operation's scopes (or roles) must then be granted.
+     *
+     * @param springSecurity whether credentials are verified with the authentication Spring
+     *     Security established (when it is present): authenticated requests are granted their
+     *     authorities as scopes and roles, unauthenticated ones are rejected
+     */
+    public record Security(@DefaultValue("true") boolean springSecurity) {
+    }
 
     /**
      * One API description.
