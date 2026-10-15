@@ -5,7 +5,7 @@ plugins {
 description = "Spring Boot 4 integration: runtime for generated controllers and clients, Spring MVC support (validation filter), auto-configuration"
 
 dependencies {
-    api(project(":openapi-fn-core"))
+    api(project(":openapi-fn-validator"))
     api(platform(libs.spring.boot.bom))
     api("org.springframework.boot:spring-boot-autoconfigure")
     api("org.springframework:spring-web")

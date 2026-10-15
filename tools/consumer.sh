@@ -34,7 +34,16 @@ grep -q "version \"$version\"" "$work/build.gradle.kts"
 grep -q "mavenLocal()" "$work/build.gradle.kts"
 
 cd "$work"
+# The generator is needed during the build only: the application's classpaths have the validator, not it.
+for classpath in runtimeClasspath testRuntimeClasspath; do
+    ./gradlew dependencies --configuration "$classpath" -q > "$work/$classpath.txt"
+    grep -q "dev.openapifn:openapi-fn-validator" "$work/$classpath.txt"
+    if grep -q "openapi-fn-generator" "$work/$classpath.txt"; then
+        echo "openapi-fn-generator is on the $classpath of $sample" >&2
+        exit 1
+    fi
+done
 ./gradlew check --console=plain
 tests=$(cat build/test-results/test/*.xml | grep -c "<testcase " || true)
 [ "$tests" -gt 0 ]
-echo "$sample builds and passes its $tests tests with openapi-fn $version from the local Maven repository"
+echo "$sample builds and passes its $tests tests with openapi-fn $version from the local Maven repository, without the generator on its classpaths"

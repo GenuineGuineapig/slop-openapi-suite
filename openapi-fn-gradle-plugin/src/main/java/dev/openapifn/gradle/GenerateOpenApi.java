@@ -1,8 +1,8 @@
 package dev.openapifn.gradle;
 
-import dev.openapifn.codegen.GeneratedFile;
-import dev.openapifn.codegen.Generator;
-import dev.openapifn.codegen.GeneratorConfig;
+import dev.openapifn.generator.GeneratedFile;
+import dev.openapifn.generator.Generator;
+import dev.openapifn.generator.GeneratorConfig;
 import dev.openapifn.load.Diagnostic;
 import dev.openapifn.load.ResourceLoader;
 import dev.openapifn.load.ResourceLoaders;

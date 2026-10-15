@@ -5,10 +5,10 @@ plugins {
 rootProject.name = "openapi-fn"
 
 include(
-    "openapi-fn-core",
+    "openapi-fn-validator",
     "openapi-fn-spring",
     "openapi-fn-spring-webflux",
     "openapi-fn-spring-test",
-    "openapi-fn-codegen",
+    "openapi-fn-generator",
     "openapi-fn-gradle-plugin",
 )

@@ -2,13 +2,13 @@
 
 This document records how openapi-fn covers the OpenAPI Specification 3.2. 3.2 is a superset of
 3.1 and 3.0, so those are covered too; Swagger / OpenAPI 2.0 is converted to 3.0 on load. Every
-field of every object is read into the model (`openapi-fn-core`, `dev.openapifn.model`). The table
+field of every object is read into the model (`openapi-fn-validator`, `dev.openapifn.model`). The table
 below says what each feature *does* in the parts that act on the model:
 
 * **Validation**: `OpenApiValidator`, also behind the Spring filter and the test matchers
 * **Runtime**: Spring binding and response mapping, for Spring MVC (`openapi-fn-spring`) and
   WebFlux (`openapi-fn-spring-webflux`)
-* **Codegen**: generated code (`openapi-fn-codegen`)
+* **Codegen**: generated code (`openapi-fn-generator`)
 
 "Model" means the information is available through the model but has no behaviour; this is
 usually because the specification gives it none (descriptions, documentation links).

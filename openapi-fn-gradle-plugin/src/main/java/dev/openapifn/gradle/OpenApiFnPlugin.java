@@ -1,6 +1,6 @@
 package dev.openapifn.gradle;
 
-import dev.openapifn.codegen.java.Names;
+import dev.openapifn.generator.java.Names;
 import java.io.File;
 import java.time.Duration;
 import java.util.List;

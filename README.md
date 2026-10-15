@@ -59,8 +59,10 @@ your code. Remote documents the description references (`$ref: 'https://…'`) a
 generated code, so nothing is fetched at runtime. At build time they are cached in the Gradle user
 home and fetched again once a day (`remoteMaxAge = Duration.ofHours(…)` in `openapiFn`), or now with
 `--refresh-dependencies`; `--offline` builds use the cached copies. The task is up to date while
-the documents are unchanged. The plugin adds the runtime (`openapi-fn-spring`) and the test support
-(`openapi-fn-spring-test`, `spring-boot-starter-webmvc-test`). The Gradle daemon needs Java 21;
+the documents are unchanged. The plugin adds the runtime (`openapi-fn-spring`, which brings the
+validator, `openapi-fn-validator`) and the test support (`openapi-fn-spring-test`,
+`spring-boot-starter-webmvc-test`). The generator (`openapi-fn-generator`) runs in the build only:
+it is on the plugin's classpath, never on the application's. The Gradle daemon needs Java 21;
 add `gradle/gradle-daemon-jvm.properties` with `toolchainVersion=21`.
 
 For a **Spring WebFlux** application, depend on `spring-boot-starter-webflux` (and
@@ -227,7 +229,7 @@ response when its expression refers to it. Links lead to operations named by `op
 an `operationRef` to a path or webhook operation of the description. Expressions see the request
 as the client sends it: its declared parameters (typed), its body and the headers the client sets.
 `$url` is the request URL relative to the client's base URL. `RuntimeExpressions` in
-openapi-fn-core evaluates expressions without Spring.
+openapi-fn-validator evaluates expressions without Spring.
 
 ## Several media types of different types
 
@@ -332,7 +334,7 @@ which is what a gateway in front of the application needs.
 
 ## Without Spring, and without generated code
 
-The core (`openapi-fn-core`) depends only on snakeyaml-engine (descriptions, with line and column
+The validator (`openapi-fn-validator`) depends only on snakeyaml-engine (descriptions, with line and column
 of every node) and jackson-core (JSON bodies, through Jackson's streaming parser and its limits on
 nesting, number and string length):
 
@@ -351,16 +353,16 @@ report.errors().forEach(System.out::println);
 descriptions from strings. Other entry points:
 
 * `SchemaValidator`: JSON Schema on its own (drafts 4 to 2020-12 and the OAS 3.0 dialect)
-* `ExampleGenerator`: valid example values
+* `ExampleGenerator` (in `openapi-fn-generator`): valid example values
 * `BodyParser` / `BodyWriter`: every supported media type
 
 ## Code generation without Gradle
 
 ```bash
-java -jar openapi-fn-codegen-0.1.0-SNAPSHOT-cli.jar --spec api.yaml --name petstore --package com.example.petstore --output build/generated/sources
+java -jar openapi-fn-generator-0.1.0-SNAPSHOT-cli.jar --spec api.yaml --name petstore --package com.example.petstore --output build/generated/sources
 ```
 
-The self-contained jar comes from `./gradlew :openapi-fn-codegen:cliJar`. Options:
+The self-contained jar comes from `./gradlew :openapi-fn-generator:cliJar`. Options:
 `--test-output`, `--resources-output`, `--base-path`, `--no-server`, `--no-client`, `--no-tests`,
 `--reactive`. The Gradle task takes the same settings: `basePath`, `server`, `client`, `tests` and
 `reactive` on each spec.
@@ -414,14 +416,18 @@ openapi-fn taken from the local Maven repository (`tools/consumer.sh`). See
 
 ## Modules
 
-| Module | Contents |
-|---|---|
-| `openapi-fn-core` | Functional utilities (`Result`, …), an immutable JSON model (parsed with jackson-core) and YAML, multi-document loading, the OpenAPI model, JSON Schema validation, HTTP message parsing and serialization, request/response validation, example generation, Swagger 2.0 conversion |
-| `openapi-fn-spring` | Spring Boot 4 runtime: auto-configuration, request binding and response mapping for generated controllers (independent of the web stack), the Spring MVC validation filter, problem details, `RestClient` client support |
-| `openapi-fn-spring-webflux` | Spring WebFlux: the reactive runtime of generated controllers, the validation `WebFilter`, `WebClient` client support, auto-configuration |
-| `openapi-fn-spring-test` | MockMvc matchers and `WebTestClient` assertions |
-| `openapi-fn-codegen` | The code generator and its CLI |
-| `openapi-fn-gradle-plugin` | The `dev.openapifn` Gradle plugin |
+The runtime and the build are served by separate libraries: the validator, with the Spring
+modules on top, at runtime; the generator, which uses the validator (to parse descriptions and to
+check the requests of the tests it generates), during the build only.
+
+| Module | Needed | Contents |
+|---|---|---|
+| `openapi-fn-validator` | at runtime | Functional utilities (`Result`, …), an immutable JSON model (parsed with jackson-core) and YAML, multi-document loading, the OpenAPI model, JSON Schema validation, HTTP message parsing and serialization, request/response validation, Swagger 2.0 conversion |
+| `openapi-fn-spring` | at runtime | Spring Boot 4 runtime: auto-configuration, request binding and response mapping for generated controllers (independent of the web stack), the Spring MVC validation filter, problem details, `RestClient` client support |
+| `openapi-fn-spring-webflux` | at runtime | Spring WebFlux: the reactive runtime of generated controllers, the validation `WebFilter`, `WebClient` client support, auto-configuration |
+| `openapi-fn-spring-test` | in tests | MockMvc matchers and `WebTestClient` assertions |
+| `openapi-fn-generator` | in the build | The code generator, the example values of generated tests, and the CLI |
+| `openapi-fn-gradle-plugin` | in the build | The `dev.openapifn` Gradle plugin |
 
 Every module is built with 100% line, branch, instruction and method coverage, enforced by
 `./gradlew check`.

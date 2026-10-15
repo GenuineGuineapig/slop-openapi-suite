@@ -5,7 +5,7 @@ plugins {
 description = "Gradle plugin: generates models, controllers, clients and controller tests from OpenAPI descriptions during the build"
 
 dependencies {
-    implementation(project(":openapi-fn-codegen"))
+    implementation(project(":openapi-fn-generator"))
 }
 
 gradlePlugin {
