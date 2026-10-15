@@ -327,7 +327,15 @@ final class Swagger2Converter {
 
     private JsonObject components() {
         var out = new LinkedHashMap<String, JsonValue>();
-        source.object("definitions").ifPresent(definitions -> out.put("schemas", map(definitions, this::schema)));
+        source.object("definitions").ifPresent(definitions -> {
+            definitions.members().forEach((name, definition) -> {
+                if (hasFileType(definition)) {
+                    warnings.add("definition '" + name + "' uses type 'file', which Swagger 2.0 allows for parameters and responses only; "
+                        + "it is converted to a binary string");
+                }
+            });
+            out.put("schemas", map(definitions, this::schema));
+        });
         var plain = new LinkedHashMap<String, JsonValue>();
         var bodies = new LinkedHashMap<String, JsonValue>();
         globalParameters.forEach((name, parameter) -> {
@@ -416,6 +424,16 @@ final class Swagger2Converter {
             }
             case JsonArray array -> new JsonArray(array.values().stream().map(this::schema).toList());
             default -> value;
+        };
+    }
+
+    /** Whether a schema, or one of its subschemas, has {@code type: file}. */
+    private static boolean hasFileType(JsonValue schema) {
+        return switch (schema) {
+            case JsonObject object -> object.string("type").filter("file"::equals).isPresent() || object.members().entrySet().stream()
+                .anyMatch(member -> !DATA_KEYWORDS.contains(member.getKey()) && !member.getKey().startsWith("x-") && hasFileType(member.getValue()));
+            case JsonArray array -> array.values().stream().anyMatch(Swagger2Converter::hasFileType);
+            default -> false;
         };
     }
 

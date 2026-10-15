@@ -38,7 +38,7 @@ public final class Formats {
 
     /** {@code hostname}: an IDNA2008 host name of A-labels (JSON Schema draft 7 and later, OpenAPI). */
     static final FormatValidator HOSTNAME = FormatValidator.forStrings(value -> Idna.isValid(value, false), "hostname");
-    /** {@code hostname} as JSON Schema draft 4 defines it: an RFC 1123 host name of letters, digits and hyphens. */
+    /** {@code hostname} as JSON Schema drafts 4 and 6 define it: an RFC 1123 host name of letters, digits and hyphens. */
     static final FormatValidator RFC_1123_HOSTNAME = FormatValidator.forStrings(value -> RFC_1123.matcher(value).matches(), "hostname");
 
     private static final Map<String, FormatValidator> STANDARD = Map.ofEntries(

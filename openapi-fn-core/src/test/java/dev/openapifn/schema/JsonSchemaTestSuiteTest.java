@@ -54,6 +54,11 @@ class JsonSchemaTestSuiteTest {
     }
 
     @TestFactory
+    Stream<DynamicNode> draft6() {
+        return suite("draft6", Dialect.DRAFT_6);
+    }
+
+    @TestFactory
     Stream<DynamicNode> draft4() {
         return suite("draft4", Dialect.DRAFT_4);
     }

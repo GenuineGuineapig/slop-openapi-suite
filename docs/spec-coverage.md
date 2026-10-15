@@ -13,6 +13,18 @@ below says what each feature *does* in the parts that act on the model:
 "Model" means the information is available through the model but has no behaviour; this is
 usually because the specification gives it none (descriptions, documentation links).
 
+## How this is verified
+
+Beyond the project's own tests (100% line, branch, instruction and method coverage), conformance is
+checked against material openapi-fn did not write:
+
+| Evidence | What must hold |
+|---|---|
+| The [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite), drafts 4, 6, 7, 2019-09 and 2020-12 (`JsonSchemaTestSuiteTest`) | All 8888 cases pass, required and optional, none skipped |
+| The OpenAPI Initiative's schema tests: 3.1 and 3.2 `pass` and `fail` descriptions, 3.0 examples (`OpenApiConformanceSuiteTest`) | `pass` descriptions load without errors, `fail` descriptions are rejected |
+| The OpenAPI Initiative's JSON Schemas for 2.0, 3.0, 3.1 and 3.2 as an oracle (`OfficialSchemaTest`) | Every one of those descriptions is judged by the official schema as openapi-fn judges it; the samples' descriptions (Train Travel, Scalar Galaxy, Redocly Museum, a petstore) and the fixtures are valid for both; Swagger 2.0 descriptions are converted to descriptions the official 3.0 schema accepts |
+| The samples (`samples/`), built on third-party descriptions | Generated controllers, clients and tests work end to end on each, for Spring MVC and WebFlux |
+
 ## Documents and references
 
 | Feature | Support |

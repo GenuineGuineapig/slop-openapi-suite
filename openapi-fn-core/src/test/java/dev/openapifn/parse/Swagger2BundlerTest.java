@@ -45,8 +45,9 @@ class Swagger2BundlerTest {
 
         assertThat(schemaJson("pet")).isEqualTo("{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"},"
             + "\"tag\":{\"type\":\"string\",\"nullable\":true},\"owner\":{\"$ref\":\"#/components/schemas/Owner\"},"
-            + "\"children\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/pet\"}},\"kind\":{\"$ref\":\"#/components/schemas/Kind\"}},"
-            + "\"definitions\":{\"Kind\":{\"type\":\"string\",\"enum\":[\"cat\",\"dog\"]}}}");
+            + "\"children\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/pet\"}},\"kind\":{\"$ref\":\"#/components/schemas/Kind\"}}}");
+        // The schema document's own definitions are copied like any other schema, not kept inside the copy.
+        assertThat(schemaJson("Kind")).isEqualTo("{\"type\":\"string\",\"enum\":[\"cat\",\"dog\"]}");
         assertThat(API.schemas().deref(API.model().components().schemas().get("Owner2")).discriminator().orElseThrow().propertyName()).isEqualTo("kind");
         var create = API.operation("createOwner").orElseThrow();
         assertThat(create.operation().requestBody().orElseThrow().content().get("application/json").schema().orElseThrow().ref())

@@ -171,8 +171,17 @@ final class Swagger2Bundler {
         var name = unique(nameOf(target));
         copied.put(target, name);
         definitions.put(name, JsonObject.EMPTY);
-        definitions.put(name, schema(schema.get(), Uris.withoutFragment(target)));
+        definitions.put(name, schema(withoutDocumentKeywords(schema.get()), Uris.withoutFragment(target)));
         return Optional.of(name);
+    }
+
+    /**
+     * A schema document without the keywords of the document rather than of the schema
+     * ({@code definitions}, {@code $schema}, {@code id}), which a Schema Object does not have:
+     * references into its {@code definitions} are copied like any other.
+     */
+    private static JsonValue withoutDocumentKeywords(JsonValue schema) {
+        return schema.asObject().<JsonValue>map(object -> object.without("definitions").without("$schema").without("id")).orElse(schema);
     }
 
     /** The last token of the pointer, else the file name without extension. */

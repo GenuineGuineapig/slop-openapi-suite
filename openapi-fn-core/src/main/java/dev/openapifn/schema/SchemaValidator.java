@@ -299,10 +299,10 @@ public final class SchemaValidator {
             }
         }
 
-        /** Draft 4 host names follow RFC 1123, unless another validator was configured. */
+        /** Draft 4 and 6 host names follow RFC 1123, unless another validator was configured. */
         private FormatValidator formatValidator(String format, Dialect dialect) {
             var validator = options.formats().get(format);
-            return validator == Formats.HOSTNAME && dialect == Dialect.DRAFT_4 ? Formats.RFC_1123_HOSTNAME : validator;
+            return validator == Formats.HOSTNAME && (dialect == Dialect.DRAFT_4 || dialect == Dialect.DRAFT_6) ? Formats.RFC_1123_HOSTNAME : validator;
         }
 
         /** Draft 4 tells integers from numbers with a fraction by their spelling: {@code 1.0} is not an integer there. */

@@ -44,7 +44,8 @@ class Swagger2ConverterTest {
         assertThat(API.operations()).extracting(operation -> operation.displayName())
             .containsExactly("listPets", "createPet", "updatePet", "deletePet", "uploadPhoto", "getBatch", "addNote", "addLabels", "legacy");
         // Collection formats OpenAPI 3 cannot express are kept as an extension, not lost.
-        assertThat(API.warnings()).isEmpty();
+        assertThat(API.warnings()).extracting(dev.openapifn.load.Diagnostic::message).containsExactly("definition 'Blob' uses type 'file', which "
+            + "Swagger 2.0 allows for parameters and responses only; it is converted to a binary string");
     }
 
     @Test
@@ -196,6 +197,20 @@ class Swagger2ConverterTest {
             """);
         assertThat(unusual.warnings()).extracting(Diagnostic::message).containsExactly(
             "collectionFormat 'multi' is only valid for query and formData parameters; using csv", "unknown collectionFormat 'semicolons'; using csv");
+    }
+
+    @Test
+    void warnsAboutFileTypesInDefinitions() {
+        var source = (dev.openapifn.json.JsonObject) dev.openapifn.json.Json.parse("""
+            {"swagger": "2.0", "info": {"title": "t", "version": "v"}, "paths": {}, "definitions": {
+              "Nested": {"type": "object", "properties": {"file": {"type": "file"}}},
+              "Listed": {"allOf": [{"type": "file"}]},
+              "Data": {"type": "object", "x-shape": {"type": "file"}, "example": {"type": "file"}},
+              "Plain": {"type": "string"}}}
+            """).orElseThrow(e -> new AssertionError(e.toString()));
+        assertThat(Swagger2Converter.convert(source).warnings()).containsExactly(
+            "definition 'Nested' uses type 'file', which Swagger 2.0 allows for parameters and responses only; it is converted to a binary string",
+            "definition 'Listed' uses type 'file', which Swagger 2.0 allows for parameters and responses only; it is converted to a binary string");
     }
 
     @Test
