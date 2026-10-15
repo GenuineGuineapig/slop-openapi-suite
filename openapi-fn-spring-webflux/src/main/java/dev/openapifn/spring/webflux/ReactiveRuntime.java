@@ -44,7 +44,7 @@ public final class ReactiveRuntime {
      * reusing the validation filter's result when present. The body is read first, unless it is of
      * a sequential media type: {@link ReactiveBinding#items} streams it.
      *
-     * @return the binding, or an {@link OpenApiValidationException} when the request is invalid
+     * @return the binding, or an {@link dev.openapifn.spring.OpenApiValidationException} when the request is invalid
      *     (and failing is enabled)
      */
     public Mono<ReactiveBinding> bind(ServerWebExchange exchange, String operationId) {

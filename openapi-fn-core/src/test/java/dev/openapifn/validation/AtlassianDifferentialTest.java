@@ -1,5 +1,10 @@
 package dev.openapifn.validation;
 
+import static dev.openapifn.validation.Interactions.PROJECT;
+import static dev.openapifn.validation.Interactions.jsonBody;
+import static dev.openapifn.validation.Interactions.jsonResponse;
+import static dev.openapifn.validation.Interactions.responses;
+import static dev.openapifn.validation.Interactions.valid;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
@@ -8,30 +13,22 @@ import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import dev.openapifn.example.ExampleGenerator;
 import dev.openapifn.http.Headers;
-import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
-import dev.openapifn.http.ParameterSerializer;
 import dev.openapifn.http.UrlCodec;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonObject;
 import dev.openapifn.json.JsonValue;
 import dev.openapifn.json.JsonWriter;
 import dev.openapifn.model.ApiOperation;
-import dev.openapifn.model.MediaType;
-import dev.openapifn.model.Parameter;
 import dev.openapifn.model.ParameterLocation;
-import dev.openapifn.model.SecurityScheme;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
-import dev.openapifn.schema.Direction;
-import dev.openapifn.schema.Schema;
-import java.net.URISyntaxException;
+import dev.openapifn.validation.Interactions.Message;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -48,42 +45,16 @@ import org.junit.jupiter.api.TestFactory;
  */
 class AtlassianDifferentialTest {
 
-    private static final Path PROJECT = project();
-
-    private static Path project() {
-        try {
-            return Path.of(AtlassianDifferentialTest.class.getResource("/oas-schemas").toURI()).resolve("../../../../..").normalize();
-        } catch (URISyntaxException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    /** A message, as both validators get it. */
-    private record Message(String method, String path, List<Map.Entry<String, String>> query, Map<String, String> headers, Optional<String> body) {
-
-        Message with(List<Map.Entry<String, String>> otherQuery, Map<String, String> otherHeaders, Optional<String> otherBody) {
-            return new Message(method, path, otherQuery, otherHeaders, otherBody);
-        }
-
-        HttpRequest ours() {
-            var request = HttpRequest.of(method, path + (query.isEmpty() ? "" : "?" + ParameterSerializer.queryString(query)));
-            for (var header : headers.entrySet()) {
-                request = request.withHeader(header.getKey(), header.getValue());
-            }
-            var head = request;
-            return body.map(text -> head.withBody(text.getBytes(StandardCharsets.UTF_8))).orElse(head);
-        }
-
-        SimpleRequest theirs() {
-            var builder = new SimpleRequest.Builder(method, path);
-            var decoded = new LinkedHashMap<String, List<String>>();
-            query.forEach(pair -> decoded.computeIfAbsent(UrlCodec.decode(pair.getKey(), false), key -> new ArrayList<>())
-                .add(UrlCodec.decode(pair.getValue(), false)));
-            decoded.forEach(builder::withQueryParam);
-            headers.forEach(builder::withHeader);
-            body.ifPresent(builder::withBody);
-            return builder.build();
-        }
+    /** The request as Atlassian gets it. */
+    private static SimpleRequest theirs(Message message) {
+        var builder = new SimpleRequest.Builder(message.method(), message.path());
+        var decoded = new LinkedHashMap<String, List<String>>();
+        message.query().forEach(pair -> decoded.computeIfAbsent(UrlCodec.decode(pair.getKey(), false), key -> new ArrayList<>())
+            .add(UrlCodec.decode(pair.getValue(), false)));
+        decoded.forEach(builder::withQueryParam);
+        message.headers().forEach(builder::withHeader);
+        message.body().ifPresent(builder::withBody);
+        return builder.build();
     }
 
     /** A judgement to compare. */
@@ -137,12 +108,11 @@ class AtlassianDifferentialTest {
         var ours = OpenApiValidator.of(api);
         var theirs = OpenApiInteractionValidator.createFor(file.toUri().toString()).withResolveCombinators(true).build();
         var examples = new ExampleGenerator(api.schemas());
-        var serverPath = api.model().servers().getFirst().defaultUrl().replaceFirst("^[a-z]+://[^/]*", "").replaceFirst("/$", "");
         var relative = PROJECT.relativize(file);
         var label = relative.startsWith("samples") ? relative.getName(1).toString() : "oai " + file.getFileName().toString().replaceFirst("\\.yaml$", "");
         var cases = new ArrayList<Case>();
         for (var operation : api.operations()) {
-            valid(api, operation, examples, serverPath).ifPresent(message -> {
+            valid(api, operation, examples).ifPresent(message -> {
                 var name = label + " " + operation.method() + " " + operation.path();
                 cases.add(request(name, true, message, ours, theirs));
                 for (var parameter : operation.parameters()) {
@@ -187,7 +157,7 @@ class AtlassianDifferentialTest {
 
     private static Case request(String name, boolean valid, Message message, OpenApiValidator ours, OpenApiInteractionValidator theirs) {
         var our = ours.validateRequest(message.ours()).report();
-        var their = theirs.validateRequest(message.theirs());
+        var their = theirs.validateRequest(theirs(message));
         return new Case(name, valid, !our.hasErrors(), !their.hasErrors(), "openapi-fn: " + our.errors() + "; Atlassian: " + their.getMessages().stream()
             .filter(m -> m.getLevel() == com.atlassian.oai.validator.report.ValidationReport.Level.ERROR).map(m -> m.getKey() + " " + m.getMessage()).toList());
     }
@@ -205,107 +175,9 @@ class AtlassianDifferentialTest {
             .filter(m -> m.getLevel() == com.atlassian.oai.validator.report.ValidationReport.Level.ERROR).map(m -> m.getKey() + " " + m.getMessage()).toList());
     }
 
-    /** A valid request: example values for the path and the required parameters, credentials, and a JSON body if one is described. */
-    private static Optional<Message> valid(OpenApiDocument api, ApiOperation operation, ExampleGenerator examples, String serverPath) {
-        var path = operation.path();
-        var query = new ArrayList<Map.Entry<String, String>>();
-        var headers = new LinkedHashMap<String, String>();
-        for (var parameter : operation.parameters()) {
-            if (!parameter.required() && parameter.in() != ParameterLocation.PATH) {
-                continue;
-            }
-            var value = example(parameter, examples);
-            if (value.isEmpty() || !parameter.content().isEmpty()) {
-                return Optional.empty();
-            }
-            var spec = ParameterSerializer.Spec.of(parameter);
-            switch (parameter.in()) {
-                case PATH -> path = path.replace("{" + parameter.name() + "}", ParameterSerializer.path(spec, value.get()));
-                case QUERY -> query.addAll(ParameterSerializer.query(spec, value.get()));
-                case HEADER -> headers.put(parameter.name(), ParameterSerializer.header(spec, value.get()));
-                default -> {
-                    return Optional.empty(); // cookies and querystrings
-                }
-            }
-        }
-        if (!credentials(api, operation, headers, query)) {
-            return Optional.empty();
-        }
-        var body = Optional.<String>empty();
-        var requestBody = operation.operation().requestBody();
-        if (requestBody.isPresent()) {
-            var json = jsonBody(operation);
-            if (json.isEmpty()) {
-                return Optional.empty();
-            }
-            var example = mediaTypeExample(requestBody.get().content().get("application/json"), examples, Direction.REQUEST);
-            if (example.isEmpty()) {
-                return Optional.empty();
-            }
-            body = example.map(JsonWriter::compact);
-            headers.put("Content-Type", "application/json");
-        }
-        return Optional.of(new Message(operation.method(), serverPath + path, query, headers, body));
-    }
-
-    private static Optional<JsonValue> example(Parameter parameter, ExampleGenerator examples) {
-        return parameter.example().or(() -> parameter.examples().values().stream().flatMap(e -> e.data().stream()).findFirst())
-            .or(() -> parameter.effectiveSchema().flatMap(schema -> examples.example(schema, Direction.REQUEST)));
-    }
-
-    private static Optional<JsonValue> mediaTypeExample(MediaType mediaType, ExampleGenerator examples, Direction direction) {
-        return mediaType.example().or(() -> mediaType.examples().values().stream().flatMap(e -> e.data().stream()).findFirst())
-            .or(() -> mediaType.schema().flatMap(schema -> examples.example(schema, direction)));
-    }
-
-    private static Optional<Schema> jsonBody(ApiOperation operation) {
-        return operation.operation().requestBody().map(body -> body.content().get("application/json")).flatMap(MediaType::schema);
-    }
-
-    /** Example JSON bodies (or none) of the fixed statuses whose responses describe JSON or nothing. */
-    private static Map<Integer, Optional<JsonValue>> responses(OpenApiDocument api, ApiOperation operation, ExampleGenerator examples) {
-        var responses = new LinkedHashMap<Integer, Optional<JsonValue>>();
-        operation.operation().responses().byStatus().forEach((status, response) -> {
-            if (!status.matches("[0-9]{3}") || !response.headers().values().stream().noneMatch(header -> header.required())) {
-                return;
-            }
-            if (response.content().isEmpty()) {
-                responses.put(Integer.parseInt(status), Optional.empty());
-            } else if (response.content().size() == 1 && response.content().containsKey("application/json")) {
-                mediaTypeExample(response.content().get("application/json"), examples, Direction.RESPONSE)
-                    .ifPresent(body -> responses.put(Integer.parseInt(status), Optional.of(body)));
-            }
-        });
-        return responses;
-    }
-
     /** Whether the JSON response of {@code status} is described as an object (so that an array is the wrong type). */
     private static boolean objectSchema(OpenApiDocument api, ApiOperation operation, int status) {
-        return operation.operation().responses().forStatus(status).map(response -> response.content().get("application/json")).flatMap(MediaType::schema)
-            .map(schema -> api.schemas().deref(schema).types().contains("object")).orElse(false);
-    }
-
-    /** Credentials for the first security requirement; false when they cannot be made up (mutual TLS). */
-    private static boolean credentials(OpenApiDocument api, ApiOperation operation, Map<String, String> headers, List<Map.Entry<String, String>> query) {
-        var requirement = operation.security().stream().findFirst();
-        if (requirement.isEmpty()) {
-            return true;
-        }
-        var schemes = api.model().components().securitySchemes();
-        for (var name : requirement.get().schemes().keySet()) {
-            switch (schemes.get(name)) {
-                case SecurityScheme.ApiKey key when key.in() == ParameterLocation.HEADER -> headers.put(key.name(), "secret");
-                case SecurityScheme.ApiKey key when key.in() == ParameterLocation.QUERY -> query.add(Map.entry(key.name(), "secret"));
-                case SecurityScheme.Http http when http.scheme().toLowerCase(Locale.ROOT).equals("basic") -> headers.put("Authorization", "Basic dXNlcjpwYXNz");
-                case SecurityScheme.Http http -> headers.put("Authorization", "Bearer token");
-                case SecurityScheme.OAuth2 oauth -> headers.put("Authorization", "Bearer token");
-                case SecurityScheme.OpenIdConnect oidc -> headers.put("Authorization", "Bearer token");
-                case null, default -> {
-                    return false;
-                }
-            }
-        }
-        return true;
+        return jsonResponse(operation, status).map(schema -> api.schemas().deref(schema).types().contains("object")).orElse(false);
     }
 
     /**

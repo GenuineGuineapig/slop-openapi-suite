@@ -9,6 +9,8 @@ mockito = "5.23.0"
 jacoco = "0.8.15"
 # Only to compare request and response validation with (see AtlassianDifferentialTest).
 atlassian-validator = "3.0.0"
+# Only to compare body validation with (see NetworkntDifferentialTest); the version Atlassian's validator uses.
+networknt-validator = "2.0.1"
 
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
@@ -20,3 +22,4 @@ junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 mockito = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 atlassian-validator = { module = "com.atlassian.oai:openapi-request-validator-core", version.ref = "atlassian-validator" }
+networknt-validator = { module = "com.networknt:json-schema-validator", version.ref = "networknt-validator" }

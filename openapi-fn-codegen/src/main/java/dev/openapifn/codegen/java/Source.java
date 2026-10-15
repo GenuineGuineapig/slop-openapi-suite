@@ -21,7 +21,7 @@ public final class Source {
         return this;
     }
 
-    /** Appends {@code header {} and indents. */
+    /** Appends <code>header {</code> and indents. */
     public Source open(String header) {
         line(header + " {");
         depth++;

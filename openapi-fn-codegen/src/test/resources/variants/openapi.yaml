@@ -184,8 +184,9 @@ paths:
               schema:
                 $id: 'https://example.com/schemas/PointPage'
                 $defs:
-                  item: {$dynamicAnchor: item, $ref: '#/components/schemas/Point'}
-                $ref: '#/components/schemas/Page'
+                  item: {$dynamicAnchor: item, $ref: Point}
+                # Relative to the $id: https://example.com/schemas/Page ('#/components/...' would refer into this schema).
+                $ref: Page
   /subscriptions:
     post:
       operationId: subscribe
@@ -228,7 +229,7 @@ paths:
         '204': {description: unsubscribed}
 components:
   schemas:
-    Point: {type: object, required: [x], properties: {x: {type: integer}, y: {type: integer}}}
+    Point: {$id: 'https://example.com/schemas/Point', type: object, required: [x], properties: {x: {type: integer}, y: {type: integer}}}
     Page:
       $id: 'https://example.com/schemas/Page'
       description: A page of any items (a generic schema)

@@ -47,8 +47,12 @@ openapiFn {
 }
 ```
 
-Until the artifacts are published, use this repository as a composite build, as the samples do
-(`pluginManagement { includeBuild("…") }` and `includeBuild("…")` in `settings.gradle.kts`).
+Until the artifacts are on Maven Central, publish them to your local Maven repository with
+`./gradlew publishToMavenLocal` and add `mavenLocal()` to the plugin repositories
+(`pluginManagement { repositories { … } }` in `settings.gradle.kts`) and to the project's
+repositories; `tools/consumer.sh <sample>` builds a sample that way. Or use this repository as a
+composite build, as the samples do (`pluginManagement { includeBuild("…") }` and `includeBuild("…")`
+in `settings.gradle.kts`).
 
 The build generates everything into `build/generated/openapi-fn/petstore/` and compiles it with
 your code. Remote documents the description references (`$ref: 'https://…'`) are bundled with the
@@ -401,7 +405,11 @@ what Swagger 2.0 descriptions are converted to) as openapi-fn does; and the norm
 the specification texts (parameter styles, parameter and form body examples), read from the texts
 themselves, which must serialize as shown and validate and parse back at runtime. Request and
 response validation is also compared with Atlassian's validator on over 100 messages: they agree,
-except where Atlassian demonstrably errs (the test names each case and why). See
+except where Atlassian demonstrably errs (the test names each case and why). Body validation is
+compared with networknt's json-schema-validator, which also reads 3.1 and 3.2, on over 6000 bodies
+mutated from every example of the descriptions: they agree but for one documented networknt error
+in 3.0. Each sample also builds and passes its tests as a project outside this repository, with
+openapi-fn taken from the local Maven repository (`tools/consumer.sh`). See
 [docs/spec-coverage.md](docs/spec-coverage.md#how-this-is-verified).
 
 ## Modules
