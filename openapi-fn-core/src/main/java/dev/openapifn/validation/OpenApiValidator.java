@@ -666,7 +666,8 @@ public final class OpenApiValidator {
      * {@link #framer()} is parsed and validated against the {@code itemSchema} and the item of the
      * {@code schema} at the item's position, and, for multipart parts, against the item encoding.
      * Constraints of the {@code schema} on the sequence as a whole are checked as items pass:
-     * {@code maxItems}, {@code uniqueItems} (which remembers the items seen) and {@code maxContains}
+     * {@code maxItems}, {@code uniqueItems} (which remembers a 32-byte digest of each item, see
+     * {@link dev.openapifn.json.JsonDigest}) and {@code maxContains}
      * on the item that violates them, {@code minItems} and {@code contains} / {@code minContains}
      * with the last frame. Findings are located at {@code body/<index>}, or at {@code body} for the
      * sequence. Instances are not thread-safe.
@@ -678,7 +679,8 @@ public final class OpenApiValidator {
         private final Direction direction;
         private final String side;
         private final List<Schema> sequence;
-        private final java.util.Set<JsonValue> seen = new java.util.HashSet<>();
+        private final boolean unique;
+        private final java.util.Set<dev.openapifn.json.JsonDigest> seen = new java.util.HashSet<>();
         private final Map<Schema, Integer> contained = new LinkedHashMap<>();
         private int index;
 
@@ -689,6 +691,7 @@ public final class OpenApiValidator {
             this.side = side;
             this.sequence = mediaType.schema().map(OpenApiValidator.this::applying).orElse(List.of()).stream()
                 .filter(schema -> SEQUENCE_KEYWORDS.stream().anyMatch(schema::has)).toList();
+            this.unique = sequence.stream().anyMatch(schema -> schema.object().bool("uniqueItems").orElse(false));
         }
 
         /** The content type of the body. */
@@ -732,11 +735,12 @@ public final class OpenApiValidator {
         /** The constraints on the sequence that an item can violate as it arrives. */
         private void sequenceItem(JsonValue value, int position, Issues issues) {
             var location = "body/" + position;
+            var duplicate = unique && !seen.add(dev.openapifn.json.JsonDigest.of(value));
             for (var schema : sequence) {
                 var key = side + ".body.schema.";
                 schema.number("maxItems").filter(max -> position == max.intValue())
                     .ifPresent(max -> issues.add(key + "maxItems", "must have at most " + max.intValue() + " items", location));
-                if (schema.object().bool("uniqueItems").orElse(false) && seen.contains(value)) {
+                if (duplicate && schema.object().bool("uniqueItems").orElse(false)) {
                     issues.add(key + "uniqueItems", "must not contain duplicate items", location);
                 }
                 schema.subschema("contains").filter(contains -> schemas.validate(contains, value, direction).isEmpty()).ifPresent(contains -> {
@@ -745,7 +749,6 @@ public final class OpenApiValidator {
                         issues.add(key + "maxContains", "must contain at most " + max.intValue() + " matching items", location));
                 });
             }
-            seen.add(value);
         }
 
         /** The constraints on the sequence that are only known at its end. */

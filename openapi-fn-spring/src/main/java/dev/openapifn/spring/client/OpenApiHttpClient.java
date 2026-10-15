@@ -8,7 +8,6 @@ import dev.openapifn.validation.OperationMatch;
 import java.net.URI;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -74,15 +73,16 @@ public final class OpenApiHttpClient {
             var itemType = body.value() instanceof Stream<?> ? codec.itemType(body) : Optional.<ContentType>empty();
             if (itemType.isPresent()) {
                 var type = itemType.get();
-                var check = new AtomicReference<@Nullable Consumer<byte[]>>();
-                var items = new StreamedBody((Stream<?>) body.value(), item -> {
-                    var bytes = codec.encodeItem(item, type);
-                    if (validator != null) {
-                        check.updateAndGet(current -> current != null ? current : validator.requestItems(match.get(), type)).accept(bytes);
+                var items = new StreamedBody((Stream<?>) body.value(), item -> codec.encodeItem(item, type), BodyWriter.end(type));
+                request.header("Content-Type", type.toString()).body(out -> {
+                    if (validator == null) {
+                        items.writeTo(out);
+                        return;
                     }
-                    return bytes;
-                }, BodyWriter.end(type));
-                request.header("Content-Type", type.toString()).body(items::writeTo);
+                    var sink = validator.requestItems(match.get(), type, out);
+                    items.writeTo(sink);
+                    sink.finish();
+                });
                 streamed = true;
             } else {
                 var encoded = encode(body);

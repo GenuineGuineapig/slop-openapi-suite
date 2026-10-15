@@ -185,9 +185,9 @@ public final class OpenApiWebClient {
         }
         if (itemType.isPresent()) {
             var type = itemType.get();
-            var validated = validatedItems(sending, type, java.util.Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)));
             var end = BodyWriter.end(type);
-            request.body(BodyInserters.fromDataBuffers(validated.concatWith(end.length == 0 ? Flux.empty() : Flux.just(end))
+            var streamedBody = java.util.Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)).concatWith(end.length == 0 ? Flux.empty() : Flux.just(end));
+            request.body(BodyInserters.fromDataBuffers(validatedItems(sending, type, streamedBody)
                 .map(bytes -> (DataBuffer) DefaultDataBufferFactory.sharedInstance.wrap(bytes))));
         }
         return request.retrieve().onStatus(status -> true, response -> Mono.empty()).toEntityFlux(DataBuffer.class)
@@ -219,20 +219,25 @@ public final class OpenApiWebClient {
         });
     }
 
-    /** The encoded items of a streamed request body, validated as they are produced when validating. */
-    private Flux<byte[]> validatedItems(Sending sending, ContentType type, Flux<byte[]> items) {
+    /**
+     * The encoded body of a streamed request, validated as it is produced when validating: each item
+     * passes once it is valid, and the sequence as a whole is checked at its end.
+     */
+    private Flux<byte[]> validatedItems(Sending sending, ContentType type, Flux<byte[]> body) {
         return Flux.defer(() -> {
             var validator = sending.match.flatMap(m -> java.util.Objects.requireNonNull(this.validator).requestItems(m, type.toString()));
             if (validator.isEmpty()) {
-                return items;
+                return body;
             }
             var framer = validator.get().framer();
-            return items.doOnNext(bytes -> framer.feed(bytes).forEach(frame -> {
+            java.util.function.Consumer<ItemFramer.Frame> check = frame -> {
                 var report = validator.get().validate(frame).report();
                 if (report.hasErrors()) {
                     throw new ClientValidationException("A request item violates the API description", report);
                 }
-            }));
+            };
+            return body.concatMap(bytes -> Flux.fromIterable(framer.feed(bytes)).doOnNext(check).map(ItemFramer.Frame::raw))
+                .concatWith(Mono.fromCallable(framer::finish).doOnNext(check).map(ItemFramer.Frame::raw).filter(raw -> raw.length > 0));
         });
     }
 

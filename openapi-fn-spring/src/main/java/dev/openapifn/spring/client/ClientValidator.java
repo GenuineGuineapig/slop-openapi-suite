@@ -12,6 +12,7 @@ import dev.openapifn.validation.ValidationReport;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
@@ -63,21 +64,74 @@ public final class ClientValidator {
     }
 
     /**
-     * A check of the encoded items of a streamed request body, in the order they are written:
-     * throws a {@link ClientValidationException} on the first invalid item.
+     * {@code out}, passing a streamed request body on item by item: each item once it is complete
+     * and valid, so that an invalid item is never sent. {@link ItemSink#finish} checks the sequence
+     * as a whole ({@code minItems}, {@code contains}). Bodies of media types whose items are not
+     * described pass as they are.
      */
-    public Consumer<byte[]> requestItems(Optional<OperationMatch> match, ContentType type) {
-        var items = match.flatMap(m -> validator.requestItems(m, type.toString()));
-        if (items.isEmpty()) {
-            return bytes -> { };
+    public ItemSink requestItems(Optional<OperationMatch> match, ContentType type, OutputStream out) {
+        return new ItemSink(out, match.flatMap(m -> validator.requestItems(m, type.toString())));
+    }
+
+    /**
+     * A streamed request body on its way out: written in any chunks, passed on item by item.
+     * Throws a {@link ClientValidationException} at the first invalid item (which is not passed on).
+     */
+    public static final class ItemSink extends OutputStream {
+
+        private final OutputStream out;
+        private final Optional<OpenApiValidator.ItemValidator> items;
+        private final Optional<ItemFramer> framer;
+        private boolean finished;
+
+        ItemSink(OutputStream out, Optional<OpenApiValidator.ItemValidator> items) {
+            this.out = out;
+            this.items = items;
+            this.framer = items.map(OpenApiValidator.ItemValidator::framer);
         }
-        var framer = items.get().framer();
-        return bytes -> framer.feed(bytes).forEach(frame -> {
-            var report = items.get().validate(frame).report();
+
+        @Override
+        public void write(int b) throws IOException {
+            write(new byte[] {(byte) b}, 0, 1);
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (framer.isEmpty()) {
+                out.write(bytes, offset, length);
+                return;
+            }
+            for (var frame : framer.get().feed(bytes, offset, length)) {
+                pass(frame);
+            }
+        }
+
+        /** Passes on the rest of the body, checking the sequence as a whole; later calls do nothing. */
+        public void finish() throws IOException {
+            if (!finished && framer.isPresent()) {
+                pass(framer.get().finish());
+            }
+            finished = true;
+        }
+
+        @Override
+        public void flush() throws IOException {
+            out.flush();
+        }
+
+        @Override
+        public void close() throws IOException {
+            finish();
+            out.close();
+        }
+
+        private void pass(ItemFramer.Frame frame) throws IOException {
+            var report = items.orElseThrow().validate(frame).report();
             if (report.hasErrors()) {
                 throw new ClientValidationException("A request item violates the API description", report);
             }
-        });
+            out.write(frame.raw());
+        }
     }
 
     /** Validates a whole response; {@code description} names the request in messages. */
@@ -153,6 +207,21 @@ public final class ClientValidator {
                 validate(framer.finish());
             }
             return count;
+        }
+
+        /** Re-reading would feed bytes to the framer twice. */
+        @Override
+        public boolean markSupported() {
+            return false;
+        }
+
+        @Override
+        public void mark(int limit) {
+        }
+
+        @Override
+        public void reset() throws IOException {
+            throw new IOException("mark/reset not supported");
         }
 
         private void validate(ItemFramer.Frame frame) {

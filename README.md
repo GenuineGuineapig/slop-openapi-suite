@@ -155,6 +155,24 @@ passes, and only passes on items that are valid. When responses fail on violatio
 response becomes a 500 problem while nothing has been sent yet; later, the stream ends before the
 invalid item. An invalid request item ends the request's stream with a 400 problem.
 
+Clients validate what they stream the same way: an item is sent once it is complete and valid, and
+the sequence as a whole (`minItems`, `contains`) is checked at its end. A multipart part is complete
+when the next delimiter begins, so it is held until then. Constraints on the whole sequence take no
+more memory than they must: `maxItems` and `contains` count, and `uniqueItems` remembers a 32-byte
+digest of each item (equal for equal JSON, whatever the number spelling or member order).
+
+`RestClient`s other than the generated clients' validate with `OpenApiValidatingRequestFactory`,
+which wraps their request factory and streams like the generated clients do:
+
+```java
+var client = RestClient.builder()
+    .requestFactory(new OpenApiValidatingRequestFactory(new JdkClientHttpRequestFactory(), runtimes.get("petstore").validator(), true))
+    .build();
+```
+
+(`OpenApiClientValidationInterceptor` validates too, but Spring hands interceptors buffered
+request bodies.)
+
 ## Links and callback URLs
 
 Link Objects and callback URLs are runtime expressions (`$url`, `$method`, `$statusCode`,
@@ -375,10 +393,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 
 ## Limitations
 
-* **Streams are validated as they pass.** An item is passed on once it is complete and valid;
-  `uniqueItems` remembers the items seen so far. `OpenApiClientValidationInterceptor`, for
-  `RestClient`s other than the generated clients', sees whole request bodies, because Spring
-  buffers request bodies for interceptors (generated clients validate without buffering).
 * **Remote references are fetched on every build.** The Gradle task fetches them to see whether
   they changed; it is up to date (or taken from the build cache) while they did not.
 * **Different callbacks on one URL with the same method cannot be told apart.** The operations of
