@@ -1,5 +1,6 @@
 package dev.openapifn.model;
 
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -12,17 +13,15 @@ public enum ParameterLocation {
     HEADER,
     COOKIE;
 
+    private final String value = name().toLowerCase(Locale.ROOT);
+
+    /** The name in descriptions: {@code path}, {@code query}, … */
     public String value() {
-        return name().toLowerCase(Locale.ROOT);
+        return value;
     }
 
     public static Optional<ParameterLocation> of(String value) {
-        for (var location : values()) {
-            if (location.value().equals(value)) {
-                return Optional.of(location);
-            }
-        }
-        return Optional.empty();
+        return Arrays.stream(values()).filter(location -> location.value.equals(value)).findFirst();
     }
 
     /** The default style for parameters in this location. */

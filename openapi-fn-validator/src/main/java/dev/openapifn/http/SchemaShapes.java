@@ -46,9 +46,9 @@ public final class SchemaShapes {
         return result;
     }
 
-    private void collect(Schema schema, List<Schema> result, Set<java.net.URI> seen) {
+    private void collect(Schema schema, List<Schema> result, Set<Schema.Key> seen) {
         var resolved = registry.deref(schema);
-        if (!seen.add(resolved.location())) {
+        if (!seen.add(resolved.key())) {
             return;
         }
         result.add(resolved);

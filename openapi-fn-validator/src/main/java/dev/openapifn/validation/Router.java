@@ -6,6 +6,8 @@ import dev.openapifn.model.Server;
 import dev.openapifn.parse.OpenApiDocument;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,11 +42,13 @@ public final class Router {
         var byPath = new LinkedHashMap<String, Map<String, ApiOperation>>();
         api.operations().forEach(op -> byPath.computeIfAbsent(op.path(), path -> new LinkedHashMap<>()).put(op.method(), op));
         var list = new ArrayList<Entry>();
+        // Paths with the same prefixes share them, so that a request strips each set of prefixes once (see find).
+        var shared = new HashMap<List<String>, List<PathTemplate>>();
         byPath.forEach((path, operations) -> {
             var servers = operations.values().iterator().next().pathItem().servers();
             var paths = new ArrayList<>(basePaths);
             (servers.isEmpty() ? api.model().servers() : servers).stream().map(Router::prefix).forEach(paths::add);
-            var prefixes = paths.stream().distinct().map(PathTemplate::compile).toList();
+            var prefixes = shared.computeIfAbsent(paths.stream().distinct().toList(), distinct -> distinct.stream().map(PathTemplate::compile).toList());
             list.add(new Entry(PathTemplate.compile(path), prefixes, operations));
         });
         list.sort(Comparator.comparing(Entry::template, PathTemplate::compareSpecificity));
@@ -83,8 +87,10 @@ public final class Router {
     }
 
     private Optional<Map.Entry<Entry, Map<String, String>>> find(String path, boolean ignorePrefixes) {
+        var stripped = new IdentityHashMap<List<PathTemplate>, List<String>>();
         for (var entry : entries) {
-            var candidates = ignorePrefixes ? List.of(path) : entry.prefixes().stream().flatMap(p -> p.stripPrefix(path).stream()).toList();
+            var candidates = ignorePrefixes ? List.of(path)
+                : stripped.computeIfAbsent(entry.prefixes(), prefixes -> prefixes.stream().flatMap(p -> p.stripPrefix(path).stream()).toList());
             for (var candidate : candidates) {
                 var values = entry.template().match(candidate);
                 if (values.isPresent()) {

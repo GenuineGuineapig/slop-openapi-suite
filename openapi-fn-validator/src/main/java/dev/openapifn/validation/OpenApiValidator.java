@@ -720,7 +720,7 @@ public final class OpenApiValidator {
                 var itemSchema = mediaType.itemSchema().map(api.schemas()::deref);
                 itemSchema.ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", at, schemas.validate(schema, value.get(), direction)));
                 mediaType.schema().flatMap(schema -> shapes.item(schema, position)).map(api.schemas()::deref)
-                    .filter(schema -> itemSchema.filter(same -> same.location().equals(schema.location())).isEmpty())
+                    .filter(schema -> itemSchema.filter(same -> same.key().equals(schema.key())).isEmpty())
                     .ifPresent(schema -> issues.schemaAt(side + ".body.schema", "body", at, schemas.validate(schema, value.get(), direction)));
                 sequenceItem(value.get(), position, issues);
             }
@@ -776,9 +776,9 @@ public final class OpenApiValidator {
         return result;
     }
 
-    private void applying(Schema schema, List<Schema> result, java.util.Set<java.net.URI> seen) {
+    private void applying(Schema schema, List<Schema> result, Set<Schema.Key> seen) {
         var resolved = api.schemas().deref(schema);
-        if (seen.add(resolved.location())) {
+        if (seen.add(resolved.key())) {
             result.add(resolved);
             resolved.subschemaList("allOf").forEach(member -> applying(member, result, seen));
         }

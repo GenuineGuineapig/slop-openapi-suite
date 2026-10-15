@@ -1,5 +1,6 @@
 package dev.openapifn.schema;
 
+import dev.openapifn.fn.Result;
 import dev.openapifn.json.Json;
 import dev.openapifn.json.JsonArray;
 import dev.openapifn.json.JsonBoolean;
@@ -16,15 +17,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Validates JSON instances against schemas. Supports JSON Schema draft 4 through 2020-12 and the
@@ -32,8 +38,10 @@ import java.util.stream.Collectors;
  * {@code $dynamicRef}, {@code $recursiveRef}, format assertion, OpenAPI {@code nullable} and
  * direction-aware {@code readOnly}/{@code writeOnly}. A {@code discriminator} does not change the
  * outcome, as the OpenAPI Specification requires; it only explains a failed {@code oneOf} or
- * {@code anyOf} by the member its value selects. Instances are
- * immutable and thread-safe.
+ * {@code anyOf} by the member its value selects.
+ *
+ * <p>Each schema's keywords are read once into a {@link Plan}, which later evaluations of the
+ * schema use instead of its JSON. Instances are immutable (but for that cache) and thread-safe.
  */
 public final class SchemaValidator {
 
@@ -69,7 +77,13 @@ public final class SchemaValidator {
 
     private final SchemaRegistry registry;
     private final Options options;
-    private final Map<String, Set<String>> restricted = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<PlanKey, Plan> plans = new ConcurrentHashMap<>();
+    private final Map<Restriction, Set<String>> restricted = new ConcurrentHashMap<>();
+    private final Map<KeywordAt, URI> keywordLocations = new ConcurrentHashMap<>();
+
+    /** A keyword of a schema, whose location errors report (see {@link Run#keywordLocation}). */
+    private record KeywordAt(Schema.Key schema, String keyword) {
+    }
 
     public SchemaValidator(SchemaRegistry registry, Options options) {
         this.registry = registry;
@@ -97,6 +111,200 @@ public final class SchemaValidator {
     public List<SchemaError> validate(Schema schema, JsonValue instance, Direction direction) {
         return new Run(direction).evaluate(schema, instance, JsonPointer.ROOT).errors();
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Plans: the keywords of a schema, read once
+
+    /** What a plan is kept by: a schema's location with what its meaning there depends on. */
+    private record PlanKey(Schema.Key schema, URI baseUri, Dialect dialect) {
+    }
+
+    /**
+     * A schema's keywords as evaluating it needs them: subschemas made, patterns compiled, bounds
+     * read. The groups of type-specific keywords are present only when the schema has one of them.
+     *
+     * @param schema the schema without the keywords its dialect or vocabularies do not have
+     * @param nullable whether {@code null} is valid outright (OpenAPI 3.0 {@code nullable})
+     * @param enumValues the {@code enum} values, when the keyword is present
+     * @param format the validator of an asserted {@code format}
+     */
+    private record Plan(Schema schema, boolean nullable, Optional<String> ref, Optional<String> dynamicRef, Optional<String> recursiveRef,
+                        Set<String> types, Optional<List<JsonValue>> enumValues, Optional<JsonValue> constValue, Optional<FormatValidator> format,
+                        Optional<NumberKeywords> numbers, Optional<StringKeywords> strings, Optional<ArrayKeywords> arrays,
+                        Optional<ObjectKeywords> objects, Combinators combinators) {
+    }
+
+    /** A {@code maximum} or {@code minimum}, exclusive by the boolean {@code exclusiveMaximum}/{@code exclusiveMinimum} of draft 4. */
+    private record Bound(BigDecimal value, boolean exclusive) {
+    }
+
+    private record NumberKeywords(Optional<BigDecimal> multipleOf, Optional<Bound> maximum, Optional<Bound> minimum, Optional<BigDecimal> exclusiveMaximum,
+                                  Optional<BigDecimal> exclusiveMinimum) {
+    }
+
+    /** A {@code pattern}, as written and compiled (or why it does not compile). */
+    private record Regex(String source, Result<Pattern, String> compiled) {
+
+        static Regex of(String source) {
+            return new Regex(source, EcmaRegex.compile(source));
+        }
+
+        boolean finds(String text) {
+            return compiled.toOptional().filter(pattern -> pattern.matcher(text).find()).isPresent();
+        }
+
+        /** Why {@code text} fails the pattern: it does not compile, or finds no match. */
+        Optional<String> mismatch(String text) {
+            return compiled.fold(pattern -> pattern.matcher(text).find() ? Optional.<String>empty() : Optional.of("must match pattern " + source),
+                Optional::of);
+        }
+    }
+
+    /** {@code contentEncoding}, {@code contentMediaType} and {@code contentSchema}, when asserted. */
+    private record Content(boolean base64, boolean json, Optional<Schema> schema) {
+    }
+
+    private record StringKeywords(Optional<Integer> maxLength, Optional<Integer> minLength, Optional<Regex> pattern, Optional<Content> content) {
+    }
+
+    private record Contains(Schema schema, int min, Optional<Integer> max) {
+    }
+
+    /**
+     * Array keywords.
+     *
+     * @param tuple the schemas of the leading items ({@code prefixItems}, or the array form of {@code items})
+     * @param rest the schema of the other items ({@code items}, or {@code additionalItems})
+     */
+    private record ArrayKeywords(Optional<Integer> maxItems, Optional<Integer> minItems, boolean uniqueItems, List<Schema> tuple, Optional<Schema> rest,
+                                 Optional<Contains> contains, Optional<Schema> unevaluatedItems) {
+    }
+
+    /** A property's schema, and whether it is read-only or write-only once dereferenced. */
+    private record Property(Schema schema, boolean readOnly, boolean writeOnly) {
+    }
+
+    private record PatternProperty(Regex pattern, Schema schema) {
+    }
+
+    private record ObjectKeywords(Optional<Integer> maxProperties, Optional<Integer> minProperties, List<String> required,
+                                  Map<String, List<String>> dependentRequired, Map<String, Property> properties, List<PatternProperty> patternProperties,
+                                  Optional<Schema> additionalProperties, Optional<Schema> propertyNames, Map<String, Schema> dependentSchemas,
+                                  Optional<Schema> unevaluatedProperties) {
+    }
+
+    private record Combinators(List<Schema> allOf, List<Schema> anyOf, List<Schema> oneOf, Optional<Schema> not, Optional<Schema> condition,
+                               Optional<Schema> then, Optional<Schema> otherwise) {
+    }
+
+    private static final Set<String> NUMBER_KEYWORDS = Set.of("multipleOf", "maximum", "minimum", "exclusiveMaximum", "exclusiveMinimum");
+    private static final Set<String> STRING_KEYWORDS = Set.of("maxLength", "minLength", "pattern", "contentEncoding", "contentMediaType");
+    private static final Set<String> ARRAY_KEYWORDS = Set.of("maxItems", "minItems", "uniqueItems", "items", "prefixItems", "additionalItems", "contains",
+        "unevaluatedItems");
+    private static final Set<String> OBJECT_KEYWORDS = Set.of("maxProperties", "minProperties", "required", "dependentRequired", "dependencies",
+        "properties", "patternProperties", "additionalProperties", "propertyNames", "dependentSchemas", "unevaluatedProperties");
+
+    /** The plan of a schema that is not a boolean schema. */
+    private Plan plan(Schema schema) {
+        return plans.computeIfAbsent(new PlanKey(schema.key(), schema.baseUri(), schema.dialect()), key -> planOf(effective(schema)));
+    }
+
+    /**
+     * {@code schema} without the keywords its dialect does not have and, under a custom metaschema,
+     * those of the vocabularies it does not enable.
+     */
+    private Schema effective(Schema schema) {
+        var foreign = schema.dialect().foreignKeywords();
+        var inactive = registry.vocabularies(schema).map(Vocabularies::inactiveKeywords).orElse(Set.of());
+        var object = schema.object();
+        if (object.keys().stream().noneMatch(keyword -> foreign.contains(keyword) || inactive.contains(keyword))) {
+            return schema;
+        }
+        var kept = new LinkedHashMap<>(object.members());
+        kept.keySet().removeIf(keyword -> foreign.contains(keyword) || inactive.contains(keyword));
+        return new Schema(new JsonObject(kept), schema.document(), schema.pointer(), schema.baseUri(), schema.dialect());
+    }
+
+    private Plan planOf(Schema schema) {
+        var object = schema.object();
+        var dialect = schema.dialect();
+        var asserted = options.assertFormats() || registry.vocabularies(schema).filter(v -> v.contains(Vocabularies.FORMAT_ASSERTION)).isPresent();
+        return new Plan(schema, dialect.nullableKeyword() && object.bool("nullable").orElse(false), schema.ref(), object.string("$dynamicRef"),
+            object.string("$recursiveRef"), Set.copyOf(schema.types()), object.has("enum") ? Optional.of(schema.enumValues()) : Optional.empty(),
+            schema.constValue(), schema.format().filter(format -> asserted).flatMap(format -> formatValidator(format, dialect)),
+            any(object, NUMBER_KEYWORDS) ? Optional.of(numbers(schema)) : Optional.empty(),
+            any(object, STRING_KEYWORDS) ? Optional.of(strings(schema)) : Optional.empty(),
+            any(object, ARRAY_KEYWORDS) ? Optional.of(arrays(schema)) : Optional.empty(),
+            any(object, OBJECT_KEYWORDS) ? Optional.of(objects(schema)) : Optional.empty(),
+            new Combinators(schema.subschemaList("allOf"), schema.subschemaList("anyOf"), schema.subschemaList("oneOf"), schema.subschema("not"),
+                schema.subschema("if"), schema.subschema("then"), schema.subschema("else")));
+    }
+
+    private static boolean any(JsonObject object, Set<String> keywords) {
+        return object.keys().stream().anyMatch(keywords::contains);
+    }
+
+    /** Draft 4 and 6 host names follow RFC 1123, unless another validator was configured. */
+    private Optional<FormatValidator> formatValidator(String format, Dialect dialect) {
+        return Optional.ofNullable(options.formats().get(format)).map(validator -> validator == Formats.HOSTNAME
+            && (dialect == Dialect.DRAFT_4 || dialect == Dialect.DRAFT_6) ? Formats.RFC_1123_HOSTNAME : validator);
+    }
+
+    private static NumberKeywords numbers(Schema schema) {
+        var object = schema.object();
+        var booleanBounds = schema.dialect().booleanExclusiveBounds();
+        return new NumberKeywords(schema.number("multipleOf"),
+            schema.number("maximum").map(max -> new Bound(max, booleanBounds && object.bool("exclusiveMaximum").orElse(false))),
+            schema.number("minimum").map(min -> new Bound(min, booleanBounds && object.bool("exclusiveMinimum").orElse(false))),
+            schema.number("exclusiveMaximum"), schema.number("exclusiveMinimum"));
+    }
+
+    private StringKeywords strings(Schema schema) {
+        var object = schema.object();
+        var content = Optional.of(schema).filter(s -> options.assertContent()).map(s -> new Content(
+            object.string("contentEncoding").filter("base64"::equalsIgnoreCase).isPresent(),
+            object.string("contentMediaType").filter(type -> type.equals("application/json") || type.endsWith("+json")).isPresent(),
+            schema.subschema("contentSchema")));
+        return new StringKeywords(integer(schema, "maxLength"), integer(schema, "minLength"), schema.pattern().map(Regex::of), content);
+    }
+
+    private static ArrayKeywords arrays(Schema schema) {
+        var legacyTuple = schema.keyword("items").filter(JsonArray.class::isInstance).isPresent();
+        var contains = schema.subschema("contains").map(c -> new Contains(c, integer(schema, "minContains").orElse(1), integer(schema, "maxContains")));
+        return new ArrayKeywords(integer(schema, "maxItems"), integer(schema, "minItems"), schema.object().bool("uniqueItems").orElse(false),
+            schema.subschemaList(legacyTuple ? "items" : "prefixItems"), schema.subschema(legacyTuple ? "additionalItems" : "items"), contains,
+            schema.subschema("unevaluatedItems"));
+    }
+
+    private ObjectKeywords objects(Schema schema) {
+        var dependentRequired = new LinkedHashMap<String, List<String>>();
+        for (var keyword : List.of("dependentRequired", "dependencies")) {
+            schema.object().object(keyword).ifPresent(map -> map.members().forEach((name, required) -> {
+                if (required instanceof JsonArray array) {
+                    dependentRequired.put(name, array.values().stream().flatMap(item -> item.asString().stream()).toList());
+                }
+            }));
+        }
+        var properties = new LinkedHashMap<String, Property>();
+        schema.subschemaMap("properties").forEach((name, property) -> {
+            var resolved = registry.deref(property);
+            properties.put(name, new Property(property, resolved.readOnly(), resolved.writeOnly()));
+        });
+        var patterns = schema.subschemaMap("patternProperties").entrySet().stream()
+            .map(entry -> new PatternProperty(Regex.of(entry.getKey()), entry.getValue())).toList();
+        var dependentSchemas = new LinkedHashMap<>(schema.subschemaMap("dependencies"));
+        dependentSchemas.putAll(schema.subschemaMap("dependentSchemas"));
+        return new ObjectKeywords(integer(schema, "maxProperties"), integer(schema, "minProperties"), schema.required(),
+            Collections.unmodifiableMap(dependentRequired), Collections.unmodifiableMap(properties), patterns, schema.subschema("additionalProperties"),
+            schema.subschema("propertyNames"), Collections.unmodifiableMap(dependentSchemas), schema.subschema("unevaluatedProperties"));
+    }
+
+    private static Optional<Integer> integer(Schema schema, String keyword) {
+        return schema.number(keyword).map(BigDecimal::intValue);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Evaluation
 
     /** The annotations and errors of one schema evaluated against one instance location. */
     private record Evaluation(List<SchemaError> errors, Set<String> properties, Set<Integer> items) {
@@ -131,17 +339,22 @@ public final class SchemaValidator {
             items.addAll(evaluation.items());
         }
 
+        /** The evaluation collected; the collector is not used afterwards, so its sets need no copies. */
         Evaluation result() {
-            return errors.isEmpty() ? new Evaluation(List.of(), Set.copyOf(properties), Set.copyOf(items))
-                : new Evaluation(List.copyOf(errors), Set.of(), Set.of());
+            return errors.isEmpty() ? new Evaluation(List.of(), Collections.unmodifiableSet(properties), Collections.unmodifiableSet(items))
+                : new Evaluation(Collections.unmodifiableList(errors), Set.of(), Set.of());
         }
+    }
+
+    /** A schema evaluated at an instance location: evaluating it again there, within itself, is a cycle. */
+    private record Visit(Schema.Key schema, JsonPointer path) {
     }
 
     /** A single validation run, carrying the dynamic scope. */
     private final class Run {
         private final Direction direction;
         private final Deque<URI> dynamicScope = new ArrayDeque<>();
-        private final Set<String> active = new HashSet<>();
+        private final Set<Visit> active = new HashSet<>();
         private final Map<JsonPointer, Set<String>> exemptions = new HashMap<>();
 
         Run(Direction direction) {
@@ -153,9 +366,9 @@ public final class SchemaValidator {
                 return accept ? Evaluation.VALID
                     : new Evaluation(List.of(error(path, schema, "false", "no value is allowed here")), Set.of(), Set.of());
             }
-            schema = effective(schema);
-            var key = schema.location() + "@" + path;
-            if (!active.add(key)) {
+            var plan = plan(schema);
+            var visit = new Visit(schema.key(), path);
+            if (!active.add(visit)) {
                 return Evaluation.VALID;
             }
             var enteredResource = dynamicScope.isEmpty() || !dynamicScope.peekLast().equals(schema.baseUri());
@@ -164,10 +377,10 @@ public final class SchemaValidator {
             }
             var ownsExemptions = direction != Direction.NONE && instance instanceof JsonObject && !exemptions.containsKey(path);
             if (ownsExemptions) {
-                exemptions.put(path, restrictedProperties(schema, direction));
+                exemptions.put(path, restrictedProperties(plan.schema(), direction));
             }
             try {
-                return evaluateKeywords(schema, instance, path);
+                return evaluateKeywords(plan, instance, path);
             } finally {
                 if (enteredResource) {
                     dynamicScope.removeLast();
@@ -175,60 +388,39 @@ public final class SchemaValidator {
                 if (ownsExemptions) {
                     exemptions.remove(path);
                 }
-                active.remove(key);
+                active.remove(visit);
             }
         }
 
-        /**
-         * {@code schema} without the keywords its dialect does not have and, under a custom
-         * metaschema, those of the vocabularies it does not enable.
-         */
-        private Schema effective(Schema schema) {
-            var object = (JsonObject) schema.json();
-            var foreign = schema.dialect().foreignKeywords();
-            var inactive = registry.vocabularies(schema).map(Vocabularies::inactiveKeywords).orElse(Set.of());
-            var ignored = false;
-            for (var keyword : object.keys()) {
-                ignored |= foreign.contains(keyword) || inactive.contains(keyword);
-            }
-            if (!ignored) {
-                return schema;
-            }
-            var kept = new java.util.LinkedHashMap<>(object.members());
-            kept.keySet().removeIf(keyword -> foreign.contains(keyword) || inactive.contains(keyword));
-            return new Schema(new JsonObject(kept), schema.document(), schema.pointer(), schema.baseUri(), schema.dialect());
-        }
-
-        private Evaluation evaluateKeywords(Schema schema, JsonValue instance, JsonPointer path) {
-            var dialect = schema.dialect();
-            var object = schema.object();
+        private Evaluation evaluateKeywords(Plan plan, JsonValue instance, JsonPointer path) {
+            var schema = plan.schema();
             var out = new Collector();
-            if (dialect.nullableKeyword() && instance == JsonNull.INSTANCE && object.bool("nullable").orElse(false)) {
+            if (plan.nullable() && instance == JsonNull.INSTANCE) {
                 return Evaluation.VALID;
             }
-            if (object.has("$ref")) {
-                out.absorb(reference(schema, instance, path, "$ref", object.string("$ref").orElse("")));
-                if (dialect.refOverridesSiblings()) {
+            if (plan.ref().isPresent()) {
+                out.absorb(reference(schema, instance, path, plan.ref().get()));
+                if (schema.dialect().refOverridesSiblings()) {
                     return out.result();
                 }
             }
-            object.string("$dynamicRef").ifPresent(ref -> out.absorb(dynamicReference(schema, instance, path, ref)));
-            object.string("$recursiveRef").ifPresent(ref -> out.absorb(recursiveReference(schema, instance, path, ref)));
-            generic(schema, instance, path, out);
+            plan.dynamicRef().ifPresent(ref -> out.absorb(dynamicReference(schema, instance, path, ref)));
+            plan.recursiveRef().ifPresent(ref -> out.absorb(recursiveReference(schema, instance, path, ref)));
+            generic(plan, instance, path, out);
             switch (instance) {
-                case JsonNumber number -> numeric(schema, number, path, out);
-                case JsonString string -> text(schema, string, path, out);
-                case JsonArray array -> array(schema, array, path, out);
-                case JsonObject value -> object(schema, value, path, out);
+                case JsonNumber number -> plan.numbers().ifPresent(keywords -> numeric(schema, keywords, number, path, out));
+                case JsonString string -> plan.strings().ifPresent(keywords -> text(schema, keywords, string, path, out));
+                case JsonArray array -> plan.arrays().ifPresent(keywords -> array(schema, keywords, array, path, out));
+                case JsonObject value -> plan.objects().ifPresent(keywords -> object(schema, keywords, value, path, out));
                 default -> {
                 }
             }
-            combinators(schema, instance, path, out);
+            combinators(schema, plan.combinators(), instance, path, out);
             if (instance instanceof JsonArray array) {
-                unevaluatedItems(schema, array, path, out);
+                plan.arrays().flatMap(ArrayKeywords::unevaluatedItems).ifPresent(items -> unevaluatedItems(items, array, path, out));
             }
             if (instance instanceof JsonObject value) {
-                unevaluatedProperties(schema, value, path, out);
+                plan.objects().flatMap(ObjectKeywords::unevaluatedProperties).ifPresent(properties -> unevaluatedProperties(schema, properties, value, path, out));
             }
             return out.result();
         }
@@ -236,10 +428,10 @@ public final class SchemaValidator {
         // -----------------------------------------------------------------------------------------
         // References
 
-        private Evaluation reference(Schema schema, JsonValue instance, JsonPointer path, String keyword, String ref) {
+        private Evaluation reference(Schema schema, JsonValue instance, JsonPointer path, String ref) {
             var target = registry.resolve(schema, ref);
             if (target.isEmpty()) {
-                return failure(path, schema, keyword, "unresolvable reference '" + ref + "'");
+                return failure(path, schema, "$ref", "unresolvable reference '" + ref + "'");
             }
             return evaluate(target.get(), instance, path);
         }
@@ -281,29 +473,17 @@ public final class SchemaValidator {
         // -----------------------------------------------------------------------------------------
         // Keywords applying to any type
 
-        private void generic(Schema schema, JsonValue instance, JsonPointer path, Collector out) {
-            var types = schema.types();
+        private void generic(Plan plan, JsonValue instance, JsonPointer path, Collector out) {
+            var schema = plan.schema();
+            var types = plan.types();
             if (!types.isEmpty() && types.stream().noneMatch(type -> matchesType(type, instance, schema.dialect()))) {
-                out.errors.add(error(path, schema, "type", "must be " + describeTypes(types) + " but was " + instance.typeName()));
+                out.errors.add(error(path, schema, "type", "must be " + describeTypes(schema.types()) + " but was " + instance.typeName()));
             }
-            var enumValues = schema.enumValues();
-            if (schema.has("enum") && !enumValues.contains(instance)) {
-                out.errors.add(error(path, schema, "enum", "must be one of " + enumValues.stream().map(JsonValue::toJson).toList()));
-            }
-            schema.constValue().filter(expected -> !expected.equals(instance))
+            plan.enumValues().filter(values -> !values.contains(instance))
+                .ifPresent(values -> out.errors.add(error(path, schema, "enum", "must be one of " + values.stream().map(JsonValue::toJson).toList())));
+            plan.constValue().filter(expected -> !expected.equals(instance))
                 .ifPresent(expected -> out.errors.add(error(path, schema, "const", "must be " + expected.toJson())));
-            var assertFormats = options.assertFormats() || registry.vocabularies(schema).filter(v -> v.contains(Vocabularies.FORMAT_ASSERTION)).isPresent();
-            if (assertFormats) {
-                schema.format().flatMap(format -> Optional.ofNullable(formatValidator(format, schema.dialect())))
-                    .flatMap(validator -> validator.validate(instance))
-                    .ifPresent(message -> out.errors.add(error(path, schema, "format", message)));
-            }
-        }
-
-        /** Draft 4 and 6 host names follow RFC 1123, unless another validator was configured. */
-        private FormatValidator formatValidator(String format, Dialect dialect) {
-            var validator = options.formats().get(format);
-            return validator == Formats.HOSTNAME && (dialect == Dialect.DRAFT_4 || dialect == Dialect.DRAFT_6) ? Formats.RFC_1123_HOSTNAME : validator;
+            plan.format().flatMap(validator -> validator.validate(instance)).ifPresent(message -> out.errors.add(error(path, schema, "format", message)));
         }
 
         /** Draft 4 tells integers from numbers with a fraction by their spelling: {@code 1.0} is not an integer there. */
@@ -322,26 +502,17 @@ public final class SchemaValidator {
         // -----------------------------------------------------------------------------------------
         // Numbers
 
-        private void numeric(Schema schema, JsonNumber number, JsonPointer path, Collector out) {
+        private void numeric(Schema schema, NumberKeywords keywords, JsonNumber number, JsonPointer path, Collector out) {
             var value = number.value();
-            schema.number("multipleOf").filter(divisor -> divisor.signum() > 0 && value.remainder(divisor).signum() != 0)
-                .ifPresent(divisor -> out.errors.add(error(path, schema, "multipleOf", "must be a multiple of " + divisor.stripTrailingZeros().toPlainString())));
-            var booleanBounds = schema.dialect().booleanExclusiveBounds();
-            schema.number("maximum").ifPresent(max -> {
-                var exclusive = booleanBounds && schema.object().bool("exclusiveMaximum").orElse(false);
-                if (exclusive ? value.compareTo(max) >= 0 : value.compareTo(max) > 0) {
-                    out.errors.add(error(path, schema, "maximum", "must be " + (exclusive ? "< " : "<= ") + plain(max)));
-                }
-            });
-            schema.number("minimum").ifPresent(min -> {
-                var exclusive = booleanBounds && schema.object().bool("exclusiveMinimum").orElse(false);
-                if (exclusive ? value.compareTo(min) <= 0 : value.compareTo(min) < 0) {
-                    out.errors.add(error(path, schema, "minimum", "must be " + (exclusive ? "> " : ">= ") + plain(min)));
-                }
-            });
-            schema.number("exclusiveMaximum").filter(max -> value.compareTo(max) >= 0)
+            keywords.multipleOf().filter(divisor -> divisor.signum() > 0 && value.remainder(divisor).signum() != 0)
+                .ifPresent(divisor -> out.errors.add(error(path, schema, "multipleOf", "must be a multiple of " + plain(divisor))));
+            keywords.maximum().filter(max -> max.exclusive() ? value.compareTo(max.value()) >= 0 : value.compareTo(max.value()) > 0)
+                .ifPresent(max -> out.errors.add(error(path, schema, "maximum", "must be " + (max.exclusive() ? "< " : "<= ") + plain(max.value()))));
+            keywords.minimum().filter(min -> min.exclusive() ? value.compareTo(min.value()) <= 0 : value.compareTo(min.value()) < 0)
+                .ifPresent(min -> out.errors.add(error(path, schema, "minimum", "must be " + (min.exclusive() ? "> " : ">= ") + plain(min.value()))));
+            keywords.exclusiveMaximum().filter(max -> value.compareTo(max) >= 0)
                 .ifPresent(max -> out.errors.add(error(path, schema, "exclusiveMaximum", "must be < " + plain(max))));
-            schema.number("exclusiveMinimum").filter(min -> value.compareTo(min) <= 0)
+            keywords.exclusiveMinimum().filter(min -> value.compareTo(min) <= 0)
                 .ifPresent(min -> out.errors.add(error(path, schema, "exclusiveMinimum", "must be > " + plain(min))));
         }
 
@@ -352,85 +523,73 @@ public final class SchemaValidator {
         // -----------------------------------------------------------------------------------------
         // Strings
 
-        private void text(Schema schema, JsonString string, JsonPointer path, Collector out) {
+        private void text(Schema schema, StringKeywords keywords, JsonString string, JsonPointer path, Collector out) {
             var length = string.codePointLength();
-            schema.number("maxLength").filter(max -> length > max.intValue())
-                .ifPresent(max -> out.errors.add(error(path, schema, "maxLength", "must be at most " + max.intValue() + " characters long")));
-            schema.number("minLength").filter(min -> length < min.intValue())
-                .ifPresent(min -> out.errors.add(error(path, schema, "minLength", "must be at least " + min.intValue() + " characters long")));
-            schema.pattern().ifPresent(pattern -> {
-                var compiled = EcmaRegex.compile(pattern);
-                if (compiled.isErr()) {
-                    out.errors.add(error(path, schema, "pattern", compiled.failure().orElseThrow()));
-                } else if (!compiled.toOptional().orElseThrow().matcher(string.value()).find()) {
-                    out.errors.add(error(path, schema, "pattern", "must match pattern " + pattern));
-                }
-            });
-            if (options.assertContent()) {
-                content(schema, string, path, out);
-            }
+            keywords.maxLength().filter(max -> length > max)
+                .ifPresent(max -> out.errors.add(error(path, schema, "maxLength", "must be at most " + max + " characters long")));
+            keywords.minLength().filter(min -> length < min)
+                .ifPresent(min -> out.errors.add(error(path, schema, "minLength", "must be at least " + min + " characters long")));
+            keywords.pattern().flatMap(pattern -> pattern.mismatch(string.value()))
+                .ifPresent(message -> out.errors.add(error(path, schema, "pattern", message)));
+            keywords.content().ifPresent(content -> content(schema, content, string, path, out));
         }
 
-        private void content(Schema schema, JsonString string, JsonPointer path, Collector out) {
-            var decoded = Optional.of(string.value());
-            if (schema.object().string("contentEncoding").filter("base64"::equalsIgnoreCase).isPresent()) {
+        private void content(Schema schema, Content content, JsonString string, JsonPointer path, Collector out) {
+            var decoded = string.value();
+            if (content.base64()) {
                 try {
-                    decoded = Optional.of(new String(Base64.getDecoder().decode(string.value()), StandardCharsets.UTF_8));
+                    decoded = new String(Base64.getDecoder().decode(string.value()), StandardCharsets.UTF_8);
                 } catch (IllegalArgumentException e) {
                     out.errors.add(error(path, schema, "contentEncoding", "must be base64 encoded"));
                     return;
                 }
             }
-            var isJson = schema.object().string("contentMediaType").filter(type -> type.equals("application/json") || type.endsWith("+json"));
-            if (isJson.isEmpty()) {
+            if (!content.json()) {
                 return;
             }
-            var parsed = Json.parse(decoded.get());
+            var parsed = Json.parse(decoded);
             if (parsed.isErr()) {
                 out.errors.add(error(path, schema, "contentMediaType", "must contain valid JSON"));
                 return;
             }
-            schema.subschema("contentSchema").ifPresent(contentSchema ->
-                out.errors.addAll(evaluate(contentSchema, parsed.toOptional().orElseThrow(), path).errors()));
+            content.schema().ifPresent(contentSchema -> out.errors.addAll(evaluate(contentSchema, parsed.toOptional().orElseThrow(), path).errors()));
         }
 
         // -----------------------------------------------------------------------------------------
         // Arrays
 
-        private void array(Schema schema, JsonArray array, JsonPointer path, Collector out) {
+        private void array(Schema schema, ArrayKeywords keywords, JsonArray array, JsonPointer path, Collector out) {
             var size = array.size();
-            schema.number("maxItems").filter(max -> size > max.intValue())
-                .ifPresent(max -> out.errors.add(error(path, schema, "maxItems", "must have at most " + max.intValue() + " items")));
-            schema.number("minItems").filter(min -> size < min.intValue())
-                .ifPresent(min -> out.errors.add(error(path, schema, "minItems", "must have at least " + min.intValue() + " items")));
-            if (schema.object().bool("uniqueItems").orElse(false) && new HashSet<>(array.values()).size() != size) {
+            keywords.maxItems().filter(max -> size > max)
+                .ifPresent(max -> out.errors.add(error(path, schema, "maxItems", "must have at most " + max + " items")));
+            keywords.minItems().filter(min -> size < min)
+                .ifPresent(min -> out.errors.add(error(path, schema, "minItems", "must have at least " + min + " items")));
+            if (keywords.uniqueItems() && new HashSet<>(array.values()).size() != size) {
                 out.errors.add(error(path, schema, "uniqueItems", "must not contain duplicate items"));
             }
-            var legacyTuple = schema.keyword("items").filter(JsonArray.class::isInstance).isPresent();
-            var tuple = schema.subschemaList(legacyTuple ? "items" : "prefixItems");
-            var rest = schema.subschema(legacyTuple ? "additionalItems" : "items");
+            var tuple = keywords.tuple();
             int prefix = Math.min(tuple.size(), size);
             for (int i = 0; i < prefix; i++) {
                 out.child(evaluate(tuple.get(i), array.values().get(i), path.child(i)));
                 out.items.add(i);
             }
-            rest.ifPresent(itemSchema -> {
+            keywords.rest().ifPresent(itemSchema -> {
                 for (int i = prefix; i < size; i++) {
                     out.child(evaluate(itemSchema, array.values().get(i), path.child(i)));
                     out.items.add(i);
                 }
             });
-            schema.subschema("contains").ifPresent(contains -> {
+            keywords.contains().ifPresent(contains -> {
                 var matched = new ArrayList<Integer>();
                 for (int i = 0; i < size; i++) {
-                    if (evaluate(contains, array.values().get(i), path.child(i)).valid()) {
+                    if (evaluate(contains.schema(), array.values().get(i), path.child(i)).valid()) {
                         matched.add(i);
                     }
                 }
                 out.items.addAll(matched);
-                var min = schema.number("minContains").map(BigDecimal::intValue).orElse(1);
-                schema.number("maxContains").filter(max -> matched.size() > max.intValue()).ifPresent(max ->
-                    out.errors.add(error(path, schema, "maxContains", "must contain at most " + max.intValue() + " matching items")));
+                contains.max().filter(max -> matched.size() > max).ifPresent(max ->
+                    out.errors.add(error(path, schema, "maxContains", "must contain at most " + max + " matching items")));
+                var min = contains.min();
                 if (matched.size() < min) {
                     out.errors.add(error(path, schema, min == 1 ? "contains" : "minContains",
                         min == 1 ? "must contain at least one matching item" : "must contain at least " + min + " matching items"));
@@ -438,56 +597,57 @@ public final class SchemaValidator {
             });
         }
 
-        private void unevaluatedItems(Schema schema, JsonArray array, JsonPointer path, Collector out) {
-            schema.subschema("unevaluatedItems").ifPresent(itemSchema -> {
-                for (int i = 0; i < array.size(); i++) {
-                    if (!out.items.contains(i)) {
-                        out.child(evaluate(itemSchema, array.values().get(i), path.child(i)));
-                        out.items.add(i);
-                    }
+        private void unevaluatedItems(Schema itemSchema, JsonArray array, JsonPointer path, Collector out) {
+            for (int i = 0; i < array.size(); i++) {
+                if (!out.items.contains(i)) {
+                    out.child(evaluate(itemSchema, array.values().get(i), path.child(i)));
+                    out.items.add(i);
                 }
-            });
+            }
         }
 
         // -----------------------------------------------------------------------------------------
         // Objects
 
-        private void object(Schema schema, JsonObject value, JsonPointer path, Collector out) {
+        private void object(Schema schema, ObjectKeywords keywords, JsonObject value, JsonPointer path, Collector out) {
             var size = value.size();
-            schema.number("maxProperties").filter(max -> size > max.intValue())
-                .ifPresent(max -> out.errors.add(error(path, schema, "maxProperties", "must have at most " + max.intValue() + " properties")));
-            schema.number("minProperties").filter(min -> size < min.intValue())
-                .ifPresent(min -> out.errors.add(error(path, schema, "minProperties", "must have at least " + min.intValue() + " properties")));
-            for (var name : schema.required()) {
-                if (!value.has(name) && !exemptions.getOrDefault(path, Set.of()).contains(name)) {
+            keywords.maxProperties().filter(max -> size > max)
+                .ifPresent(max -> out.errors.add(error(path, schema, "maxProperties", "must have at most " + max + " properties")));
+            keywords.minProperties().filter(min -> size < min)
+                .ifPresent(min -> out.errors.add(error(path, schema, "minProperties", "must have at least " + min + " properties")));
+            var exempt = exemptions.getOrDefault(path, Set.of());
+            for (var name : keywords.required()) {
+                if (!value.has(name) && !exempt.contains(name)) {
                     out.errors.add(error(path, schema, "required", "missing required property '" + name + "'"));
                 }
             }
-            dependentRequired(schema, value, path, out);
-            var properties = schema.subschemaMap("properties");
-            var patterns = schema.subschemaMap("patternProperties");
+            keywords.dependentRequired().forEach((name, required) -> {
+                if (value.has(name)) {
+                    required.stream().filter(other -> !value.has(other)).forEach(other -> out.errors.add(
+                        error(path, schema, "dependentRequired", "property '" + other + "' is required when '" + name + "' is present")));
+                }
+            });
             for (var member : value.members().entrySet()) {
                 var name = member.getKey();
                 var childPath = path.child(name);
                 var matched = false;
-                var propertySchema = properties.get(name);
-                if (propertySchema != null) {
+                var property = keywords.properties().get(name);
+                if (property != null) {
                     matched = true;
-                    accessMode(propertySchema, childPath, out);
-                    out.child(evaluate(propertySchema, member.getValue(), childPath));
+                    accessMode(property, childPath, out);
+                    out.child(evaluate(property.schema(), member.getValue(), childPath));
                 }
-                for (var pattern : patterns.entrySet()) {
-                    var compiled = EcmaRegex.compile(pattern.getKey());
-                    if (compiled.isOk() && compiled.toOptional().orElseThrow().matcher(name).find()) {
+                for (var pattern : keywords.patternProperties()) {
+                    if (pattern.pattern().finds(name)) {
                         matched = true;
-                        out.child(evaluate(pattern.getValue(), member.getValue(), childPath));
+                        out.child(evaluate(pattern.schema(), member.getValue(), childPath));
                     }
                 }
                 if (matched) {
                     out.properties.add(name);
                     continue;
                 }
-                var additional = schema.subschema("additionalProperties");
+                var additional = keywords.additionalProperties();
                 if (additional.isPresent()) {
                     if (additional.get().rejectsEverything()) {
                         out.errors.add(error(childPath, schema, "additionalProperties", "property '" + name + "' is not allowed"));
@@ -497,112 +657,76 @@ public final class SchemaValidator {
                     out.properties.add(name);
                 }
             }
-            schema.subschema("propertyNames").ifPresent(names -> value.keys().forEach(name ->
+            keywords.propertyNames().ifPresent(names -> value.keys().forEach(name ->
                 evaluate(names, JsonString.of(name), path.child(name)).errors().forEach(e ->
                     out.errors.add(error(path.child(name), schema, "propertyNames", "property name '" + name + "' is invalid: " + e.message())))));
-            for (var dependent : dependentSchemas(schema).entrySet()) {
-                if (value.has(dependent.getKey())) {
-                    out.absorb(evaluate(dependent.getValue(), value, path));
-                }
-            }
-        }
-
-        private void dependentRequired(Schema schema, JsonObject value, JsonPointer path, Collector out) {
-            var dependencies = new HashMap<String, List<String>>();
-            for (var keyword : List.of("dependentRequired", "dependencies")) {
-                schema.object().object(keyword).ifPresent(map -> map.members().forEach((name, required) -> {
-                    if (required instanceof JsonArray array) {
-                        dependencies.put(name, array.values().stream().flatMap(item -> item.asString().stream()).toList());
-                    }
-                }));
-            }
-            dependencies.forEach((name, required) -> {
+            keywords.dependentSchemas().forEach((name, dependent) -> {
                 if (value.has(name)) {
-                    required.stream().filter(other -> !value.has(other)).forEach(other -> out.errors.add(
-                        error(path, schema, "dependentRequired", "property '" + other + "' is required when '" + name + "' is present")));
+                    out.absorb(evaluate(dependent, value, path));
                 }
             });
         }
 
-        private Map<String, Schema> dependentSchemas(Schema schema) {
-            var result = new java.util.LinkedHashMap<>(schema.subschemaMap("dependencies"));
-            result.putAll(schema.subschemaMap("dependentSchemas"));
-            return result;
-        }
-
-        private void accessMode(Schema propertySchema, JsonPointer path, Collector out) {
-            var resolved = registry.deref(propertySchema);
-            if (direction == Direction.REQUEST && resolved.readOnly()) {
-                out.errors.add(error(path, propertySchema, "readOnly", "is read-only and must not be sent in a request"));
-            } else if (direction == Direction.RESPONSE && resolved.writeOnly()) {
-                out.errors.add(error(path, propertySchema, "writeOnly", "is write-only and must not be returned in a response"));
+        private void accessMode(Property property, JsonPointer path, Collector out) {
+            if (direction == Direction.REQUEST && property.readOnly()) {
+                out.errors.add(error(path, property.schema(), "readOnly", "is read-only and must not be sent in a request"));
+            } else if (direction == Direction.RESPONSE && property.writeOnly()) {
+                out.errors.add(error(path, property.schema(), "writeOnly", "is write-only and must not be returned in a response"));
             }
         }
 
-        private void unevaluatedProperties(Schema schema, JsonObject value, JsonPointer path, Collector out) {
-            schema.subschema("unevaluatedProperties").ifPresent(propertySchema -> {
-                for (var member : value.members().entrySet()) {
-                    var name = member.getKey();
-                    if (out.properties.contains(name)) {
-                        continue;
-                    }
-                    if (propertySchema.rejectsEverything()) {
-                        out.errors.add(error(path.child(name), schema, "unevaluatedProperties", "property '" + name + "' is not allowed"));
-                    } else {
-                        out.child(evaluate(propertySchema, member.getValue(), path.child(name)));
-                    }
-                    out.properties.add(name);
+        private void unevaluatedProperties(Schema schema, Schema propertySchema, JsonObject value, JsonPointer path, Collector out) {
+            for (var member : value.members().entrySet()) {
+                var name = member.getKey();
+                if (out.properties.contains(name)) {
+                    continue;
                 }
-            });
+                if (propertySchema.rejectsEverything()) {
+                    out.errors.add(error(path.child(name), schema, "unevaluatedProperties", "property '" + name + "' is not allowed"));
+                } else {
+                    out.child(evaluate(propertySchema, member.getValue(), path.child(name)));
+                }
+                out.properties.add(name);
+            }
         }
 
         // -----------------------------------------------------------------------------------------
         // Combinators
 
-        private void combinators(Schema schema, JsonValue instance, JsonPointer path, Collector out) {
-            for (var member : schema.subschemaList("allOf")) {
+        private void combinators(Schema schema, Combinators keywords, JsonValue instance, JsonPointer path, Collector out) {
+            for (var member : keywords.allOf()) {
                 out.absorb(evaluate(member, instance, path));
             }
-            var anyOf = schema.subschemaList("anyOf");
-            if (!anyOf.isEmpty()) {
-                var evaluations = anyOf.stream().map(member -> evaluate(member, instance, path)).toList();
+            if (!keywords.anyOf().isEmpty()) {
+                var evaluations = keywords.anyOf().stream().map(member -> evaluate(member, instance, path)).toList();
                 var valid = evaluations.stream().filter(Evaluation::valid).toList();
                 if (valid.isEmpty()) {
-                    out.errors.addAll(combinatorFailure(schema, instance, path, "anyOf", "must match at least one schema in anyOf", evaluations));
+                    out.errors.addAll(combinatorFailure(schema, keywords, instance, path, "anyOf", "must match at least one schema in anyOf", evaluations));
                 }
                 valid.forEach(out::annotate);
             }
-            var oneOf = schema.subschemaList("oneOf");
-            if (!oneOf.isEmpty()) {
-                var evaluations = oneOf.stream().map(member -> evaluate(member, instance, path)).toList();
+            if (!keywords.oneOf().isEmpty()) {
+                var evaluations = keywords.oneOf().stream().map(member -> evaluate(member, instance, path)).toList();
                 var valid = evaluations.stream().filter(Evaluation::valid).toList();
                 if (valid.isEmpty()) {
-                    out.errors.addAll(combinatorFailure(schema, instance, path, "oneOf", "must match exactly one schema in oneOf", evaluations));
+                    out.errors.addAll(combinatorFailure(schema, keywords, instance, path, "oneOf", "must match exactly one schema in oneOf", evaluations));
                 } else if (valid.size() > 1) {
                     // A discriminator MUST NOT change the validation outcome: an instance valid for several members is invalid.
-                    var indices = new ArrayList<Integer>();
-                    for (int i = 0; i < evaluations.size(); i++) {
-                        if (evaluations.get(i).valid()) {
-                            indices.add(i);
-                        }
-                    }
+                    var indices = java.util.stream.IntStream.range(0, evaluations.size()).filter(i -> evaluations.get(i).valid()).boxed().toList();
                     out.errors.add(error(path, schema, "oneOf", "must match exactly one schema in oneOf but matched schemas at " + indices));
                 } else {
                     out.annotate(valid.getFirst());
                 }
             }
-            schema.subschema("not").ifPresent(not -> {
-                if (evaluate(not, instance, path).valid()) {
-                    out.errors.add(error(path, schema, "not", "must not match the schema in 'not'"));
-                }
-            });
-            schema.subschema("if").ifPresent(condition -> {
+            keywords.not().filter(not -> evaluate(not, instance, path).valid())
+                .ifPresent(not -> out.errors.add(error(path, schema, "not", "must not match the schema in 'not'")));
+            keywords.condition().ifPresent(condition -> {
                 var test = evaluate(condition, instance, path);
                 if (test.valid()) {
                     out.annotate(test);
-                    schema.subschema("then").ifPresent(then -> out.absorb(evaluate(then, instance, path)));
+                    keywords.then().ifPresent(then -> out.absorb(evaluate(then, instance, path)));
                 } else {
-                    schema.subschema("else").ifPresent(otherwise -> out.absorb(evaluate(otherwise, instance, path)));
+                    keywords.otherwise().ifPresent(otherwise -> out.absorb(evaluate(otherwise, instance, path)));
                 }
             });
         }
@@ -611,8 +735,8 @@ public final class SchemaValidator {
          * Explains a failed {@code anyOf}/{@code oneOf}. With a discriminator whose value selects a
          * branch, the errors of that branch are reported directly.
          */
-        private List<SchemaError> combinatorFailure(Schema schema, JsonValue instance, JsonPointer path, String keyword, String message,
-                                                    List<Evaluation> evaluations) {
+        private List<SchemaError> combinatorFailure(Schema schema, Combinators keywords, JsonValue instance, JsonPointer path, String keyword,
+                                                    String message, List<Evaluation> evaluations) {
             var discriminator = schema.discriminator();
             if (discriminator.isPresent() && instance instanceof JsonObject object) {
                 var property = discriminator.get().propertyName();
@@ -620,7 +744,7 @@ public final class SchemaValidator {
                 if (value.isEmpty()) {
                     return List.of(error(path, schema, "discriminator", "missing discriminator property '" + property + "'"));
                 }
-                var selected = discriminatedSchema(schema, discriminator.get(), value.get());
+                var selected = discriminatedSchema(schema, keywords, discriminator.get(), value.get());
                 if (selected.isEmpty()) {
                     return List.of(error(path.child(property), schema, "discriminator",
                         "unknown discriminator value '" + value.get() + "' for property '" + property + "'"));
@@ -631,11 +755,9 @@ public final class SchemaValidator {
             return List.of(new SchemaError(path, keyword, message, keywordLocation(schema, keyword), causes));
         }
 
-        private Optional<Schema> discriminatedSchema(Schema schema, Discriminator discriminator, String value) {
-            var candidates = new ArrayList<>(schema.subschemaList("oneOf"));
-            candidates.addAll(schema.subschemaList("anyOf"));
+        private Optional<Schema> discriminatedSchema(Schema schema, Combinators keywords, Discriminator discriminator, String value) {
             return Optional.ofNullable(discriminator.mapping().get(value)).flatMap(target -> registry.resolveMapping(schema, target))
-                .or(() -> candidates.stream()
+                .or(() -> Stream.concat(keywords.oneOf().stream(), keywords.anyOf().stream())
                     .filter(candidate -> candidate.ref().map(ref -> ref.substring(ref.lastIndexOf('/') + 1)).filter(value::equals).isPresent())
                     .findFirst())
                 .or(() -> registry.resolveMapping(schema, value))
@@ -652,9 +774,15 @@ public final class SchemaValidator {
             return new SchemaError(path, keyword, message, keywordLocation(schema, keyword), List.of());
         }
 
+        /** Where {@code keyword} of {@code schema} is: made once, as failing branches of {@code oneOf} report errors even for valid data. */
         private URI keywordLocation(Schema schema, String keyword) {
-            return URI.create(schema.document() + schema.pointer().child(keyword).toUriFragment());
+            return keywordLocations.computeIfAbsent(new KeywordAt(schema.key(), keyword),
+                at -> URI.create(schema.document() + schema.pointer().child(keyword).toUriFragment()));
         }
+    }
+
+    /** The properties a schema restricts in a direction (see {@link #restrictedProperties}). */
+    private record Restriction(Direction direction, Schema.Key schema) {
     }
 
     /**
@@ -664,15 +792,15 @@ public final class SchemaValidator {
      * Such properties are exempt from {@code required} in that direction.
      */
     private Set<String> restrictedProperties(Schema schema, Direction direction) {
-        return restricted.computeIfAbsent(direction + " " + schema.location(), key -> {
+        return restricted.computeIfAbsent(new Restriction(direction, schema.key()), key -> {
             var names = new HashSet<String>();
             collectRestricted(schema, direction, names, new HashSet<>());
             return Set.copyOf(names);
         });
     }
 
-    private void collectRestricted(Schema schema, Direction direction, Set<String> names, Set<URI> seen) {
-        if (!seen.add(schema.location())) {
+    private void collectRestricted(Schema schema, Direction direction, Set<String> names, Set<Schema.Key> seen) {
+        if (!seen.add(schema.key())) {
             return;
         }
         schema.subschemaMap("properties").forEach((name, property) -> {
@@ -693,7 +821,7 @@ public final class SchemaValidator {
 
     /** All distinct messages of {@code errors} (including nested causes), for diagnostics. */
     public static Set<String> describe(List<SchemaError> errors) {
-        return errors.stream().flatMap(error -> java.util.stream.Stream.concat(java.util.stream.Stream.of(error.toString()),
-            describe(error.causes()).stream())).collect(Collectors.toCollection(LinkedHashSet::new));
+        return errors.stream().flatMap(error -> Stream.concat(Stream.of(error.toString()), describe(error.causes()).stream()))
+            .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 }

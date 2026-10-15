@@ -19,33 +19,45 @@ public final class PathTemplate {
 
     private final String template;
     private final Pattern pattern;
+    private final Pattern prefix;
     private final List<String> names;
     private final int literalLength;
 
-    private PathTemplate(String template, Pattern pattern, List<String> names, int literalLength) {
+    private PathTemplate(String template, Pattern pattern, Pattern prefix, List<String> names, int literalLength) {
         this.template = template;
         this.pattern = pattern;
+        this.prefix = prefix;
         this.names = names;
         this.literalLength = literalLength;
     }
 
     public static PathTemplate compile(String template) {
-        var regex = new StringBuilder();
-        var names = new ArrayList<String>();
-        var matcher = EXPRESSION.matcher(template);
-        int last = 0;
-        int literal = 0;
-        while (matcher.find()) {
-            regex.append(Pattern.quote(template.substring(last, matcher.start())));
-            literal += matcher.start() - last;
-            var nextIsSeparator = matcher.end() == template.length() || template.charAt(matcher.end()) == '/';
-            regex.append(nextIsSeparator ? "([^/]*)" : "([^/]*?)");
-            names.add(matcher.group(1));
-            last = matcher.end();
+        var compiled = Compiled.of(template);
+        var prefix = template.endsWith("/") ? Compiled.of(template.substring(0, template.length() - 1)).pattern() : compiled.pattern();
+        return new PathTemplate(template, compiled.pattern(), prefix, compiled.names(), compiled.literalLength());
+    }
+
+    /** A template as a regular expression, with its expression names and the length of its literal parts. */
+    private record Compiled(Pattern pattern, List<String> names, int literalLength) {
+
+        static Compiled of(String template) {
+            var regex = new StringBuilder();
+            var names = new ArrayList<String>();
+            var matcher = EXPRESSION.matcher(template);
+            int last = 0;
+            int literal = 0;
+            while (matcher.find()) {
+                regex.append(Pattern.quote(template.substring(last, matcher.start())));
+                literal += matcher.start() - last;
+                var nextIsSeparator = matcher.end() == template.length() || template.charAt(matcher.end()) == '/';
+                regex.append(nextIsSeparator ? "([^/]*)" : "([^/]*?)");
+                names.add(matcher.group(1));
+                last = matcher.end();
+            }
+            regex.append(Pattern.quote(template.substring(last)));
+            literal += template.length() - last;
+            return new Compiled(Pattern.compile(regex.toString()), List.copyOf(names), literal);
         }
-        regex.append(Pattern.quote(template.substring(last)));
-        literal += template.length() - last;
-        return new PathTemplate(template, Pattern.compile(regex.toString()), List.copyOf(names), literal);
     }
 
     public String template() {
@@ -71,8 +83,7 @@ public final class PathTemplate {
 
     /** Matches a prefix of {@code path} ending at a segment boundary, returning the remaining path. */
     public Optional<String> stripPrefix(String path) {
-        var prefix = template.endsWith("/") ? template.substring(0, template.length() - 1) : template;
-        var matcher = compile(prefix).pattern.matcher(path);
+        var matcher = prefix.matcher(path);
         if (!matcher.lookingAt()) {
             return Optional.empty();
         }

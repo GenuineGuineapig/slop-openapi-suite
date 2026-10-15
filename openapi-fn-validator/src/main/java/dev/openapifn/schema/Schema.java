@@ -69,6 +69,18 @@ public record Schema(JsonValue json, URI document, JsonPointer pointer, URI base
         return URI.create(document + pointer.toUriFragment());
     }
 
+    /**
+     * This schema's identity: equal for schemas at the same {@link #location()}, and much cheaper
+     * to make and compare, for keys of maps and sets.
+     */
+    public Key key() {
+        return new Key(document, pointer);
+    }
+
+    /** See {@link #key()}. */
+    public record Key(URI document, JsonPointer pointer) {
+    }
+
     /** The schema object, or an empty object for boolean schemas. */
     public JsonObject object() {
         return json instanceof JsonObject object ? object : JsonObject.EMPTY;

@@ -51,7 +51,12 @@ public final class SchemaRegistry {
     private final Dialect defaultDialect;
     private final Map<String, Set<String>> vocabularies;
     private final Map<URI, Optional<Schema>> cache = new ConcurrentHashMap<>();
-    private final Map<URI, Optional<String>> metaschemas = new ConcurrentHashMap<>();
+    private final Map<Reference, Optional<Schema>> references = new ConcurrentHashMap<>();
+    private final Map<Schema.Key, Optional<String>> metaschemas = new ConcurrentHashMap<>();
+
+    /** A reference as written in a schema with the given base URI, in the given document. */
+    private record Reference(URI base, URI document, String reference) {
+    }
 
     private SchemaRegistry(Map<URI, Document> documents, Function<URI, Optional<Document>> documentLookup, Map<URI, Resource> resources,
                            Map<URI, Schema> anchors, Map<URI, Map<String, Schema>> dynamicAnchors, Dialect defaultDialect,
@@ -95,7 +100,7 @@ public final class SchemaRegistry {
         if (vocabularies.isEmpty()) {
             return Optional.empty();
         }
-        return metaschemas.computeIfAbsent(schema.location(), location -> documentLookup.apply(schema.document())
+        return metaschemas.computeIfAbsent(schema.key(), key -> documentLookup.apply(schema.document())
             .flatMap(document -> metaschemaAt(document, schema.pointer()))).map(vocabularies::get);
     }
 
@@ -122,8 +127,8 @@ public final class SchemaRegistry {
 
     /** Resolves {@code reference} relative to the base URI of {@code from} (see {@link #documentFallback}). */
     public Optional<Schema> resolve(Schema from, String reference) {
-        return Uris.resolve(from.baseUri(), reference).toOptional().flatMap(this::resolve)
-            .or(() -> documentFallback(from, reference).flatMap(this::resolve));
+        return references.computeIfAbsent(new Reference(from.baseUri(), from.document(), reference), key ->
+            Uris.resolve(from.baseUri(), reference).toOptional().flatMap(this::resolve).or(() -> documentFallback(from, reference).flatMap(this::resolve)));
     }
 
     /**
@@ -144,8 +149,8 @@ public final class SchemaRegistry {
     /** Follows {@code $ref} chains until reaching a schema without one (or an unresolvable reference). */
     public Schema deref(Schema schema) {
         var current = schema;
-        var seen = new HashSet<URI>();
-        while (current.ref().isPresent() && seen.add(current.location())) {
+        var seen = new HashSet<Schema.Key>();
+        while (current.ref().isPresent() && seen.add(current.key())) {
             var next = dereference(current);
             if (next.isEmpty()) {
                 return current;
@@ -232,7 +237,7 @@ public final class SchemaRegistry {
     private static final class Builder {
         private final DocumentLoader loader;
         private final Dialect defaultDialect;
-        private final Set<URI> visited = new HashSet<>();
+        private final Set<Schema.Key> visited = new HashSet<>();
         private final Set<URI> visitedDocuments = new HashSet<>();
         private final Map<URI, Resource> resources = new HashMap<>();
         private final Map<URI, Schema> anchors = new HashMap<>();
@@ -269,7 +274,7 @@ public final class SchemaRegistry {
         }
 
         void visit(Schema schema) {
-            if (!visited.add(schema.location())) {
+            if (!visited.add(schema.key())) {
                 return;
             }
             var object = schema.object();

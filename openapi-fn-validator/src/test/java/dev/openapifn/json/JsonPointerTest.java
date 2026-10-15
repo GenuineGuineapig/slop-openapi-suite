@@ -43,6 +43,22 @@ class JsonPointerTest {
     }
 
     @Test
+    void equalWhenTheirTokensAre() {
+        var built = JsonPointer.ROOT.child("a").child("b");
+        assertThat(built).isEqualTo(pointer("/a/b")).isEqualTo(JsonPointer.of(java.util.List.of("a", "b")));
+        assertThat(built.hashCode()).isEqualTo(java.util.List.of("a", "b").hashCode()).isEqualTo(pointer("/a/b").hashCode());
+        assertThat(JsonPointer.ROOT.hashCode()).isEqualTo(java.util.List.of().hashCode());
+        assertThat(built).isNotEqualTo(JsonPointer.of("a")).isNotEqualTo(JsonPointer.of("a", "c")).isNotEqualTo("/a/b");
+        // "Aa" and "BB" have the same hash code: equal hashes, different tokens.
+        assertThat(JsonPointer.of("x", "Aa").hashCode()).isEqualTo(JsonPointer.of("x", "BB").hashCode());
+        assertThat(JsonPointer.of("x", "Aa")).isNotEqualTo(JsonPointer.of("x", "BB"));
+        assertThat(JsonPointer.of("Aa", "x")).isNotEqualTo(JsonPointer.of("BB", "x"));
+        // Computed once, then kept.
+        assertThat(built.hashCode()).isEqualTo(built.hashCode());
+        assertThat(built.toString()).isSameAs(built.toString());
+    }
+
+    @Test
     void resolves() {
         var doc = Json.parse("{\"a\":[{\"b\":1},2],\"\":3}").orElseThrow(e -> new AssertionError(e));
         assertThat(pointer("/a/0/b").resolve(doc)).contains(JsonNumber.of(1));
