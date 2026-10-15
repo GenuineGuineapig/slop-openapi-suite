@@ -10,6 +10,7 @@ import java.io.UncheckedIOException;
 import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 import org.springframework.web.util.WebUtils;
@@ -54,12 +55,8 @@ public final class ServletMessages {
     }
 
     private static HttpRequest withBody(HttpServletRequest request, byte[] body) {
-        var headers = Headers.EMPTY;
-        for (var name : Collections.list(request.getHeaderNames())) {
-            for (var value : Collections.list(request.getHeaders(name))) {
-                headers = headers.with(name, value);
-            }
-        }
+        var headers = Collections.list(request.getHeaderNames()).stream()
+            .flatMap(name -> Collections.list(request.getHeaders(name)).stream().map(value -> Map.entry(name, value))).collect(Headers.collector());
         return new HttpRequest(request.getMethod(), path(request), Optional.ofNullable(request.getQueryString()).orElse(""), headers,
             body.length == 0 ? Optional.empty() : Optional.of(body), clientCertificates(request));
     }
@@ -79,12 +76,8 @@ public final class ServletMessages {
 
     /** The response captured by {@code wrapper}. */
     public static HttpResponse response(ContentCachingResponseWrapper wrapper) {
-        var headers = Headers.EMPTY;
-        for (var name : wrapper.getHeaderNames()) {
-            for (var value : wrapper.getHeaders(name)) {
-                headers = headers.with(name, value);
-            }
-        }
+        var fields = wrapper.getHeaderNames().stream().flatMap(name -> wrapper.getHeaders(name).stream().map(value -> Map.entry(name, value)));
+        var headers = fields.collect(Headers.collector());
         var contentType = wrapper.getContentType();
         if (contentType != null && !headers.has("Content-Type")) {
             headers = headers.with("Content-Type", contentType);

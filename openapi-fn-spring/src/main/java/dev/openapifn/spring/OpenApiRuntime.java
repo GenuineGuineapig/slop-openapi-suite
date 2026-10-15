@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -64,6 +65,8 @@ public final class OpenApiRuntime {
     private final boolean failOnInvalidRequest;
     private final BodyWriter writer;
     private final Map<String, List<ApiOperation>> receivers;
+    /** The mapping patterns of requests, compiled (there are as many as handler mappings). */
+    private final Map<String, PathTemplate> patterns;
 
     public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest) {
         this(name, api, validator, mapper, failOnInvalidRequest, Map.of());
@@ -97,6 +100,7 @@ public final class OpenApiRuntime {
         var declared = api.allOperations();
         operations.values().forEach(shared -> shared.sort(Comparator.comparingInt(declared::indexOf)));
         this.receivers = Map.copyOf(operations);
+        this.patterns = new ConcurrentHashMap<>();
     }
 
     private OpenApiRuntime(OpenApiRuntime runtime, OpenApiValidator validator) {
@@ -107,6 +111,7 @@ public final class OpenApiRuntime {
         this.failOnInvalidRequest = runtime.failOnInvalidRequest;
         this.writer = runtime.writer;
         this.receivers = runtime.receivers;
+        this.patterns = runtime.patterns;
     }
 
     /**
@@ -135,7 +140,7 @@ public final class OpenApiRuntime {
 
     /** The operation (path, webhook or callback) an identifier names, see {@link OpenApiDocument#operation(String)}. */
     public ApiOperation operation(String id) {
-        return api.operation(id)
+        return validator.operation(id)
             .orElseThrow(() -> new IllegalArgumentException("API '" + name + "' has no operation '" + id + "'"));
     }
 
@@ -250,7 +255,7 @@ public final class OpenApiRuntime {
 
     /** Raw path values from the mapping pattern, falling back to the validator's router. */
     private Map<String, String> pathValues(HttpRequest message, ApiOperation operation, @Nullable String pattern) {
-        return Optional.ofNullable(pattern).flatMap(mapped -> PathTemplate.compile(mapped).match(message.path()))
+        return Optional.ofNullable(pattern).flatMap(mapped -> patterns.computeIfAbsent(mapped, PathTemplate::compile).match(message.path()))
             .or(() -> validator.route(HttpRequest.of(operation.method(), message.path())) instanceof Route.Found found
                 ? Optional.of(found.match().pathValues()) : Optional.empty())
             .orElse(Map.of());

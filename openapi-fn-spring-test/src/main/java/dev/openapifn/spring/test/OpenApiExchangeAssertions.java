@@ -4,6 +4,7 @@ import dev.openapifn.http.Headers;
 import dev.openapifn.http.HttpRequest;
 import dev.openapifn.http.HttpResponse;
 import dev.openapifn.spring.OpenApiRuntime;
+import dev.openapifn.spring.client.ClientValidator;
 import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.ValidationReport;
@@ -78,12 +79,6 @@ public final class OpenApiExchangeAssertions {
     }
 
     private static Headers headers(HttpHeaders source) {
-        var headers = Headers.EMPTY;
-        for (var entry : source.headerSet()) {
-            for (var value : entry.getValue()) {
-                headers = headers.with(entry.getKey(), value);
-            }
-        }
-        return headers;
+        return ClientValidator.headers(source);
     }
 }

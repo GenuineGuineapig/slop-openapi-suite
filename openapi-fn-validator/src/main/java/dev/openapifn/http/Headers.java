@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
 /**
  * Immutable HTTP headers with case-insensitive names. Names are stored lower-cased.
@@ -22,6 +24,15 @@ public record Headers(Map<String, List<String>> values) {
         values.forEach((name, list) -> copy.computeIfAbsent(name.toLowerCase(Locale.ROOT), key -> new ArrayList<>()).addAll(list));
         copy.replaceAll((name, list) -> List.copyOf(list));
         values = Collections.unmodifiableMap(copy);
+    }
+
+    /**
+     * Collects name/value pairs (header fields) into headers, keeping the values of each name in
+     * order: one pass, where adding the fields one by one with {@link #with} copies them each time.
+     */
+    public static Collector<Map.Entry<String, String>, ?, Headers> collector() {
+        return Collectors.collectingAndThen(Collectors.groupingBy(field -> field.getKey().toLowerCase(Locale.ROOT), LinkedHashMap::new,
+            Collectors.mapping(Map.Entry::getValue, Collectors.toList())), Headers::new);
     }
 
     /** Headers from alternating name/value pairs. */

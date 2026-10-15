@@ -207,7 +207,7 @@ public final class OpenApiWebClient {
             var message = new HttpRequest(request.method().name(), uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""),
                 ReactiveMessages.headers(request.headers()), Optional.ofNullable(sending.body).filter(bytes -> bytes.length > 0));
             var head = sending.streamed;
-            var operation = Optional.ofNullable(sending.operationId).flatMap(id -> validator.api().operation(id))
+            var operation = Optional.ofNullable(sending.operationId).flatMap(id -> validator.operation(id))
                 .filter(op -> op.kind() != ApiOperation.Kind.PATH);
             RequestValidation validation = operation.map(op -> new OperationMatch(op, Map.of()))
                 .map(match -> head ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message))

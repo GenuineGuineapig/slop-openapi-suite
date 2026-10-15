@@ -11,6 +11,7 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.SecurityScheme;
 import dev.openapifn.model.SpecVersion;
 import dev.openapifn.schema.Dialect;
+import dev.openapifn.validation.OpenApiValidator;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
@@ -80,6 +81,21 @@ class OpenApiParserTest {
     }
 
     @Test
+    void operationIdsWinOverMethodAndPath() {
+        var doc = parse("""
+            openapi: 3.1.0
+            info: {title: t, version: '1'}
+            paths:
+              /a: {get: {operationId: 'GET /b', responses: {'200': {description: ok}}}}
+              /b: {get: {responses: {'200': {description: ok}}}}
+            """, Map.of()).orElseThrow(d -> new AssertionError(d.toString()));
+        // An operation with an operationId goes by it alone (see ApiOperation.displayName).
+        assertThat(doc.operation("GET /b").orElseThrow().path()).isEqualTo("/a");
+        assertThat(doc.operation("GET /a")).isEmpty();
+        assertThat(doc.operationsById()).containsOnlyKeys("GET /b");
+    }
+
+    @Test
     void loadsMultiFilePetstore() {
         var doc = OpenApiLoader.defaults().load("classpath:petstore/openapi.yaml").orElseThrow(d -> new AssertionError(d.toString()));
         var model = doc.model();
@@ -105,6 +121,9 @@ class OpenApiParserTest {
         });
         assertThat(doc.operation("newPetWebhook")).isPresent();
         assertThat(doc.operation("nope")).isEmpty();
+        var validator = OpenApiValidator.of(doc);
+        doc.operationsById().forEach((id, operation) -> assertThat(validator.operation(id)).as(id).contains(operation));
+        assertThat(validator.operation("nope")).isEmpty();
         var petSchema = doc.schemas().deref(model.components().schemas().get("Pet"));
         assertThat(petSchema.document().toString()).endsWith("petstore/schemas/pet.yaml");
         assertThat(petSchema.required()).containsExactly("id", "name", "petType");

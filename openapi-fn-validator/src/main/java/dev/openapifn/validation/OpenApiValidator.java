@@ -138,6 +138,7 @@ public final class OpenApiValidator {
     private final SchemaShapes shapes;
     private final ParameterParser parameters;
     private final BodyParser bodies;
+    private final Map<String, ApiOperation> operations;
 
     private OpenApiValidator(OpenApiDocument api, Options options) {
         this.api = api;
@@ -147,6 +148,7 @@ public final class OpenApiValidator {
         this.shapes = new SchemaShapes(api.schemas());
         this.parameters = new ParameterParser(shapes);
         this.bodies = new BodyParser(shapes);
+        this.operations = api.operationsById();
     }
 
     private OpenApiValidator(OpenApiValidator validator, Options options) {
@@ -157,6 +159,7 @@ public final class OpenApiValidator {
         this.shapes = validator.shapes;
         this.parameters = validator.parameters;
         this.bodies = validator.bodies;
+        this.operations = validator.operations;
     }
 
     public static OpenApiValidator of(OpenApiDocument api) {
@@ -182,6 +185,11 @@ public final class OpenApiValidator {
      */
     public OpenApiValidator withVerifier(CredentialVerifier verifier) {
         return new OpenApiValidator(this, options.withVerifier(verifier.orElse(options.verifier())));
+    }
+
+    /** The operation an identifier names, as {@link OpenApiDocument#operation(String)} finds it, but looked up in an index. */
+    public Optional<ApiOperation> operation(String id) {
+        return Optional.ofNullable(operations.get(id));
     }
 
     public Route route(HttpRequest request) {

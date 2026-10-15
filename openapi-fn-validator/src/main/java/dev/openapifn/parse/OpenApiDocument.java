@@ -3,8 +3,8 @@ package dev.openapifn.parse;
 import dev.openapifn.json.JsonPointer;
 import dev.openapifn.load.Diagnostic;
 import dev.openapifn.load.Uris;
-import dev.openapifn.model.ApiOperation;
 import dev.openapifn.model.ApiOperation.Kind;
+import dev.openapifn.model.ApiOperation;
 import dev.openapifn.model.CallbackOperation;
 import dev.openapifn.model.Link;
 import dev.openapifn.model.OpenApi;
@@ -12,6 +12,8 @@ import dev.openapifn.model.PathItem;
 import dev.openapifn.schema.SchemaRegistry;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,10 +72,25 @@ public record OpenApiDocument(URI uri, OpenApi model, SchemaRegistry schemas, Li
      * {@code METHOD path} for path and webhook operations and {@link CallbackOperation#id()} for callbacks.
      */
     public Optional<ApiOperation> operation(String id) {
+        return Optional.ofNullable(operationsById().get(id));
+    }
+
+    /**
+     * Every operation by each identifier that names it (see {@link #operation(String)}): its
+     * {@code operationId}, which wins over {@code METHOD path}, which wins over a callback id. Made
+     * anew on each call; keep it to look up many.
+     */
+    public Map<String, ApiOperation> operationsById() {
         var all = allOperations();
-        return all.stream().filter(op -> op.operationId().filter(id::equals).isPresent()).findFirst()
-            .or(() -> all.stream().filter(op -> op.kind() != Kind.CALLBACK && op.displayName().equals(id)).findFirst())
-            .or(() -> callbacks().stream().filter(callback -> callback.id().equals(id)).map(CallbackOperation::operation).findFirst());
+        var byId = new LinkedHashMap<String, ApiOperation>();
+        callbacks().forEach(callback -> byId.putIfAbsent(callback.id(), callback.operation()));
+        var named = new LinkedHashMap<String, ApiOperation>();
+        all.stream().filter(op -> op.kind() != Kind.CALLBACK).forEach(op -> named.putIfAbsent(op.displayName(), op));
+        byId.putAll(named);
+        var identified = new LinkedHashMap<String, ApiOperation>();
+        all.forEach(op -> op.operationId().ifPresent(id -> identified.putIfAbsent(id, op)));
+        byId.putAll(identified);
+        return Collections.unmodifiableMap(byId);
     }
 
     /**

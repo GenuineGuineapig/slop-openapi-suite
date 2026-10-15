@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 class HttpPrimitivesTest {
@@ -22,6 +23,9 @@ class HttpPrimitivesTest {
         assertThat(headers.without("ACCEPT").has("accept")).isFalse();
         assertThat(headers.without("ACCEPT").first("x-one")).contains("1");
         assertThat(new Headers(Map.of("A", List.of("1"))).all("a")).containsExactly("1");
+        var collected = Stream.of(Map.entry("Accept", "a"), Map.entry("X-One", "1"), Map.entry("accept", "b")).collect(Headers.collector());
+        assertThat(collected.all("ACCEPT")).containsExactly("a", "b");
+        assertThat(collected.values().keySet()).containsExactly("accept", "x-one");
     }
 
     @Test

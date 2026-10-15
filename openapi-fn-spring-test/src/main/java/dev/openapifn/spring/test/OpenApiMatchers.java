@@ -80,12 +80,8 @@ public final class OpenApiMatchers {
 
     static HttpResponse response(MvcResult result) {
         MockHttpServletResponse response = result.getResponse();
-        var headers = Headers.EMPTY;
-        for (var name : response.getHeaderNames()) {
-            for (var value : response.getHeaders(name)) {
-                headers = headers.with(name, value);
-            }
-        }
+        var headers = response.getHeaderNames().stream().flatMap(name -> response.getHeaders(name).stream().map(value -> Map.entry(name, value)))
+            .collect(Headers.collector());
         var body = response.getContentAsByteArray();
         return new HttpResponse(response.getStatus(), headers, body.length == 0 ? Optional.empty() : Optional.of(body));
     }

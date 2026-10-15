@@ -53,7 +53,7 @@ public final class ClientValidator {
                                             @Nullable String operationId) {
         var message = new HttpRequest(method, uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""), headers,
             Optional.ofNullable(body).filter(bytes -> bytes.length > 0));
-        var operation = Optional.ofNullable(operationId).flatMap(id -> validator.api().operation(id)).filter(op -> op.kind() != ApiOperation.Kind.PATH);
+        var operation = Optional.ofNullable(operationId).flatMap(id -> validator.operation(id)).filter(op -> op.kind() != ApiOperation.Kind.PATH);
         var validation = operation.map(op -> new OperationMatch(op, Map.of()))
             .map(match -> streamed ? validator.validateRequestHead(match, message) : validator.validateRequest(match, message))
             .orElseGet(() -> streamed ? validator.validateRequestHead(message) : validator.validateRequest(message));
@@ -166,13 +166,8 @@ public final class ClientValidator {
 
     /** Spring headers as openapi-fn's. */
     public static Headers headers(HttpHeaders source) {
-        var headers = Headers.EMPTY;
-        for (var entry : source.headerSet()) {
-            for (var value : entry.getValue()) {
-                headers = headers.with(entry.getKey(), value);
-            }
-        }
-        return headers;
+        return source.headerSet().stream().flatMap(field -> field.getValue().stream().map(value -> Map.entry(field.getKey(), value)))
+            .collect(Headers.collector());
     }
 
     /** Validates the items of a body as they are read. */
