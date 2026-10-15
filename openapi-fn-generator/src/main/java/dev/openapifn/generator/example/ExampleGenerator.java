@@ -203,11 +203,9 @@ public final class ExampleGenerator {
         var max = number(schema, "maximum").map(m -> flag(schema, "exclusiveMaximum") ? m.subtract(step) : m)
             .or(() -> number(schema, "exclusiveMaximum").map(m -> m.subtract(step)));
         var value = min.or(() -> max.map(m -> m.min(BigDecimal.ONE))).orElse(BigDecimal.ONE);
-        var multiple = number(schema, "multipleOf");
-        if (multiple.isPresent() && multiple.get().signum() > 0) {
-            value = value.divide(multiple.get(), 0, RoundingMode.CEILING).multiply(multiple.get());
-        }
-        return JsonNumber.of(integral ? value.setScale(0, RoundingMode.CEILING) : value);
+        var multiple = number(schema, "multipleOf").filter(divisor -> divisor.signum() > 0)
+            .map(divisor -> value.divide(divisor, 0, RoundingMode.CEILING).multiply(divisor)).orElse(value);
+        return JsonNumber.of(integral ? multiple.setScale(0, RoundingMode.CEILING) : multiple);
     }
 
     /** An OpenAPI 3.0 / draft 4 boolean exclusive bound. */
@@ -223,13 +221,8 @@ public final class ExampleGenerator {
         var format = shapes.closure(schema).stream().flatMap(s -> s.format().stream()).findFirst();
         var text = format.map(FORMATS::get).orElse("example");
         var minLength = number(schema, "minLength").map(BigDecimal::intValue).orElse(0);
-        var maxLength = number(schema, "maxLength").map(BigDecimal::intValue);
-        if (text.length() < minLength) {
-            text = text + "x".repeat(minLength - text.length());
-        }
-        if (maxLength.isPresent() && text.length() > maxLength.get()) {
-            text = text.substring(0, maxLength.get());
-        }
-        return JsonString.of(text);
+        var padded = text + "x".repeat(Math.max(0, minLength - text.length()));
+        return JsonString.of(number(schema, "maxLength").map(BigDecimal::intValue).filter(max -> padded.length() > max)
+            .map(max -> padded.substring(0, max)).orElse(padded));
     }
 }

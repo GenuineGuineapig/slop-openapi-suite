@@ -430,37 +430,33 @@ public final class SchemaValidator {
         // References
 
         private Evaluation reference(Schema schema, JsonValue instance, JsonPointer path, String ref) {
-            var target = registry.resolve(schema, ref);
-            if (target.isEmpty()) {
-                return failure(path, schema, "$ref", "unresolvable reference '" + ref + "'");
-            }
-            return evaluate(target.get(), instance, path);
+            return registry.resolve(schema, ref).map(target -> evaluate(target, instance, path))
+                .orElseGet(() -> failure(path, schema, "$ref", "unresolvable reference '" + ref + "'"));
         }
 
         private Evaluation dynamicReference(Schema schema, JsonValue instance, JsonPointer path, String ref) {
-            var initial = Uris.resolve(schema.baseUri(), ref).toOptional().flatMap(registry::resolve);
-            if (initial.isEmpty()) {
-                return failure(path, schema, "$dynamicRef", "unresolvable reference '" + ref + "'");
-            }
+            return Uris.resolve(schema.baseUri(), ref).toOptional().flatMap(registry::resolve)
+                .map(initial -> evaluate(dynamicTarget(initial, ref), instance, path))
+                .orElseGet(() -> failure(path, schema, "$dynamicRef", "unresolvable reference '" + ref + "'"));
+        }
+
+        /**
+         * Where a {@code $dynamicRef} to {@code initial} leads: when it names the dynamic anchor
+         * {@code initial} declares, to the outermost schema of the dynamic scope with that anchor.
+         */
+        private Schema dynamicTarget(Schema initial, String ref) {
             var anchor = Uris.parse(ref).toOptional().map(Uris::fragment).orElse("");
-            var target = initial.get();
-            if (!anchor.isEmpty() && !anchor.startsWith("/") && initial.get().object().string("$dynamicAnchor").filter(anchor::equals).isPresent()) {
-                target = outermostDynamicAnchor(anchor).orElse(target);
-            }
-            return evaluate(target, instance, path);
+            var dynamic = !anchor.isEmpty() && !anchor.startsWith("/") && initial.object().string("$dynamicAnchor").filter(anchor::equals).isPresent();
+            return dynamic ? outermostDynamicAnchor(anchor).orElse(initial) : initial;
         }
 
         private Evaluation recursiveReference(Schema schema, JsonValue instance, JsonPointer path, String ref) {
-            var initial = registry.resolve(schema, ref);
-            if (initial.isEmpty()) {
-                return failure(path, schema, "$recursiveRef", "unresolvable reference '" + ref + "'");
-            }
-            var target = initial.get();
-            if (recursiveAnchor(target)) {
-                target = dynamicScope.stream().map(registry::resolve).flatMap(Optional::stream).filter(Run::recursiveAnchor)
-                    .findFirst().orElse(target);
-            }
-            return evaluate(target, instance, path);
+            return registry.resolve(schema, ref)
+                .map(initial -> recursiveAnchor(initial)
+                    ? dynamicScope.stream().map(registry::resolve).flatMap(Optional::stream).filter(Run::recursiveAnchor).findFirst().orElse(initial)
+                    : initial)
+                .map(target -> evaluate(target, instance, path))
+                .orElseGet(() -> failure(path, schema, "$recursiveRef", "unresolvable reference '" + ref + "'"));
         }
 
         private static boolean recursiveAnchor(Schema schema) {

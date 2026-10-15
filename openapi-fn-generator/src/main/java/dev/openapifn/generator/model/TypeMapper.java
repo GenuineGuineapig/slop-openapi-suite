@@ -310,13 +310,12 @@ public final class TypeMapper {
         return Names.unique(JAVA_LANG.contains(base) ? base + "Model" : base, takenNames);
     }
 
+    /** The name of a schema's position (not an array index), else of its document's file. */
     private String baseName(Schema schema) {
-        var last = schema.pointer().last();
-        if (last.isPresent() && !last.get().matches("[0-9]+")) {
-            return Names.pascal(last.get());
-        }
-        var path = schema.document().getPath();
-        return Names.pascal(path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.[^.]*$", ""));
+        return Names.pascal(schema.pointer().last().filter(last -> !last.matches("[0-9]+")).orElseGet(() -> {
+            var path = schema.document().getPath();
+            return path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.[^.]*$", "");
+        }));
     }
 
     private ClassName uniqueNested(ClassName owner, String name) {

@@ -246,8 +246,8 @@ public final class TestRenderer {
             return Optional.of(imports.ref(ApiRenderer.FILE_PART) + ".of(\"example.bin\", " + Names.literal(mediaType)
                 + ", \"example\".getBytes(" + imports.ref(STANDARD_CHARSETS) + ".UTF_8))");
         }
-        var example = itemSchema.isPresent() ? examples.example(itemSchema.get(), direction).map(JsonArray::of).map(JsonValue.class::cast)
-            : examples.example(property.schema(), direction);
+        var example = itemSchema.map(item -> examples.example(item, direction).<JsonValue>map(JsonArray::of))
+            .orElseGet(() -> examples.example(property.schema(), direction));
         var streamed = OperationModel.streamed(type);
         return example.map(json -> type.equals(TypeRef.STRING) ? Names.literal(json.asString().orElse(json.toJson()))
             : streamed.isPresent() ? stream(type, "mapper.readValue(" + Names.literal(json.toJson()) + ", "
