@@ -1,6 +1,8 @@
 package dev.openapifn.model;
 
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /** Supported OpenAPI specification versions. */
 public enum SpecVersion {
@@ -14,12 +16,12 @@ public enum SpecVersion {
         this.prefix = prefix;
     }
 
-    private static final java.util.regex.Pattern VERSION = java.util.regex.Pattern.compile("(3\\.[0-2])\\.[0-9]+(-.+)?");
+    private static final Pattern VERSION = Pattern.compile("(3\\.[0-2])\\.[0-9]+(-.+)?");
 
     /** Identifies the version from the {@code openapi} field: {@code major.minor.patch} in ASCII digits, e.g. {@code 3.1.0}. */
     public static Optional<SpecVersion> of(String openapi) {
         var matcher = VERSION.matcher(openapi);
-        return matcher.matches() ? java.util.Arrays.stream(values()).filter(v -> v.prefix.equals(matcher.group(1))).findFirst() : Optional.empty();
+        return matcher.matches() ? Arrays.stream(values()).filter(v -> v.prefix.equals(matcher.group(1))).findFirst() : Optional.empty();
     }
 
     /** {@code major.minor}, e.g. {@code 3.1}. */

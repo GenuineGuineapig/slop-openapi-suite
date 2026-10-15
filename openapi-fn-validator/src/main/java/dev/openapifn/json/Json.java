@@ -4,6 +4,7 @@ import dev.openapifn.fn.Result;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,7 +45,7 @@ public final class Json {
                 yield new JsonObject(members);
             }
             case Collection<?> collection -> new JsonArray(collection.stream().map(Json::of).toList());
-            case Object[] array -> new JsonArray(java.util.Arrays.stream(array).map(Json::of).toList());
+            case Object[] array -> new JsonArray(Arrays.stream(array).map(Json::of).toList());
             default -> throw new IllegalArgumentException("Cannot convert " + value.getClass().getName() + " to JSON");
         };
     }

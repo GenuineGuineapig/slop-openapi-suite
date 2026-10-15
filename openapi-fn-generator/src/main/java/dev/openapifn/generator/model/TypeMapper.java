@@ -1,8 +1,8 @@
 package dev.openapifn.generator.model;
 
 import dev.openapifn.generator.java.Names;
-import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.java.TypeRef.ClassName;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelDef.EnumDef;
 import dev.openapifn.generator.model.ModelDef.ParentDef;
 import dev.openapifn.generator.model.ModelDef.Property;
@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * Maps schemas to Java types and collects the classes to generate: records for objects, enums,
@@ -365,7 +366,7 @@ public final class TypeMapper {
     }
 
     private boolean fitsInt(Schema schema) {
-        var bounds = closure(schema).stream().flatMap(s -> java.util.stream.Stream.of(s.number("minimum"), s.number("maximum"),
+        var bounds = closure(schema).stream().flatMap(s -> Stream.of(s.number("minimum"), s.number("maximum"),
             s.number("exclusiveMinimum"), s.number("exclusiveMaximum"))).flatMap(Optional::stream).toList();
         return bounds.stream().allMatch(b -> b.compareTo(INT_MIN) >= 0 && b.compareTo(INT_MAX) <= 0);
     }

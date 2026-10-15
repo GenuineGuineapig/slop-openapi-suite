@@ -14,10 +14,13 @@ import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.ValidationIssue;
 import dev.openapifn.validation.ValidationReport;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -168,7 +171,7 @@ class RuntimeTest {
     @Test
     void respondsWithHeadersAndNegotiatedTypes() {
         var request = request("GET", "/items/1");
-        var headers = new java.util.LinkedHashMap<String, @Nullable Object>();
+        var headers = new LinkedHashMap<String, @Nullable Object>();
         headers.put("X-Map", Map.of("a", 1));
         headers.put("X-Plain", "v");
         headers.put("X-None", null);
@@ -214,8 +217,8 @@ class RuntimeTest {
         assertThat(JacksonJson.toJsonValue(factory.missingNode())).isEqualTo(Json.of(null));
         assertThat(JacksonJson.toJsonValue(JacksonJson.embed(new Object()))).isEqualTo(Json.of(null));
         assertThat(JacksonJson.toJsonValue(factory.numberNode(new BigDecimal("2.50")))).isEqualTo(Json.of(2.5));
-        assertThat(MAPPER.treeToValue(JacksonJson.toJsonNode(Json.of(List.of(1, 5_000_000_000L, new java.math.BigInteger("99999999999999999999")))), Object.class))
-            .isEqualTo(List.of(1, 5_000_000_000L, new java.math.BigInteger("99999999999999999999")));
+        assertThat(MAPPER.treeToValue(JacksonJson.toJsonNode(Json.of(List.of(1, 5_000_000_000L, new BigInteger("99999999999999999999")))), Object.class))
+            .isEqualTo(List.of(1, 5_000_000_000L, new BigInteger("99999999999999999999")));
     }
 
     @Test
@@ -249,7 +252,7 @@ class RuntimeTest {
     @Test
     void verifiersCanBeAddedPerRequest() {
         var runtime = runtime(true);
-        var verifying = runtime.withVerifier(credential -> java.util.Optional.of(dev.openapifn.fn.Result.err("nope")));
+        var verifying = runtime.withVerifier(credential -> Optional.of(dev.openapifn.fn.Result.err("nope")));
         assertThat(verifying.name()).isEqualTo(runtime.name());
         assertThat(verifying.api()).isSameAs(runtime.api());
         assertThat(verifying.mapper()).isSameAs(runtime.mapper());

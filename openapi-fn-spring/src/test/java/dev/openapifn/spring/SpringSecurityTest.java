@@ -11,6 +11,7 @@ import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.security.Grant;
 import dev.openapifn.spring.app.TestApplication;
 import jakarta.servlet.Filter;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class SpringSecurityTest {
         @Bean
         FilterRegistrationBean<Filter> testAuthentication() {
             Filter filter = (request, response, chain) -> {
-                var user = ((jakarta.servlet.http.HttpServletRequest) request).getHeader("X-Test-User");
+                var user = ((HttpServletRequest) request).getHeader("X-Test-User");
                 if (user != null) {
                     var parts = user.split(":", 2);
                     SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(parts[0], "n/a",

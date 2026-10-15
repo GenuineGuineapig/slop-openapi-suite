@@ -2,6 +2,7 @@ package dev.openapifn.http;
 
 import dev.openapifn.fn.Immutable;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -82,16 +83,11 @@ public record ContentType(String type, String subtype, Map<String, String> param
 
     /** The most specific of {@code ranges} (media range keys of a content map) that includes {@code actual}. */
     public static Optional<String> bestMatch(Collection<String> ranges, ContentType actual) {
-        String best = null;
-        int bestScore = -1;
-        for (var range : ranges) {
-            var parsed = parse(range);
-            if (parsed.isPresent() && parsed.get().includes(actual) && parsed.get().specificity() > bestScore) {
-                best = range;
-                bestScore = parsed.get().specificity();
-            }
+        record Candidate(String range, int specificity) {
         }
-        return Optional.ofNullable(best);
+        // max keeps the first of equally specific ranges.
+        return ranges.stream().flatMap(range -> parse(range).filter(type -> type.includes(actual)).map(type -> new Candidate(range, type.specificity())).stream())
+            .max(Comparator.comparingInt(Candidate::specificity)).map(Candidate::range);
     }
 
     @Override

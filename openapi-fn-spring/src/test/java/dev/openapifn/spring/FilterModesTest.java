@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 class FilterModesTest {
 
@@ -83,7 +84,7 @@ class FilterModesTest {
         void invalidRequestsReachTheHandler() throws Exception {
             mvc.perform(get("/mounted/pets?limit=500")).andExpect(status().isOk());
             mvc.perform(get("/mounted/broken")).andExpect(status().isOk());
-            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/mounted/pets")).andExpect(status().isMethodNotAllowed());
+            mvc.perform(MockMvcRequestBuilders.put("/mounted/pets")).andExpect(status().isMethodNotAllowed());
         }
     }
 
@@ -97,7 +98,7 @@ class FilterModesTest {
 
         @Test
         void unmatchedMethodsPassWithoutResponseValidation() throws Exception {
-            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/pets")).andExpect(status().isMethodNotAllowed());
+            mvc.perform(MockMvcRequestBuilders.put("/api/pets")).andExpect(status().isMethodNotAllowed());
         }
     }
 }

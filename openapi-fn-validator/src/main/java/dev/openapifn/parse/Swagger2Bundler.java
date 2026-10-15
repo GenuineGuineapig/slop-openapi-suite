@@ -14,7 +14,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Makes a Swagger 2.0 description self-contained, so that it can be converted as one document.
@@ -209,7 +211,7 @@ final class Swagger2Bundler {
     }
 
     /** Inlines an object, unless it is being inlined already (a reference cycle, kept as an empty object). */
-    private JsonValue inlined(Target target, java.util.function.Supplier<JsonValue> inline) {
+    private JsonValue inlined(Target target, Supplier<JsonValue> inline) {
         if (!inlining.add(target.uri())) {
             return JsonObject.EMPTY;
         }
@@ -239,7 +241,7 @@ final class Swagger2Bundler {
         return Uris.withoutFragment(uri).normalize().equals(root);
     }
 
-    private static JsonObject map(JsonObject source, java.util.function.BiFunction<String, JsonValue, JsonValue> convert) {
+    private static JsonObject map(JsonObject source, BiFunction<String, JsonValue, JsonValue> convert) {
         var out = new LinkedHashMap<String, JsonValue>();
         source.members().forEach((key, value) -> out.put(key, convert.apply(key, value)));
         return new JsonObject(out);

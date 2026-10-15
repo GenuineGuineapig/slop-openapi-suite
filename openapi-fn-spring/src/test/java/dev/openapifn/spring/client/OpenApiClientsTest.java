@@ -12,7 +12,7 @@ import dev.openapifn.spring.autoconfigure.OpenApiFnAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -47,7 +47,7 @@ class OpenApiClientsTest {
     void unexpectedResponses() {
         var builder = RestClient.builder();
         var server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo("https://h.test/x")).andRespond(withStatus(org.springframework.http.HttpStatusCode.valueOf(418)));
+        server.expect(requestTo("https://h.test/x")).andRespond(withStatus(HttpStatusCode.valueOf(418)));
         var http = new OpenApiHttpClient(builder.build(), "https://h.test", JsonMapper.builder().build());
         assertThatThrownBy(() -> http.exchange(ClientCall.of("GET", "/x"), response -> {
             throw new UnexpectedResponseException(response);

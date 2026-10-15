@@ -2,6 +2,7 @@ package dev.openapifn.model;
 
 import dev.openapifn.fn.Immutable;
 import dev.openapifn.json.JsonValue;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,7 +42,7 @@ public record Operation(List<String> tags, Optional<String> summary, Optional<St
      * Path item parameters overridden by operation parameters with the same name and location.
      */
     public List<Parameter> effectiveParameters(PathItem pathItem) {
-        var result = new java.util.ArrayList<Parameter>();
+        var result = new ArrayList<Parameter>();
         for (var shared : pathItem.parameters()) {
             if (parameters.stream().noneMatch(own -> own.sameIdentity(shared))) {
                 result.add(shared);

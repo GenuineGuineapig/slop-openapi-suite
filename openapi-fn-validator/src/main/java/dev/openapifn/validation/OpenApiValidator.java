@@ -26,15 +26,21 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.Response;
 import dev.openapifn.model.SecurityRequirement;
 import dev.openapifn.model.SecurityScheme;
-import dev.openapifn.security.Credential;
-import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Direction;
 import dev.openapifn.schema.Schema;
 import dev.openapifn.schema.SchemaError;
 import dev.openapifn.schema.SchemaValidator;
+import dev.openapifn.security.Credential;
+import dev.openapifn.security.CredentialVerifier;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -42,6 +48,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -281,7 +289,7 @@ public final class OpenApiValidator {
     }
 
     /** RFC 6750 bearer tokens (token68). */
-    private static final java.util.regex.Pattern TOKEN68 = java.util.regex.Pattern.compile("[A-Za-z0-9._~+/-]+=*");
+    private static final Pattern TOKEN68 = Pattern.compile("[A-Za-z0-9._~+/-]+=*");
 
     /**
      * Checks that one of the security requirements is met: by credentials that are present and well
@@ -293,7 +301,7 @@ public final class OpenApiValidator {
         if (requirements.isEmpty()) {
             return;
         }
-        var best = requirements.stream().map(requirement -> requirement(requirement, request)).min(java.util.Comparator.comparing(Check::standing))
+        var best = requirements.stream().map(requirement -> requirement(requirement, request)).min(Comparator.comparing(Check::standing))
             .orElseThrow();
         var alternatives = requirements.stream().map(r -> String.join(" + ", r.schemes().keySet())).collect(Collectors.joining(" or "));
         if (best.standing() != Standing.SATISFIED) {
@@ -326,7 +334,7 @@ public final class OpenApiValidator {
     private Check verify(Credential credential, List<String> scopes) {
         return options.verifier().verify(credential).map(result -> result.fold(
                 grant -> grant.scopes().containsAll(scopes) ? Check.SATISFIED : new Check(Standing.FORBIDDEN, "insufficient scopes: '"
-                    + credential.scheme() + "' grants " + new java.util.TreeSet<>(grant.scopes()) + " but " + scopes + " are required"),
+                    + credential.scheme() + "' grants " + new TreeSet<>(grant.scopes()) + " but " + scopes + " are required"),
                 reason -> new Check(Standing.REJECTED, "credentials for '" + credential.scheme() + "' rejected: " + reason)))
             .orElse(Check.SATISFIED);
     }
@@ -373,7 +381,7 @@ public final class OpenApiValidator {
     /** RFC 7617: base64 of {@code user-id ":" password}. */
     private static Result<Credential, Standing> basic(String name, String credentials) {
         try {
-            var decoded = new String(java.util.Base64.getDecoder().decode(credentials), java.nio.charset.StandardCharsets.UTF_8);
+            var decoded = new String(Base64.getDecoder().decode(credentials), StandardCharsets.UTF_8);
             var colon = decoded.indexOf(':');
             return colon < 0 ? Result.err(Standing.MALFORMED) : Result.ok(new Credential.Basic(name, decoded.substring(0, colon), decoded.substring(colon + 1)));
         } catch (IllegalArgumentException e) {
@@ -469,7 +477,7 @@ public final class OpenApiValidator {
     }
 
     private static List<ContentType> acceptRanges(String accept) {
-        return java.util.Arrays.stream(accept.split(","))
+        return Arrays.stream(accept.split(","))
             .flatMap(range -> ContentType.parse(range).stream())
             .filter(range -> !range.parameter("q").filter(q -> q.matches("0(\\.0*)?")).isPresent())
             .toList();
@@ -587,7 +595,7 @@ public final class OpenApiValidator {
     private void part(Multipart.Part part, Optional<Encoding> encoding, String location, String side, Issues issues) {
         encoding.ifPresent(declared -> {
             declared.contentType().ifPresent(allowed -> part.contentType().flatMap(ContentType::parse).ifPresent(actual -> {
-                var ranges = java.util.Arrays.stream(allowed.split(",")).map(String::trim).toList();
+                var ranges = Arrays.stream(allowed.split(",")).map(String::trim).toList();
                 if (ContentType.bestMatch(ranges, actual).isEmpty()) {
                     issues.add(side + ".body.part.contentType", "part content type '" + actual.essence() + "' is not one of " + ranges, location);
                 }
@@ -678,7 +686,7 @@ public final class OpenApiValidator {
         private final String side;
         private final List<Schema> sequence;
         private final boolean unique;
-        private final java.util.Set<dev.openapifn.json.JsonDigest> seen = new java.util.HashSet<>();
+        private final Set<dev.openapifn.json.JsonDigest> seen = new HashSet<>();
         private final Map<Schema, Integer> contained = new LinkedHashMap<>();
         private int index;
 
@@ -756,7 +764,7 @@ public final class OpenApiValidator {
                 schema.number("minItems").filter(min -> index < min.intValue())
                     .ifPresent(min -> issues.add(key + "minItems", "must have at least " + min.intValue() + " items", "body"));
                 if (schema.has("contains")) {
-                    var min = schema.number("minContains").map(java.math.BigDecimal::intValue).orElse(1);
+                    var min = schema.number("minContains").map(BigDecimal::intValue).orElse(1);
                     if (contained.getOrDefault(schema, 0) < min) {
                         issues.add(key + (min == 1 ? "contains" : "minContains"), min == 1 ? "must contain at least one matching item"
                             : "must contain at least " + min + " matching items", "body");
@@ -772,7 +780,7 @@ public final class OpenApiValidator {
     /** A schema and the schemas that apply with it wherever it applies: its {@code $ref} and {@code allOf} chain. */
     private List<Schema> applying(Schema schema) {
         var result = new ArrayList<Schema>();
-        applying(schema, result, new java.util.HashSet<>());
+        applying(schema, result, new HashSet<>());
         return result;
     }
 

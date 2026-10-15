@@ -28,6 +28,7 @@ import dev.openapifn.schema.Direction;
 import dev.openapifn.schema.Schema;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -305,8 +306,8 @@ class NetworkntDifferentialTest {
             case JsonNumber number -> {
                 out.put(at + " a string", rebuild.apply(JsonString.of(number.value().toPlainString())));
                 out.put(at + " negative", rebuild.apply(JsonNumber.of(-1)));
-                out.put(at + " a fraction", rebuild.apply(JsonNumber.of(new java.math.BigDecimal("0.5"))));
-                out.put(at + " huge", rebuild.apply(JsonNumber.of(new java.math.BigDecimal("1e15"))));
+                out.put(at + " a fraction", rebuild.apply(JsonNumber.of(new BigDecimal("0.5"))));
+                out.put(at + " huge", rebuild.apply(JsonNumber.of(new BigDecimal("1e15"))));
             }
             case JsonBoolean bool -> out.put(at + " a string", rebuild.apply(JsonString.of(Boolean.toString(bool.value()))));
             case JsonNull ignored -> out.put(at + " a string", rebuild.apply(JsonString.of("x")));

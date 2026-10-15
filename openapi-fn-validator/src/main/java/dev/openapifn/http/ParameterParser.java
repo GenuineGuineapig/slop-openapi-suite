@@ -13,6 +13,7 @@ import dev.openapifn.schema.Schema;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -250,7 +251,7 @@ public final class ParameterParser {
             return split(raw, ",");
         }
         var encoded = UrlCodec.encode(separator, "");
-        var normalized = raw.replace(encoded, separator).replace(encoded.toLowerCase(java.util.Locale.ROOT), separator);
+        var normalized = raw.replace(encoded, separator).replace(encoded.toLowerCase(Locale.ROOT), separator);
         return split(separator.equals(" ") ? normalized.replace("+", " ") : normalized, separator);
     }
 

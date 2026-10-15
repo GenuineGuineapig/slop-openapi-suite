@@ -1,6 +1,7 @@
 package dev.openapifn.model;
 
 import dev.openapifn.fn.Immutable;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -13,7 +14,7 @@ import java.util.Map;
 public record SecurityRequirement(Map<String, List<String>> schemes) {
 
     public SecurityRequirement {
-        var copy = new java.util.LinkedHashMap<String, List<String>>();
+        var copy = new LinkedHashMap<String, List<String>>();
         schemes.forEach((name, scopes) -> copy.put(name, List.copyOf(scopes)));
         schemes = Immutable.map(copy);
     }

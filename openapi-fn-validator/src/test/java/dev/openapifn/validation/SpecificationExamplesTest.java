@@ -27,8 +27,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
 /**
@@ -247,7 +249,7 @@ class SpecificationExamplesTest {
         return switch (expected) {
             case JsonNumber number -> actual instanceof JsonNumber other && other.value().compareTo(number.value()) == 0;
             case JsonArray array -> actual instanceof JsonArray other && other.size() == array.size()
-                && java.util.stream.IntStream.range(0, array.size()).allMatch(i -> equal(other.values().get(i), array.values().get(i)));
+                && IntStream.range(0, array.size()).allMatch(i -> equal(other.values().get(i), array.values().get(i)));
             case JsonObject object -> actual instanceof JsonObject other && other.members().keySet().equals(object.members().keySet())
                 && object.members().entrySet().stream().allMatch(entry -> equal(other.get(entry.getKey()).orElseThrow(), entry.getValue()));
             default -> actual.equals(expected);
@@ -259,7 +261,7 @@ class SpecificationExamplesTest {
      * Form with JSON Values" and "with Binary Values"): the data serializes to the body shown, which
      * a server validates and parses back to the data.
      */
-    @org.junit.jupiter.api.Test
+    @Test
     void theFormBodyExamples() {
         var text = String.join("\n", lines("3.2.0"));
         var withJson = "id=f81d4fae-7dec-11d0-a765-00a0c91e6bf6&address=%7B%22streetAddress%22%3A%22123+Example+Dr.%22%2C%22city%22%3A%22Somewhere%22%2C"

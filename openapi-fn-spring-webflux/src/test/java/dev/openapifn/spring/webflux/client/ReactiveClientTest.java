@@ -21,6 +21,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.core.type.TypeReference;
@@ -140,7 +141,7 @@ class ReactiveClientTest {
             .block();
         assertThat(mixed).isEqualTo(415);
         assertThatThrownBy(() -> new OpenApiWebClient(WebClient.create(), "http://localhost:1", MAPPER).exchange(ClientCall.of("GET", "/x"),
-            response -> response.buffered()).block()).isInstanceOf(org.springframework.web.reactive.function.client.WebClientRequestException.class);
+            response -> response.buffered()).block()).isInstanceOf(WebClientRequestException.class);
         var client = validating();
         assertThatThrownBy(() -> client.exchange(ClientCall.of("POST", "/pets").param(KEY, "k").body("application/json", new byte[0]),
             response -> response.buffered()).block()).isInstanceOf(ClientValidationException.class).hasMessageContaining("request.body.missing");

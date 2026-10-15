@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.snakeyaml.engine.v2.api.LoadSettings;
@@ -140,7 +141,7 @@ public final class DocumentParser {
     }
 
     private static JsonValue decimal(String value) {
-        var lower = value.toLowerCase(java.util.Locale.ROOT);
+        var lower = value.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".inf") || lower.equals(".nan")) {
             return JsonString.of(value);
         }

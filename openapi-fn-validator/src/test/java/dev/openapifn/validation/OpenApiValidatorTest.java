@@ -7,9 +7,15 @@ import dev.openapifn.http.HttpResponse;
 import dev.openapifn.json.Json;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 class OpenApiValidatorTest {
@@ -72,7 +78,7 @@ class OpenApiValidatorTest {
 
     @Test
     void securitySchemesOfEveryKind() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(java.util.Map.of())).parse(java.net.URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.1.0
             info: {title: t, version: v}
             paths:
@@ -98,7 +104,7 @@ class OpenApiValidatorTest {
 
     @Test
     void credentialsMustBeWellFormed() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(java.util.Map.of())).parse(java.net.URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.1.0
             info: {title: t, version: v}
             paths:
@@ -119,7 +125,7 @@ class OpenApiValidatorTest {
                 mtls: {type: mutualTLS}
             """).orElseThrow(d -> new AssertionError(d.toString()));
         var validator = OpenApiValidator.of(api);
-        java.util.function.BiFunction<String, String, List<String>> issues = (path, authorization) -> issues(validator.validateRequest(
+        BiFunction<String, String, List<String>> issues = (path, authorization) -> issues(validator.validateRequest(
             HttpRequest.of("GET", path).withHeader("Authorization", authorization)).report());
         assertThat(issues.apply("/basic", "Basic dXNlcjpwdw==")).isEmpty();
         assertThat(issues.apply("/basic", "basic   dXNlcjpwdw==  ")).isEmpty();
@@ -146,7 +152,7 @@ class OpenApiValidatorTest {
 
     @Test
     void emptyValuesStandForUnusedParametersWhereAllowed() {
-        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(java.util.Map.of())).parse(java.net.URI.create("mem:/a.yaml"), """
+        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(Map.of())).parse(URI.create("mem:/a.yaml"), """
             openapi: 3.2.0
             info: {title: t, version: v}
             paths:
@@ -174,7 +180,7 @@ class OpenApiValidatorTest {
         assertThat(request(listPets("?tags=a,b"))).isEmpty();
         assertThat(VALIDATOR.validateRequest(listPets("?tags=a,b&filter%5Bkind%5D=cat")).parameters())
             .containsEntry("query.tags", Json.of(List.of("a", "b")))
-            .containsEntry("query.filter", Json.of(java.util.Map.of("kind", "cat")));
+            .containsEntry("query.filter", Json.of(Map.of("kind", "cat")));
         assertThat(request(listPets("?filter[kind]=cat&filter[age]=x"))).containsExactly("request.parameter.query.schema.type@query.filter/age");
         assertThat(request(listPets("?unknown=1"))).isEmpty();
         var warnUnknown = OpenApiValidator.of(API, OpenApiValidator.Options.DEFAULT.withLevels(LevelPolicy.DEFAULT.with("request.parameter.query.unknown", Level.WARN)));
@@ -204,7 +210,7 @@ class OpenApiValidatorTest {
     void jsonFormAndXmlBodies() {
         var post = HttpRequest.of("POST", "/v1/pets");
         assertThat(request(post.withBody("application/json", "{\"name\": \"Rex\"}"))).isEmpty();
-        assertThat(VALIDATOR.validateRequest(post.withBody("application/json", "{\"name\": \"Rex\"}")).body()).contains(Json.of(java.util.Map.of("name", "Rex")));
+        assertThat(VALIDATOR.validateRequest(post.withBody("application/json", "{\"name\": \"Rex\"}")).body()).contains(Json.of(Map.of("name", "Rex")));
         assertThat(request(post.withBody("application/json; charset=utf-8", "{}"))).containsExactly("request.body.schema.required@body");
         assertThat(request(post.withBody("application/json", "{\"id\": 1, \"name\": \"Rex\"}"))).containsExactly("request.body.schema.readOnly@body/id");
         assertThat(request(post.withBody("application/json", "{"))).containsExactly("request.body.invalid@body");
@@ -344,14 +350,14 @@ class OpenApiValidatorTest {
     private static List<String> items(OpenApiValidator.ItemValidator validator, String body) {
         var framer = validator.framer();
         var bytes = body.getBytes(StandardCharsets.UTF_8);
-        var frames = new java.util.ArrayList<dev.openapifn.http.ItemFramer.Frame>();
+        var frames = new ArrayList<dev.openapifn.http.ItemFramer.Frame>();
         for (int i = 0; i < bytes.length; i += 3) {
             frames.addAll(framer.feed(bytes, i, Math.min(3, bytes.length - i)));
         }
         frames.add(framer.finish());
         return frames.stream().map(validator::validate).filter(item -> item.value().isPresent() || !item.report().isEmpty())
             .map(item -> item.value().map(value -> value.toJson()).orElse("-") + issues(item.report()).stream().map(issue -> " " + issue).collect(
-                java.util.stream.Collectors.joining()))
+                Collectors.joining()))
             .toList();
     }
 
@@ -407,7 +413,7 @@ class OpenApiValidatorTest {
     void streamedSequencesAreCheckedAsAWhole() {
         var streams = VALIDATOR.validateRequestHead(HttpRequest.of("POST", "/v1/streams").withHeader("Content-Type", "application/jsonl")).match()
             .orElseThrow();
-        var jsonl = (java.util.function.Function<String, List<String>>) body -> items(VALIDATOR.requestItems(streams, "application/jsonl").orElseThrow(), body);
+        var jsonl = (Function<String, List<String>>) body -> items(VALIDATOR.requestItems(streams, "application/jsonl").orElseThrow(), body);
         assertThat(jsonl.apply("{\"n\":1}\n")).containsExactly("{\"n\":1}", "- request.body.schema.contains@body request.body.schema.minItems@body");
         assertThat(jsonl.apply("{\"flag\":1}\n{\"flag\":1}\n")).containsExactly("{\"flag\":1}",
             "{\"flag\":1} request.body.schema.uniqueItems@body/1 request.body.schema.maxContains@body/1");

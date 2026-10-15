@@ -16,6 +16,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -139,7 +140,7 @@ public final class OpenApiValidationWebFilter implements WebFilter, Ordered {
         return new ServerHttpRequestDecorator(request) {
             @Override
             public Flux<DataBuffer> getBody() {
-                return Flux.defer(() -> Flux.fromIterable(read.body().stream().map(org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance::wrap)
+                return Flux.defer(() -> Flux.fromIterable(read.body().stream().map(DefaultDataBufferFactory.sharedInstance::wrap)
                     .map(DataBuffer.class::cast).toList()));
             }
         };

@@ -6,8 +6,8 @@ import dev.openapifn.generator.api.OperationModel;
 import dev.openapifn.generator.api.Relations;
 import dev.openapifn.generator.api.TestRenderer;
 import dev.openapifn.generator.java.Names;
-import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.java.TypeRef.ClassName;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelRenderer;
 import dev.openapifn.generator.model.TypeMapper;
 import dev.openapifn.parse.OpenApiDocument;
@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Generates Java sources, tests and resources from an API description. A pure function of the
@@ -113,7 +114,7 @@ public final class Generator {
      * Their methods tell them apart, and the requests of operations with one method their content.
      */
     private static void shareReceiverPaths(Map<List<String>, List<OperationModel>> urls, Map<List<String>, String> urlNames,
-                                           Map<String, List<OperationModel>> groups, java.util.Set<String> taken) {
+                                           Map<String, List<OperationModel>> groups, Set<String> taken) {
         var chosen = new HashSet<String>();
         urls.forEach((url, operations) -> {
             if (operations.size() < 2) {

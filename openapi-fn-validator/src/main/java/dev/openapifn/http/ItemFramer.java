@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * Splits a body of a sequential media type into its items while the bytes arrive, so that items
@@ -57,7 +58,7 @@ public final class ItemFramer {
 
     private final Kind kind;
     private final byte[] delimiter;
-    private final java.util.function.Consumer<List<Frame>> scanner;
+    private final Consumer<List<Frame>> scanner;
     private byte[] buffer = new byte[512];
     private int length;
     private int rawStart;

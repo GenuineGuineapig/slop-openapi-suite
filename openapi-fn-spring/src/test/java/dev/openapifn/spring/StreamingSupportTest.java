@@ -10,12 +10,15 @@ import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.spring.servlet.ServletRuntime;
 import dev.openapifn.validation.OpenApiValidator;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -159,7 +162,7 @@ class StreamingSupportTest {
                     }
 
                     @Override
-                    public void setReadListener(jakarta.servlet.ReadListener listener) {
+                    public void setReadListener(ReadListener listener) {
                     }
 
                     @Override
@@ -171,7 +174,7 @@ class StreamingSupportTest {
         };
         broken.setContentType("application/jsonl");
         assertThatThrownBy(() -> servlet(true).bind(broken, "publish").body(String.class)).isInstanceOf(UncheckedIOException.class);
-        var unopenable = new jakarta.servlet.http.HttpServletRequestWrapper(request("application/jsonl", "")) {
+        var unopenable = new HttpServletRequestWrapper(request("application/jsonl", "")) {
             @Override
             public ServletInputStream getInputStream() throws IOException {
                 throw new IOException("closed");
@@ -186,7 +189,7 @@ class StreamingSupportTest {
         var parsed = new ArrayList<String>();
         try (var items = ItemStreams.read(new ByteArrayInputStream("1\n\n2".getBytes(StandardCharsets.UTF_8)), framer, frame -> {
             parsed.add(new String(frame.content(), StandardCharsets.UTF_8));
-            return frame.blank() ? Optional.empty() : Optional.of(JsonValue.class.cast(dev.openapifn.json.JsonNumber.of(new java.math.BigDecimal(parsed.size()))));
+            return frame.blank() ? Optional.empty() : Optional.of(JsonValue.class.cast(dev.openapifn.json.JsonNumber.of(new BigDecimal(parsed.size()))));
         })) {
             var iterator = items.iterator();
             assertThat(iterator.next()).isNotNull();

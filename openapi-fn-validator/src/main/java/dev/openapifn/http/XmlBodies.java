@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Element;
@@ -63,7 +64,7 @@ final class XmlBodies {
     private JsonValue object(Element element, Optional<Schema> schema) {
         var members = new LinkedHashMap<String, JsonValue>();
         var claimed = new ArrayList<String>();
-        var names = schema.map(shapes::propertyNames).orElse(java.util.Set.of());
+        var names = schema.map(shapes::propertyNames).orElse(Set.of());
         for (var name : names) {
             var property = shapes.property(schema.orElseThrow(), name).orElseThrow();
             var xml = xml(property);

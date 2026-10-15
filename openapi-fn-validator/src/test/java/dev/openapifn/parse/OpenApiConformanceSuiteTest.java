@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
@@ -21,7 +23,7 @@ class OpenApiConformanceSuiteTest {
      * Valid descriptions that reference a document on example.com, which does not exist: loading
      * them fails only on that reference.
      */
-    private static final java.util.Set<String> UNRESOLVABLE = java.util.Set.of("v3.1/pass/security-scheme-object-examples.yaml",
+    private static final Set<String> UNRESOLVABLE = Set.of("v3.1/pass/security-scheme-object-examples.yaml",
         "v3.2/pass/security-scheme-object-examples.yaml");
 
     @TestFactory
@@ -39,7 +41,7 @@ class OpenApiConformanceSuiteTest {
                 } else if (valid) {
                     assertThat(loaded.failure()).as(name).isEmpty();
                 } else {
-                    java.util.List<Diagnostic> diagnostics = loaded.fold(api -> api.warnings(), errors -> errors);
+                    List<Diagnostic> diagnostics = loaded.fold(api -> api.warnings(), errors -> errors);
                     assertThat(diagnostics).as(name).anyMatch(Diagnostic::isError);
                 }
             });

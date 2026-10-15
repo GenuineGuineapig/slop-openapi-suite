@@ -1,12 +1,12 @@
 package dev.openapifn.generator.api;
 
+import dev.openapifn.generator.example.ExampleGenerator;
 import dev.openapifn.generator.java.Imports;
 import dev.openapifn.generator.java.Names;
 import dev.openapifn.generator.java.Source;
-import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.java.TypeRef.ClassName;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelDef.Property;
-import dev.openapifn.generator.example.ExampleGenerator;
 import dev.openapifn.http.BodyWriter;
 import dev.openapifn.http.ContentType;
 import dev.openapifn.http.HttpRequest;
@@ -24,12 +24,14 @@ import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Renders a {@code @WebMvcTest} (or, for WebFlux, a {@code @WebFluxTest}) per API group. For every
@@ -103,7 +105,7 @@ public final class TestRenderer {
         out.close();
         var mockito = List.of("import static org.mockito.ArgumentMatchers.any;", "import static org.mockito.BDDMockito.given;",
             "import static org.mockito.BDDMockito.then;");
-        var statics = String.join("\n", reactive ? mockito : java.util.stream.Stream.concat(mockito.stream(), java.util.stream.Stream.of(
+        var statics = String.join("\n", reactive ? mockito : Stream.concat(mockito.stream(), Stream.of(
             "import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;",
             "import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;",
             "import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;")).toList());
@@ -121,7 +123,7 @@ public final class TestRenderer {
         var shared = new LinkedHashMap<List<String>, List<OperationModel>>();
         operations.stream().filter(OperationModel::outbound)
             .forEach(op -> shared.computeIfAbsent(List.of(op.receiverPath(), op.operation().method()), key -> new ArrayList<>()).add(op));
-        var receivers = new java.util.HashMap<String, OperationModel>();
+        var receivers = new HashMap<String, OperationModel>();
         shared.values().forEach(group -> {
             for (int i = 1; i < group.size(); i++) {
                 var earlier = group.subList(0, i);

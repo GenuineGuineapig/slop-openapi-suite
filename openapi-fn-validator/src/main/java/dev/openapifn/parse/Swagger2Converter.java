@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Converts a Swagger / OpenAPI 2.0 description to OpenAPI 3.0, so that parsing, validation, the
@@ -359,7 +360,7 @@ final class Swagger2Converter {
         return new JsonObject(out);
     }
 
-    private static JsonObject map(JsonObject source, java.util.function.Function<JsonValue, JsonValue> convert) {
+    private static JsonObject map(JsonObject source, Function<JsonValue, JsonValue> convert) {
         var out = new LinkedHashMap<String, JsonValue>();
         source.members().forEach((name, value) -> out.put(name, convert.apply(value)));
         return new JsonObject(out);

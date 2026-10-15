@@ -8,6 +8,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /**
@@ -36,7 +37,7 @@ final class Bundle {
     record Receiver(String method, String operation, String path) {
     }
 
-    static Result of(String name, URI root, Map<URI, Document> documents, java.util.Optional<String> basePath, List<Receiver> receivers) {
+    static Result of(String name, URI root, Map<URI, Document> documents, Optional<String> basePath, List<Receiver> receivers) {
         var distinct = new IdentityHashMap<Document, URI>();
         documents.values().forEach(document -> distinct.putIfAbsent(document, document.uri()));
         var base = commonDirectory(distinct.values().stream().filter(uri -> sameOrigin(uri, root)).toList());

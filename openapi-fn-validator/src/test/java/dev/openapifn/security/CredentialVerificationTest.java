@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 class CredentialVerificationTest {
@@ -49,7 +51,7 @@ class CredentialVerificationTest {
     private static final CredentialVerifier TOKENS = CredentialVerifier.forScheme("oauth", credential -> {
         var token = ((Credential.Bearer) credential).token();
         return token.equals("expired") ? Result.err("token expired")
-            : Result.ok(new Grant("client", java.util.Set.of(token.split("\\+")).stream().map(scope -> "pets:" + scope).collect(java.util.stream.Collectors.toSet())));
+            : Result.ok(new Grant("client", Set.of(token.split("\\+")).stream().map(scope -> "pets:" + scope).collect(Collectors.toSet())));
     });
     private static final CredentialVerifier KEYS = CredentialVerifier.forScheme("key", credential ->
         ((Credential.ApiKey) credential).value().equals("root") ? Result.ok(Grant.of("root", "admin")) : Result.ok(Grant.of("user")));
@@ -128,7 +130,7 @@ class CredentialVerificationTest {
         assertThatThrownBy(() -> new Credential.Bearer("bearer", null)).isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new Credential.Authorization("digest", null, "c")).isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new Credential.Authorization("digest", "digest", null)).isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new Grant(null, java.util.Set.of())).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new Grant(null, Set.of())).isInstanceOf(NullPointerException.class);
     }
 
     @Test

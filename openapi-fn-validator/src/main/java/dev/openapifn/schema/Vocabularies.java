@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * The standard vocabularies of JSON Schema 2019-09 and 2020-12 and the keywords they define. A
@@ -42,7 +43,7 @@ final class Vocabularies {
         Map.entry(V2019 + "format", Set.of("format")),
         Map.entry(V2019 + "content", CONTENT));
 
-    private static final Set<String> ALL = KEYWORDS.values().stream().flatMap(Set::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    private static final Set<String> ALL = KEYWORDS.values().stream().flatMap(Set::stream).collect(Collectors.toUnmodifiableSet());
     private static final Map<Set<String>, Set<String>> INACTIVE = new ConcurrentHashMap<>();
 
     private Vocabularies() {

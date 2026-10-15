@@ -5,12 +5,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.Part;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -183,7 +187,7 @@ class ServletSupportTest {
         var empty = new MockHttpServletRequest("GET", "/x");
         assertThat(ServletMessages.toHttpRequest(empty).body()).isEmpty();
         assertThat(ServletMessages.toHttpRequest(empty).query()).isEmpty();
-        var wrapped = new jakarta.servlet.http.HttpServletRequestWrapper(CachedBodyRequest.of(request("text/plain", "cached")));
+        var wrapped = new HttpServletRequestWrapper(CachedBodyRequest.of(request("text/plain", "cached")));
         assertThat(new String(ServletMessages.toHttpRequest(wrapped).body().orElseThrow(), StandardCharsets.UTF_8)).isEqualTo("cached");
         var response = new ContentCachingResponseWrapper(new MockHttpServletResponse());
         response.setStatus(201);
@@ -208,9 +212,9 @@ class ServletSupportTest {
         var bare = new ContentCachingResponseWrapper(new MockHttpServletResponse());
         assertThat(ServletMessages.response(bare).body()).isEmpty();
         assertThat(ServletMessages.response(bare).contentType()).isEmpty();
-        var throwing = new jakarta.servlet.http.HttpServletRequestWrapper(new MockHttpServletRequest("POST", "/x")) {
+        var throwing = new HttpServletRequestWrapper(new MockHttpServletRequest("POST", "/x")) {
             @Override
-            public jakarta.servlet.ServletInputStream getInputStream() throws IOException {
+            public ServletInputStream getInputStream() throws IOException {
                 throw new IOException("closed");
             }
         };
@@ -220,16 +224,16 @@ class ServletSupportTest {
 
     @Test
     void clientCertificatesAreKnownWhereTlsEnds() throws Exception {
-        java.security.cert.X509Certificate certificate;
+        X509Certificate certificate;
         try (var pem = ServletSupportTest.class.getResourceAsStream("/security/client.pem")) {
-            certificate = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(pem);
+            certificate = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(pem);
         }
         var plain = new MockHttpServletRequest("GET", "/x");
         assertThat(ServletMessages.toHttpRequest(plain).clientCertificates()).isEmpty();
         var secure = new MockHttpServletRequest("GET", "/x");
         secure.setSecure(true);
         assertThat(ServletMessages.toHttpRequest(secure).clientCertificates()).contains(List.of());
-        secure.setAttribute("jakarta.servlet.request.X509Certificate", new java.security.cert.X509Certificate[] {certificate});
+        secure.setAttribute("jakarta.servlet.request.X509Certificate", new X509Certificate[] {certificate});
         assertThat(ServletMessages.head(secure).clientCertificates()).contains(List.of(certificate));
     }
 }

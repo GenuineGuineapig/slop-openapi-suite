@@ -4,8 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.File;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
@@ -177,10 +183,10 @@ class OpenApiFnPluginTest {
 
     @Test
     void remoteDocumentsAreFingerprinted() throws Exception {
-        var body = new java.util.concurrent.atomic.AtomicReference<>("{type: object, properties: {name: {type: string}}}");
-        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        var body = new AtomicReference<>("{type: object, properties: {name: {type: string}}}");
+        var server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/pet.yaml", exchange -> {
-            var bytes = body.get().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            var bytes = body.get().getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
@@ -193,25 +199,25 @@ class OpenApiFnPluginTest {
             var task = register(project, "pets", "remote.yaml");
             var cache = task.getRemoteCache().get().getAsFile().toPath();
             assertThat(cache).startsWithRaw(project.getGradle().getGradleUserHomeDir().toPath());
-            assertThat(task.getRemoteMaxAge().get()).isEqualTo(java.time.Duration.ofHours(24));
+            assertThat(task.getRemoteMaxAge().get()).isEqualTo(Duration.ofHours(24));
             assertThat(task.getOffline().get()).isFalse();
-            var day = GenerateOpenApi.loader(cache, java.time.Duration.ofHours(24), false);
+            var day = GenerateOpenApi.loader(cache, Duration.ofHours(24), false);
             var fingerprint = task.getRemoteFingerprint().get();
             assertThat(fingerprint).isNotEmpty().isEqualTo(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), day));
             body.set("{type: object, properties: {name: {type: string}, tag: {type: string}}}");
             // The cached copy is used for a day; refreshing fetches the change.
             assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), day)).isEqualTo(fingerprint);
-            var refreshed = GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, java.time.Duration.ZERO, false));
+            var refreshed = GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, Duration.ZERO, false));
             assertThat(refreshed).isNotEqualTo(fingerprint);
             task.generate();
             assertThat(task.getResourcesDir().get().getAsFile().toPath().resolve("META-INF/openapi-fn/pets/remote/127.0.0.1_"
                 + server.getAddress().getPort() + "/pet.yaml")).exists();
             server.stop(0);
             // Offline builds use the cache, whatever its age.
-            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, java.time.Duration.ZERO, true)))
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, Duration.ZERO, true)))
                 .isEqualTo(refreshed);
             project.getGradle().getStartParameter().setRefreshDependencies(true);
-            assertThat(register(project, "refreshed", "remote.yaml").getRemoteMaxAge().get()).isEqualTo(java.time.Duration.ZERO);
+            assertThat(register(project, "refreshed", "remote.yaml").getRemoteMaxAge().get()).isEqualTo(Duration.ZERO);
             write("local.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object"));
             assertThat(GenerateOpenApi.fingerprint(dir.resolve("local.yaml"), day)).isEmpty();
             assertThat(GenerateOpenApi.fingerprint(dir.resolve("missing.yaml"), day)).isEmpty();
@@ -230,11 +236,11 @@ class OpenApiFnPluginTest {
             .hasMessageContaining("info");
     }
 
-    private static java.util.Set<Task> dependencies(Task task) {
-        return java.util.Set.copyOf(task.getTaskDependencies().getDependencies(task));
+    private static Set<Task> dependencies(Task task) {
+        return Set.copyOf(task.getTaskDependencies().getDependencies(task));
     }
 
-    private static java.util.List<String> coordinates(Project project, String configuration) {
+    private static List<String> coordinates(Project project, String configuration) {
         return project.getConfigurations().getByName(configuration).getDependencies().stream()
             .map(dependency -> dependency.getGroup() + ":" + dependency.getName() + ":" + versionOf(dependency)).toList();
     }

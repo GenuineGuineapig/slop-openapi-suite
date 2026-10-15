@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
@@ -103,7 +104,7 @@ public final class OpenApiValidatingRequestFactory implements ClientHttpRequestF
                     buffered = new ByteArrayOutputStream();
                 }
             }
-            return sink != null ? sink : java.util.Objects.requireNonNull(buffered);
+            return sink != null ? sink : Objects.requireNonNull(buffered);
         }
 
         @Override

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.openapifn.json.JsonString;
 import dev.openapifn.parse.OpenApiDocument;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -94,7 +95,7 @@ class SchemaValidatorTest {
         var build = Schemas.build("{\"$id\": \"https://example.com/a\", \"$dynamicRef\": \"b#meta\"}", D,
             Map.of("b", "{\"$id\": \"https://example.com/b\", \"$dynamicAnchor\": \"meta\", \"type\": \"string\"}"));
         var registry = build.registry();
-        var schema = registry.resolve(java.net.URI.create("mem:/root.json")).orElseThrow();
+        var schema = registry.resolve(URI.create("mem:/root.json")).orElseThrow();
         assertThat(new SchemaValidator(registry).validate(schema, json("1"))).isNotEmpty();
     }
 
@@ -153,14 +154,14 @@ class SchemaValidatorTest {
         var root = Schemas.root(registry);
         assertThat(validator.validate(root, json("{\"n\": 1}"))).as("validation vocabulary off").isEmpty();
         assertThat(validator.validate(root, json("{\"bad\": 1}"))).as("applicator vocabulary on").isNotEmpty();
-        var standard = registry.resolve(java.net.URI.create("mem:/root.json#/$defs/standard")).orElseThrow();
+        var standard = registry.resolve(URI.create("mem:/root.json#/$defs/standard")).orElseThrow();
         assertThat(registry.vocabularies(standard)).isEmpty();
         assertThat(validator.validate(standard, json("1"))).isNotEmpty();
-        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/again.json")).orElseThrow(), json("1"))).isEmpty();
-        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/unloadable.json")).orElseThrow(), json("1"))).isNotEmpty();
-        assertThat(validator.validate(registry.resolve(java.net.URI.create("mem:/plain.json")).orElseThrow(), json("1"))).isNotEmpty();
-        var detached = Schema.at(json("{\"minimum\": 10}"), java.net.URI.create("mem:/elsewhere.json"), dev.openapifn.json.JsonPointer.ROOT,
-            java.net.URI.create("mem:/elsewhere.json"), D);
+        assertThat(validator.validate(registry.resolve(URI.create("mem:/again.json")).orElseThrow(), json("1"))).isEmpty();
+        assertThat(validator.validate(registry.resolve(URI.create("mem:/unloadable.json")).orElseThrow(), json("1"))).isNotEmpty();
+        assertThat(validator.validate(registry.resolve(URI.create("mem:/plain.json")).orElseThrow(), json("1"))).isNotEmpty();
+        var detached = Schema.at(json("{\"minimum\": 10}"), URI.create("mem:/elsewhere.json"), dev.openapifn.json.JsonPointer.ROOT,
+            URI.create("mem:/elsewhere.json"), D);
         assertThat(validator.validate(detached, json("1"))).isNotEmpty();
     }
 

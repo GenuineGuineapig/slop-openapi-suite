@@ -7,6 +7,7 @@ import dev.openapifn.http.ItemFramer;
 import dev.openapifn.spring.ApiResponse;
 import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.spring.OpenApiRuntime;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -76,7 +77,7 @@ public final class ReactiveRuntime {
         var message = streamed ? Mono.just(ReactiveMessages.head(request))
             : read instanceof HttpRequest cached ? Mono.just(cached) : ReactiveMessages.read(request).doOnNext(m -> exchange.getAttributes().put(MESSAGE_ATTRIBUTE, m));
         var validated = exchange.<Object>getAttribute(OpenApiRuntime.VALIDATION_ATTRIBUTE);
-        return message.map(m -> runtime.receiver(m, validated, streamed, java.util.List.of(operationIds)));
+        return message.map(m -> runtime.receiver(m, validated, streamed, List.of(operationIds)));
     }
 
     /**

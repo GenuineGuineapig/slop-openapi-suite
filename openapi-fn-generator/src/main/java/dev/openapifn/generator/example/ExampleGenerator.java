@@ -15,12 +15,14 @@ import dev.openapifn.schema.SchemaValidator;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * Derives example values from schemas: the first declared example, constant, default or enum
@@ -85,7 +87,7 @@ public final class ExampleGenerator {
         }
         var resolved = registry.deref(schema);
         var inner = scoped(scoped(scope, schema), resolved);
-        var declared = java.util.stream.Stream.of(resolved.examples().stream(), resolved.constValue().stream(), resolved.defaultValue().stream(),
+        var declared = Stream.of(resolved.examples().stream(), resolved.constValue().stream(), resolved.defaultValue().stream(),
                 resolved.enumValues().stream().filter(v -> !v.isNull()))
             .flatMap(values -> values)
             .filter(value -> validator.validate(resolved, value, direction).isEmpty())
@@ -167,9 +169,9 @@ public final class ExampleGenerator {
         var count = Math.max(1, number(schema, "minItems").map(BigDecimal::intValue).orElse(1));
         var item = shapes.items(schema).map(items -> generate(items, direction, depth + 1, active, scope)).orElse(JsonString.of("item"));
         if (count == 1 || !shapes.closure(schema).stream().anyMatch(s -> s.object().bool("uniqueItems").orElse(false))) {
-            return new JsonArray(java.util.Collections.nCopies(count, item));
+            return new JsonArray(Collections.nCopies(count, item));
         }
-        var values = new java.util.ArrayList<JsonValue>();
+        var values = new ArrayList<JsonValue>();
         for (int i = 0; i < count; i++) {
             values.add(item instanceof JsonNumber n ? JsonNumber.of(n.value().add(BigDecimal.valueOf(i))) : JsonString.of(text(item) + i));
         }

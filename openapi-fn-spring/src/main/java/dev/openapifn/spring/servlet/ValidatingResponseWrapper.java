@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
@@ -90,7 +91,7 @@ final class ValidatingResponseWrapper extends ContentCachingResponseWrapper {
         if (writer != null) {
             writer.flush();
         }
-        var stream = java.util.Objects.requireNonNull(streaming);
+        var stream = Objects.requireNonNull(streaming);
         stream.pass(stream.framer.finish());
         return Optional.ofNullable(stream.failure);
     }

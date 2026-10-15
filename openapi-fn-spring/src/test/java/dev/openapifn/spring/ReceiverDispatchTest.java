@@ -13,8 +13,10 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Callbacks sent to one URL with one method are told apart by their requests. */
@@ -91,7 +93,7 @@ class ReceiverDispatchTest {
         assertThat(RUNTIME.receiver(post("{\"trackingId\": \"T1\"}"), unrelated, false, ids)).isEqualTo("orderShipped");
         assertThat(RUNTIME.receiver(post("{\"trackingId\": \"T1\"}"), "not a validation", false, ids)).isEqualTo("orderShipped");
         assertThat(RUNTIME.receiver(post("{}"), new dev.openapifn.validation.OpenApiValidator.RequestValidation(
-            dev.openapifn.validation.ValidationReport.EMPTY, java.util.Optional.empty(), Map.of(), java.util.Optional.empty()), false, ids))
+            dev.openapifn.validation.ValidationReport.EMPTY, Optional.empty(), Map.of(), Optional.empty()), false, ids))
             .isEqualTo("orderShipped");
         // Streamed bodies cannot be inspected: their heads decide.
         assertThat(RUNTIME.receiver(HttpRequest.of("POST", "/hooks/orders").withHeader("Content-Type", "application/json"), null, true, ids))
@@ -105,7 +107,7 @@ class ReceiverDispatchTest {
         request.setContentType("application/json");
         request.setContent("{\"reason\": \"late\"}".getBytes(StandardCharsets.UTF_8));
         assertThat(servlet.receiver(request, "orderShipped", "orderCancelled")).isEqualTo("orderCancelled");
-        assertThat(servlet.bind(request, "orderCancelled").body(new tools.jackson.core.type.TypeReference<Map<String, String>>() { })).containsEntry("reason", "late");
+        assertThat(servlet.bind(request, "orderCancelled").body(new TypeReference<Map<String, String>>() { })).containsEntry("reason", "late");
         var streamed = new MockHttpServletRequest("POST", "/hooks/stream");
         streamed.setContentType("application/jsonl");
         streamed.setContent("{}\n".getBytes(StandardCharsets.UTF_8));

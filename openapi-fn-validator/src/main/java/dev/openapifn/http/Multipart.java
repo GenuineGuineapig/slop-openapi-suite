@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** A minimal RFC 7578 / RFC 2046 multipart parser. */
@@ -37,7 +38,7 @@ public final class Multipart {
         }
 
         private Optional<String> dispositionParameter(Pattern pattern) {
-            return headers.first("Content-Disposition").map(pattern::matcher).filter(java.util.regex.Matcher::find)
+            return headers.first("Content-Disposition").map(pattern::matcher).filter(Matcher::find)
                 .map(m -> m.group(2) != null ? m.group(2) : m.group(1));
         }
     }

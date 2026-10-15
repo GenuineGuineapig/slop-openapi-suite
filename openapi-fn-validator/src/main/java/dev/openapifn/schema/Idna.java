@@ -2,6 +2,7 @@ package dev.openapifn.schema;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -146,16 +147,16 @@ final class Idna {
             case 0x00B7 -> i > 0 && i + 1 < cps.length && cps[i - 1] == 'l' && cps[i + 1] == 'l';
             case 0x0375 -> i + 1 < cps.length && script(cps[i + 1]) == Character.UnicodeScript.GREEK;
             case 0x05F3, 0x05F4 -> i > 0 && script(cps[i - 1]) == Character.UnicodeScript.HEBREW;
-            case 0x30FB -> java.util.Arrays.stream(cps).anyMatch(c -> c != 0x30FB && (script(c) == Character.UnicodeScript.HIRAGANA
+            case 0x30FB -> Arrays.stream(cps).anyMatch(c -> c != 0x30FB && (script(c) == Character.UnicodeScript.HIRAGANA
                 || script(c) == Character.UnicodeScript.KATAKANA || script(c) == Character.UnicodeScript.HAN));
             case 0x200D -> i > 0 && VIRAMAS.contains(cps[i - 1]);
             case 0x200C -> i > 0 && (VIRAMAS.contains(cps[i - 1]) || joinsAround(cps, i));
             default -> {
                 if (cp >= 0x0660 && cp <= 0x0669) {
-                    yield java.util.Arrays.stream(cps).noneMatch(c -> c >= 0x06F0 && c <= 0x06F9);
+                    yield Arrays.stream(cps).noneMatch(c -> c >= 0x06F0 && c <= 0x06F9);
                 }
                 if (cp >= 0x06F0 && cp <= 0x06F9) {
-                    yield java.util.Arrays.stream(cps).noneMatch(c -> c >= 0x0660 && c <= 0x0669);
+                    yield Arrays.stream(cps).noneMatch(c -> c >= 0x0660 && c <= 0x0669);
                 }
                 yield pvalid(cp);
             }

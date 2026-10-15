@@ -56,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /** Interprets loaded documents as an OpenAPI description. Single use; not thread-safe. */
@@ -116,7 +117,7 @@ final class OpenApiParser {
         Map.entry("OAuth Flow Object", Map.of("deviceAuthorizationUrl", SpecVersion.V3_2)));
 
     /** Header names are HTTP field names (RFC 9110 tokens). */
-    private static final java.util.regex.Pattern TOKEN = java.util.regex.Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
+    private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private final DocumentLoader loader;
     private final List<Diagnostic> diagnostics = new ArrayList<>();
@@ -753,7 +754,7 @@ final class OpenApiParser {
         }));
     }
 
-    private <T> Optional<T> guarded(Cursor target, java.util.function.Supplier<Optional<T>> parse) {
+    private <T> Optional<T> guarded(Cursor target, Supplier<Optional<T>> parse) {
         var location = target.location();
         if (resolving.contains(location)) {
             error(target, "Circular reference to " + location);

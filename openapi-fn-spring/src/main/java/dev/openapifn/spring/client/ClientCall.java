@@ -2,6 +2,7 @@ package dev.openapifn.spring.client;
 
 import dev.openapifn.http.ParameterSerializer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -104,7 +105,7 @@ public record ClientCall(String method, String pathTemplate, List<Param> paramet
         if (body == null) {
             return this;
         }
-        var encodings = new java.util.LinkedHashMap<>(body.encodings());
+        var encodings = new LinkedHashMap<>(body.encodings());
         encodings.put(property, spec);
         return new ClientCall(method, pathTemplate, parameters, new Body(body.contentType(), body.value(), encodings), acceptTypes, operationId);
     }

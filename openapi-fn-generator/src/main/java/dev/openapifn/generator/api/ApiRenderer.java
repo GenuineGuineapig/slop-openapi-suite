@@ -3,11 +3,11 @@ package dev.openapifn.generator.api;
 import dev.openapifn.generator.java.Imports;
 import dev.openapifn.generator.java.Names;
 import dev.openapifn.generator.java.Source;
-import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.java.TypeRef.ClassName;
-import dev.openapifn.generator.model.ModelDef;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelDef.Property;
 import dev.openapifn.generator.model.ModelDef.RecordDef;
+import dev.openapifn.generator.model.ModelDef;
 import dev.openapifn.generator.model.ModelRenderer;
 import dev.openapifn.generator.model.TypeMapper;
 import dev.openapifn.http.CollectionFormat;
@@ -20,12 +20,14 @@ import dev.openapifn.schema.Dialect;
 import dev.openapifn.schema.Schema;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Renders the API side: request and response types, delegate interfaces, controllers and clients. */
 public final class ApiRenderer {
@@ -110,7 +112,7 @@ public final class ApiRenderer {
     /** The sealed response type of {@code operation}. */
     public String response(OperationModel operation) {
         var name = operation.response();
-        var declared = new java.util.HashSet<>(models.nestedNames(name));
+        var declared = new HashSet<>(models.nestedNames(name));
         operation.variants().forEach(variant -> declared.add(variant.name()));
         var imports = imports(name, declared);
         var out = new Source();
@@ -212,7 +214,7 @@ public final class ApiRenderer {
 
     private static String javadoc(OperationModel operation) {
         var op = operation.operation().operation();
-        var text = java.util.stream.Stream.of(op.summary(), op.description()).flatMap(Optional::stream).collect(Collectors.joining("\n\n"));
+        var text = Stream.of(op.summary(), op.description()).flatMap(Optional::stream).collect(Collectors.joining("\n\n"));
         var kind = switch (operation.operation().kind()) {
             case PATH -> "";
             case WEBHOOK -> "Webhook ";
@@ -295,11 +297,9 @@ public final class ApiRenderer {
             });
         });
         out.blank().open("private " + imports.ref(apiName) + " api()");
-        out.line("var implementation = api.getIfAvailable();");
-        out.open("if (implementation == null)");
-        out.line("throw new " + imports.ref(RESPONSE_STATUS_EXCEPTION) + "(" + imports.ref(HTTP_STATUS) + ".NOT_IMPLEMENTED, \"No "
-            + apiName.simpleName() + " implementation is registered\");").close();
-        out.line("return implementation;").close();
+        out.line("return " + imports.ref(OPTIONAL) + ".ofNullable(api.getIfAvailable())");
+        out.line("        .orElseThrow(() -> new " + imports.ref(RESPONSE_STATUS_EXCEPTION) + "(" + imports.ref(HTTP_STATUS) + ".NOT_IMPLEMENTED, \"No "
+            + apiName.simpleName() + " implementation is registered\"));").close();
         out.close();
         return unit(name, imports, out);
     }

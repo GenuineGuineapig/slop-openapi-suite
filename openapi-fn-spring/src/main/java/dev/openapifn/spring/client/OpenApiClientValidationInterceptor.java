@@ -4,6 +4,7 @@ import dev.openapifn.spring.ItemStreams;
 import dev.openapifn.validation.OpenApiValidator;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import org.springframework.http.HttpRequest;
 import org.springframework.http.client.ClientHttpRequestExecution;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.http.client.ClientHttpResponse;
@@ -25,7 +26,7 @@ public final class OpenApiClientValidationInterceptor implements ClientHttpReque
     }
 
     @Override
-    public ClientHttpResponse intercept(org.springframework.http.HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
+    public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
         throws IOException {
         var operationId = request.getAttributes().get(OpenApiHttpClient.OPERATION_ATTRIBUTE);
         var match = validator.request(request.getMethod().name(), request.getURI(), ClientValidator.headers(request.getHeaders()), body, false,

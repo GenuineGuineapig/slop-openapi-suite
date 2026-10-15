@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockPart;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -74,7 +75,7 @@ class OpenApiMatchersTest {
     void acceptsConformingExchanges() throws Exception {
         var pets = runtimes.get("pets");
         mvc.perform(get("/api/pets/1")).andExpect(OpenApiMatchers.conformsTo(pets)).andExpect(OpenApiMatchers.responseConformsTo(pets));
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/pets/1")).andExpect(OpenApiMatchers.conformsTo(pets));
+        mvc.perform(MockMvcRequestBuilders.delete("/api/pets/1")).andExpect(OpenApiMatchers.conformsTo(pets));
         mvc.perform(post("/api/pets").header("X-Key", "k").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Rex\"}"))
             .andExpect(OpenApiMatchers.conformsTo(pets));
         mvc.perform(multipart("/api/pets/.1/photo").part(new MockPart("file", "f.png", new byte[] {1}, MediaType.IMAGE_PNG))

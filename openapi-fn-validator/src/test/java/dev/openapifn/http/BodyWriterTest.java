@@ -10,11 +10,13 @@ import dev.openapifn.model.MediaType;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.schema.Schema;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -119,7 +121,7 @@ class BodyWriterTest {
             .isEqualTo("data: d\n\n");
         assertThat(BodyWriter.end(jsonl)).isEmpty();
         var mixed = ContentType.parse("multipart/mixed; boundary=m").orElseThrow();
-        var body = new java.io.ByteArrayOutputStream();
+        var body = new ByteArrayOutputStream();
         body.writeBytes(BodyWriter.item(json("{\"a\":1}"), mixed));
         body.writeBytes(BodyWriter.part("m", BodyWriter.part("text/plain", "x".getBytes(StandardCharsets.UTF_8))));
         body.writeBytes(BodyWriter.end(mixed));
@@ -166,8 +168,8 @@ class BodyWriterTest {
         assertThat(positional.contentType()).startsWith("multipart/related; boundary=openapi-fn-");
         assertThat(new String(positional.body(), StandardCharsets.UTF_8)).contains("Content-Type: image/png", "Content-Type: text/plain\r\n\r\nx\r\n");
         assertThat(SHAPES.item(schema("Tuple"), 1).flatMap(Schema::format)).isEmpty();
-        assertThat(SHAPES.item(schema("Tuple"), 1).map(s -> s.types())).contains(java.util.Set.of("boolean"));
-        assertThat(SHAPES.item(schema("Tuple"), 5).map(s -> s.types())).contains(java.util.Set.of("number"));
+        assertThat(SHAPES.item(schema("Tuple"), 1).map(s -> s.types())).contains(Set.of("boolean"));
+        assertThat(SHAPES.item(schema("Tuple"), 5).map(s -> s.types())).contains(Set.of("number"));
         assertThat(SHAPES.item(schema("Form"), 0)).isEmpty();
     }
 

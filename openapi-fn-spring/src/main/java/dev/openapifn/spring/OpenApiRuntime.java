@@ -15,17 +15,21 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.model.Response;
 import dev.openapifn.parse.OpenApiDocument;
 import dev.openapifn.schema.Schema;
+import dev.openapifn.security.CredentialVerifier;
 import dev.openapifn.validation.IssueKeys;
 import dev.openapifn.validation.Level;
-import dev.openapifn.security.CredentialVerifier;
-import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
+import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.Route;
 import dev.openapifn.validation.ValidationIssue;
 import dev.openapifn.validation.ValidationReport;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -80,18 +84,18 @@ public final class OpenApiRuntime {
      *     subscriber registers)
      */
     public OpenApiRuntime(String name, OpenApiDocument api, OpenApiValidator validator, JsonMapper mapper, boolean failOnInvalidRequest,
-                          java.util.Collection<Map.Entry<String, String>> receivers) {
+                          Collection<Map.Entry<String, String>> receivers) {
         this.name = name;
         this.api = api;
         this.validator = validator;
         this.mapper = mapper;
         this.failOnInvalidRequest = failOnInvalidRequest;
         this.writer = new BodyWriter(new SchemaShapes(api.schemas()));
-        var operations = new java.util.LinkedHashMap<String, List<ApiOperation>>();
-        receivers.forEach(receiver -> operations.computeIfAbsent(receiver.getKey(), path -> new java.util.ArrayList<>()).add(operation(receiver.getValue())));
+        var operations = new LinkedHashMap<String, List<ApiOperation>>();
+        receivers.forEach(receiver -> operations.computeIfAbsent(receiver.getKey(), path -> new ArrayList<>()).add(operation(receiver.getValue())));
         // Operations sharing a path and a method are tried in the order the description declares them.
         var declared = api.allOperations();
-        operations.values().forEach(shared -> shared.sort(java.util.Comparator.comparingInt(declared::indexOf)));
+        operations.values().forEach(shared -> shared.sort(Comparator.comparingInt(declared::indexOf)));
         this.receivers = Map.copyOf(operations);
     }
 

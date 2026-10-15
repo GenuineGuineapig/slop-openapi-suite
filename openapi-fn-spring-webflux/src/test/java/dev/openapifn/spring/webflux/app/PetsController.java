@@ -5,6 +5,7 @@ import dev.openapifn.spring.FilePart;
 import dev.openapifn.spring.OpenApiRuntimes;
 import dev.openapifn.spring.webflux.ReactiveRuntime;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -50,7 +51,7 @@ public class PetsController {
             RECEIVED.add(Objects.requireNonNullElse(limit, 0));
             RECEIVED.add(Objects.requireNonNullElse(binding.parameter("query", "tags", new TypeReference<List<String>>() { }), List.of()));
             var total = limit == null ? 1 : limit;
-            var headers = new java.util.LinkedHashMap<String, @Nullable Object>();
+            var headers = new LinkedHashMap<String, @Nullable Object>();
             headers.put("X-Total", total);
             headers.put("X-Ids", total == 7 ? null : List.of(1, 2));
             return runtime.respond(exchange, "listPets", new Reply(200, List.of(new Pet(1L, "Rex", null)), headers, null));

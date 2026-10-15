@@ -15,10 +15,13 @@ import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Parses message bodies into JSON according to their media type: JSON and {@code +json},
@@ -174,7 +177,7 @@ public final class BodyParser {
             }
         });
         var sources = ParameterParser.Sources.ofQuery(text);
-        var names = schema.map(shapes::propertyNames).orElse(java.util.Set.of());
+        var names = schema.map(shapes::propertyNames).orElse(Set.of());
         encodings.forEach((name, encoding) -> {
             if (!encoding.serializes()) {
                 return;
@@ -183,9 +186,9 @@ public final class BodyParser {
             if (parameter.style() == dev.openapifn.model.ParameterStyle.DEEP_OBJECT) {
                 members.keySet().removeIf(key -> key.startsWith(name + "["));
             }
-            var others = new java.util.HashSet<>(names);
+            var others = new HashSet<>(names);
             others.remove(name);
-            parameters.parse(parameter, sources, others).toOptional().flatMap(java.util.function.Function.identity())
+            parameters.parse(parameter, sources, others).toOptional().flatMap(Function.identity())
                 .ifPresent(value -> members.put(name, value));
         });
         return new JsonObject(members);

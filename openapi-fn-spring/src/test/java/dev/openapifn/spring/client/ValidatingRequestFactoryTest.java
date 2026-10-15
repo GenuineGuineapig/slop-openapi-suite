@@ -18,6 +18,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.StreamingHttpOutputMessage;
+import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.mock.http.client.MockClientHttpRequest;
@@ -68,7 +69,7 @@ class ValidatingRequestFactoryTest {
         }
 
         @Override
-        public org.springframework.http.client.ClientHttpRequest createRequest(URI uri, HttpMethod method) {
+        public ClientHttpRequest createRequest(URI uri, HttpMethod method) {
             var request = streaming ? new Streaming(method, uri) : new MockClientHttpRequest(method, uri);
             request.setResponse(response);
             requests.add(request);

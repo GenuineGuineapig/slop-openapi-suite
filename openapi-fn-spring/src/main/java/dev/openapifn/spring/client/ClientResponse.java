@@ -18,7 +18,9 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.type.TypeReference;
@@ -80,7 +82,7 @@ public final class ClientResponse {
     /** The body, read now if it has not been read yet. */
     private byte[] content() {
         if (body == null) {
-            try (var in = java.util.Objects.requireNonNull(input)) {
+            try (var in = Objects.requireNonNull(input)) {
                 body = in.readAllBytes();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -112,7 +114,7 @@ public final class ClientResponse {
             return list == null ? Stream.empty() : list.stream();
         }
         var sequential = contentType.get();
-        var source = body != null ? new ByteArrayInputStream(body) : java.util.Objects.requireNonNull(input);
+        var source = body != null ? new ByteArrayInputStream(body) : Objects.requireNonNull(input);
         streaming = body == null;
         return ItemStreams.read(source, ItemFramer.of(sequential).orElseThrow(), frame -> PARSER.item(frame, sequential, MediaType.EMPTY, 0)
                 .orElseThrow(error -> new IllegalStateException("Cannot decode " + sequential.essence() + " content: " + error)))
@@ -194,7 +196,7 @@ public final class ClientResponse {
         }
         var isList = type.isCollectionLikeType() || type.isArrayType();
         var joined = String.join(",", raw);
-        var value = isList ? Json.of(List.of(joined.split(java.util.regex.Pattern.quote(delimiter))).stream().map(String::trim).toList())
+        var value = isList ? Json.of(List.of(joined.split(Pattern.quote(delimiter))).stream().map(String::trim).toList())
             : JsonString.of(joined);
         return mapper.treeToValue(JacksonJson.toJsonNode(value), type);
     }

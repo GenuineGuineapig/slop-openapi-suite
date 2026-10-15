@@ -1,5 +1,6 @@
 package dev.openapifn.generator.java;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** A reference to a Java type in generated code. */
@@ -22,7 +23,7 @@ public sealed interface TypeRef {
         }
 
         public ClassName nested(String name) {
-            var names = new java.util.ArrayList<>(simpleNames);
+            var names = new ArrayList<>(simpleNames);
             names.add(name);
             return new ClassName(packageName, names);
         }

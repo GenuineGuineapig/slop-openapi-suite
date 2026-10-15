@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
@@ -712,7 +713,7 @@ public final class SchemaValidator {
                     out.errors.addAll(combinatorFailure(schema, keywords, instance, path, "oneOf", "must match exactly one schema in oneOf", evaluations));
                 } else if (valid.size() > 1) {
                     // A discriminator MUST NOT change the validation outcome: an instance valid for several members is invalid.
-                    var indices = java.util.stream.IntStream.range(0, evaluations.size()).filter(i -> evaluations.get(i).valid()).boxed().toList();
+                    var indices = IntStream.range(0, evaluations.size()).filter(i -> evaluations.get(i).valid()).boxed().toList();
                     out.errors.add(error(path, schema, "oneOf", "must match exactly one schema in oneOf but matched schemas at " + indices));
                 } else {
                     out.annotate(valid.getFirst());

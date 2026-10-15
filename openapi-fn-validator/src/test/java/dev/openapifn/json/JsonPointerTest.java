@@ -2,6 +2,7 @@ package dev.openapifn.json;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -45,9 +46,9 @@ class JsonPointerTest {
     @Test
     void equalWhenTheirTokensAre() {
         var built = JsonPointer.ROOT.child("a").child("b");
-        assertThat(built).isEqualTo(pointer("/a/b")).isEqualTo(JsonPointer.of(java.util.List.of("a", "b")));
-        assertThat(built.hashCode()).isEqualTo(java.util.List.of("a", "b").hashCode()).isEqualTo(pointer("/a/b").hashCode());
-        assertThat(JsonPointer.ROOT.hashCode()).isEqualTo(java.util.List.of().hashCode());
+        assertThat(built).isEqualTo(pointer("/a/b")).isEqualTo(JsonPointer.of(List.of("a", "b")));
+        assertThat(built.hashCode()).isEqualTo(List.of("a", "b").hashCode()).isEqualTo(pointer("/a/b").hashCode());
+        assertThat(JsonPointer.ROOT.hashCode()).isEqualTo(List.of().hashCode());
         assertThat(built).isNotEqualTo(JsonPointer.of("a")).isNotEqualTo(JsonPointer.of("a", "c")).isNotEqualTo("/a/b");
         // "Aa" and "BB" have the same hash code: equal hashes, different tokens.
         assertThat(JsonPointer.of("x", "Aa").hashCode()).isEqualTo(JsonPointer.of("x", "BB").hashCode());

@@ -79,8 +79,8 @@ public class OpenApiFnAutoConfiguration {
                 .withSchema(SchemaValidator.Options.DEFAULT.withAssertFormats(validation.assertFormats()))
                 .withBasePaths(basePath == null ? List.of() : List.of(basePath))
                 .withVerifier(verifier);
-            var receivers = new ArrayList<java.util.Map.Entry<String, String>>();
-            spec.getValue().receivers().values().forEach(receiver -> receivers.add(java.util.Map.entry(receiver.path(), receiver.operation())));
+            var receivers = new ArrayList<Map.Entry<String, String>>();
+            spec.getValue().receivers().values().forEach(receiver -> receivers.add(Map.entry(receiver.path(), receiver.operation())));
             runtimes.add(new OpenApiRuntime(name, api, OpenApiValidator.of(api, options), jsonMapper, validation.request().enabled(), receivers));
         }
         return new OpenApiRuntimes(runtimes);

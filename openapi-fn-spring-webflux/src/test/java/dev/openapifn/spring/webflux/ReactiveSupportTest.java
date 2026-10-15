@@ -19,12 +19,14 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 class ReactiveSupportTest {
@@ -158,12 +160,12 @@ class ReactiveSupportTest {
         var typed = runtime.bind(accepting, "publish").block();
         assertThat(typed.accept().accepts("text/plain")).isTrue();
         assertThat((List<?>) typed.body("application/json", List.class)).hasSize(1);
-        assertThat(typed.body("text/plain", new tools.jackson.core.type.TypeReference<List<Map<String, Integer>>>() { })).isNull();
+        assertThat(typed.body("text/plain", new TypeReference<List<Map<String, Integer>>>() { })).isNull();
         assertThat(typed.items("application/json", Map.class).collectList().block()).containsExactly(Map.of("a", 2));
         assertThat(typed.items("text/plain", Map.class)).isNull();
-        assertThat(typed.items("application/json", new tools.jackson.core.type.TypeReference<Map<String, Integer>>() { }).collectList().block())
+        assertThat(typed.items("application/json", new TypeReference<Map<String, Integer>>() { }).collectList().block())
             .containsExactly(Map.of("a", 2));
-        assertThat(typed.items("text/plain", new tools.jackson.core.type.TypeReference<Map<String, Integer>>() { })).isNull();
+        assertThat(typed.items("text/plain", new TypeReference<Map<String, Integer>>() { })).isNull();
         var lines = MockServerWebExchange.from(MockServerHttpRequest.post("/events").header("Content-Type", "application/jsonl").body("1\n"));
         var lenient = new ReactiveRuntime(new OpenApiRuntime("events", RUNTIME.api(), RUNTIME.validator(), RUNTIME.mapper(), false));
         assertThatThrownBy(() -> lenient.bind(lines, "publish").block().items(Map.class).collectList().block())
@@ -175,7 +177,7 @@ class ReactiveSupportTest {
     private static final class DataBufferUtilsJoin {
 
         static Mono<String> text(Flux<DataBuffer> body) {
-            return org.springframework.core.io.buffer.DataBufferUtils.join(body).map(ReactiveMessages::bytes).map(bytes -> new String(bytes,
+            return DataBufferUtils.join(body).map(ReactiveMessages::bytes).map(bytes -> new String(bytes,
                 StandardCharsets.UTF_8));
         }
     }

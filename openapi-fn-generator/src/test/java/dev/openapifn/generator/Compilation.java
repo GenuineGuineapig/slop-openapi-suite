@@ -10,6 +10,7 @@ import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import javax.tools.ToolProvider;
 
@@ -35,7 +36,7 @@ final class Compilation {
     }
 
     /** Generates and compiles; {@code extraSources} maps relative paths to additional hand-written sources. */
-    static Compilation of(OpenApiDocument api, GeneratorConfig config, Path root, java.util.Map<String, String> extraSources) {
+    static Compilation of(OpenApiDocument api, GeneratorConfig config, Path root, Map<String, String> extraSources) {
         try {
             var files = Generator.generate(api, config);
             if (System.getenv("KEEP") != null) {

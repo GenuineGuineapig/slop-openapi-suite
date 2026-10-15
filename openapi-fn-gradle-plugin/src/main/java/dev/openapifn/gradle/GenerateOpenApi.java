@@ -8,9 +8,14 @@ import dev.openapifn.load.ResourceLoader;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import org.gradle.api.DefaultTask;
@@ -105,7 +110,7 @@ public abstract class GenerateOpenApi extends DefaultTask {
     protected abstract FileSystemOperations getFileSystemOperations();
 
     /** Loads descriptions with remote documents cached in {@code cache}. */
-    public static ResourceLoader loader(java.nio.file.Path cache, Duration maxAge, boolean offline) {
+    public static ResourceLoader loader(Path cache, Duration maxAge, boolean offline) {
         return ResourceLoaders.withCachedRemote(Duration.ofSeconds(30), cache, maxAge, offline);
     }
 
@@ -114,14 +119,14 @@ public abstract class GenerateOpenApi extends DefaultTask {
      * {@code spec}, loaded with {@code loader}; empty when it references none, or cannot be loaded
      * (generation then reports why).
      */
-    public static String fingerprint(java.nio.file.Path spec, ResourceLoader loader) {
+    public static String fingerprint(Path spec, ResourceLoader loader) {
         var loaded = new OpenApiLoader(loader).load(spec);
         if (loaded.isErr()) {
             return "";
         }
-        var remote = new java.util.TreeMap<String, String>();
+        var remote = new TreeMap<String, String>();
         loaded.toOptional().orElseThrow().schemas().documents().forEach((uri, document) -> {
-            if (java.util.Set.of("http", "https").contains(uri.getScheme())) {
+            if (Set.of("http", "https").contains(uri.getScheme())) {
                 remote.put(uri.toString(), dev.openapifn.json.JsonWriter.compact(document.root()));
             }
         });
@@ -131,7 +136,7 @@ public abstract class GenerateOpenApi extends DefaultTask {
         var content = new StringBuilder();
         remote.forEach((uri, json) -> content.append(uri).append('\n').append(json).append('\n'));
         // A 128-bit (MD5) digest: enough to tell a change.
-        return java.util.UUID.nameUUIDFromBytes(content.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        return UUID.nameUUIDFromBytes(content.toString().getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     @TaskAction

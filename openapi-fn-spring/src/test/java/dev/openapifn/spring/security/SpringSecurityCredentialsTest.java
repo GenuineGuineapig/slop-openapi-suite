@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.openapifn.security.Credential;
 import dev.openapifn.security.Grant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -19,18 +22,18 @@ class SpringSecurityCredentialsTest {
     @Test
     void authenticatedRequestsAreGrantedTheirAuthorities() {
         GrantedAuthority unnamed = () -> null;
-        var authorities = new java.util.ArrayList<GrantedAuthority>(AuthorityUtils.createAuthorityList("SCOPE_pets:read", "ROLE_admin", "plain"));
+        var authorities = new ArrayList<GrantedAuthority>(AuthorityUtils.createAuthorityList("SCOPE_pets:read", "ROLE_admin", "plain"));
         authorities.add(unnamed);
         var authentication = UsernamePasswordAuthenticationToken.authenticated("ann", "n/a", authorities);
         assertThat(SpringSecurityCredentials.of(authentication).verify(KEY)).hasValueSatisfying(result -> assertThat(result.toOptional())
-            .contains(new Grant("ann", java.util.Set.of("SCOPE_pets:read", "pets:read", "ROLE_admin", "admin", "plain"))));
+            .contains(new Grant("ann", Set.of("SCOPE_pets:read", "pets:read", "ROLE_admin", "admin", "plain"))));
     }
 
     @Test
     void otherRequestsAreRejected() {
         var anonymous = new AnonymousAuthenticationToken("key", "anonymous", AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"));
         var unauthenticated = UsernamePasswordAuthenticationToken.unauthenticated("ann", "pw");
-        for (var authentication : java.util.Arrays.asList(null, anonymous, unauthenticated)) {
+        for (var authentication : Arrays.asList(null, anonymous, unauthenticated)) {
             assertThat(SpringSecurityCredentials.of(authentication).verify(KEY)).hasValueSatisfying(result ->
                 assertThat(result.failure()).contains("the request is not authenticated"));
         }

@@ -32,7 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
 /**
@@ -184,16 +186,16 @@ class AtlassianDifferentialTest {
      * Scalar Galaxy resolves {@code #/components/...} from inside schemas with an {@code $id} against
      * the document; openapi-fn falls back to the document (with a warning), Atlassian cannot load it.
      */
-    @org.junit.jupiter.api.Test
+    @Test
     void atlassianCannotLoadEverything() {
         var galaxy = PROJECT.resolve("samples/galaxy/src/main/openapi/openapi.yaml");
         assertThat(OpenApiLoader.defaults().load(galaxy).isOk()).isTrue();
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> OpenApiInteractionValidator.createFor(galaxy.toUri().toString()).build())
+        Assertions.assertThatThrownBy(() -> OpenApiInteractionValidator.createFor(galaxy.toUri().toString()).build())
             .isInstanceOf(OpenApiInteractionValidator.ApiLoadException.class).hasMessageContaining("Could not find /components/schemas/PaginatedResource");
         // OpenAPI 3.2: Atlassian reads the description as an older version.
         var trainTravel = PROJECT.resolve("samples/train-travel/src/main/openapi/openapi.yaml");
         assertThat(OpenApiLoader.defaults().load(trainTravel).isOk()).isTrue();
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> OpenApiInteractionValidator.createFor(trainTravel.toUri().toString()).build())
+        Assertions.assertThatThrownBy(() -> OpenApiInteractionValidator.createFor(trainTravel.toUri().toString()).build())
             .isInstanceOf(OpenApiInteractionValidator.ApiLoadException.class);
     }
 }

@@ -8,23 +8,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.openapifn.http.ParameterSerializer;
+import dev.openapifn.model.ParameterLocation;
 import dev.openapifn.spring.app.EventsController;
 import dev.openapifn.spring.app.TestApplication;
 import dev.openapifn.spring.client.ClientCall;
 import dev.openapifn.spring.client.OpenApiClientValidationInterceptor;
 import dev.openapifn.spring.client.OpenApiHttpClient;
-import dev.openapifn.http.ParameterSerializer;
-import dev.openapifn.model.ParameterLocation;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.client.RestClient;
 import tools.jackson.core.type.TypeReference;
@@ -55,7 +58,7 @@ class StreamingTest {
                 .andExpect(content().contentType("text/event-stream"))
                 .andExpect(content().string("event: tick\ndata: 0\n\nevent: tick\ndata: 1\n\n"));
             var mixed = mvc.perform(get("/api/events?format=mixed")).andExpect(status().isOk()).andReturn().getResponse();
-            var boundary = org.springframework.http.MediaType.parseMediaType(mixed.getContentType()).getParameter("boundary");
+            var boundary = MediaType.parseMediaType(mixed.getContentType()).getParameter("boundary");
             assertThat(mixed.getContentAsString()).isEqualTo("--" + boundary + "\r\nContent-Type: application/json\r\n\r\n{\"n\":0}\r\n--" + boundary
                 + "\r\nContent-Type: image/png\r\n\r\nA\r\n--" + boundary + "--\r\n");
             mvc.perform(get("/api/events?format=json&count=2"))
@@ -133,11 +136,11 @@ class StreamingTest {
         /** The server waits for the client to receive the first item before it produces the second. */
         @Test
         void responsesArriveItemByItem() {
-            for (var builder : java.util.List.of(RestClient.builder(),
+            for (var builder : List.of(RestClient.builder(),
                 RestClient.builder().requestInterceptor(new OpenApiClientValidationInterceptor(runtimes.get("pets").validator(), true)))) {
                 EventsController.received = new CountDownLatch(1);
                 var call = ClientCall.of("GET", "/events").param(FORMAT, "wait").accept("application/jsonl");
-                var numbers = client(builder).<java.util.List<Integer>>exchange(call, response -> {
+                var numbers = client(builder).<List<Integer>>exchange(call, response -> {
                     try (var items = response.items(new TypeReference<Map<String, Integer>>() { })) {
                         return items.map(item -> {
                             EventsController.received.countDown();
@@ -174,17 +177,17 @@ class StreamingTest {
             var created = ClientCall.of("POST", "/pets").body("application/json", Map.of("name", "Rex"));
             assertThat(client.<Integer>exchange(created, dev.openapifn.spring.client.ClientResponse::status)).isEqualTo(201);
             var anonymous = new OpenApiHttpClient(RestClient.create(), "http://localhost:" + port + "/api", JsonMapper.builder().build(), validator);
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> anonymous.exchange(created, dev.openapifn.spring.client.ClientResponse::status))
+            Assertions.assertThatThrownBy(() -> anonymous.exchange(created, dev.openapifn.spring.client.ClientResponse::status))
                 .isInstanceOf(dev.openapifn.spring.client.ClientValidationException.class).hasMessageContaining("request.security.missing");
             var invalid = ClientCall.of("POST", "/events").body("application/jsonl", Stream.of(Map.of("n", 1), Map.of("n", -1)));
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(invalid, dev.openapifn.spring.client.ClientResponse::status))
+            Assertions.assertThatThrownBy(() -> client.exchange(invalid, dev.openapifn.spring.client.ClientResponse::status))
                 .hasStackTraceContaining("request.body.schema.minimum");
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(ClientCall.of("GET", "/broken"),
+            Assertions.assertThatThrownBy(() -> client.exchange(ClientCall.of("GET", "/broken"),
                     dev.openapifn.spring.client.ClientResponse::status))
                 .isInstanceOf(dev.openapifn.spring.client.ClientValidationException.class).hasMessageContaining("response.body.schema.required");
             var badItems = ClientCall.of("GET", "/events").param(ParameterSerializer.Spec.of("invalid", ParameterLocation.QUERY), 1)
                 .accept("application/jsonl");
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.exchange(badItems, response -> {
+            Assertions.assertThatThrownBy(() -> client.exchange(badItems, response -> {
                 try (var items = response.items(new TypeReference<Map<String, Integer>>() { })) {
                     return items.toList();
                 }

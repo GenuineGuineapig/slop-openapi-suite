@@ -18,12 +18,14 @@ import dev.openapifn.spring.client.ClientValidationException;
 import dev.openapifn.spring.client.ExchangeValues;
 import dev.openapifn.spring.client.OpenApiHttpClient;
 import dev.openapifn.spring.webflux.ReactiveMessages;
-import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OpenApiValidator.RequestValidation;
+import dev.openapifn.validation.OpenApiValidator;
 import dev.openapifn.validation.OperationMatch;
 import dev.openapifn.validation.ValidationReport;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.apache.commons.logging.Log;
@@ -186,20 +188,20 @@ public final class OpenApiWebClient {
         if (itemType.isPresent()) {
             var type = itemType.get();
             var end = BodyWriter.end(type);
-            var streamedBody = java.util.Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)).concatWith(end.length == 0 ? Flux.empty() : Flux.just(end));
+            var streamedBody = Objects.requireNonNull(items).map(item -> codec.encodeItem(item, type)).concatWith(end.length == 0 ? Flux.empty() : Flux.just(end));
             request.body(BodyInserters.fromDataBuffers(validatedItems(sending, type, streamedBody)
                 .map(bytes -> (DataBuffer) DefaultDataBufferFactory.sharedInstance.wrap(bytes))));
         }
         return request.retrieve().onStatus(status -> true, response -> Mono.empty()).toEntityFlux(DataBuffer.class)
             .onErrorMap(WebClientRequestException.class, e -> e.getCause() instanceof ClientValidationException invalid ? invalid : e)
             .flatMap(entity -> decoder.apply(new ReactiveClientResponse(entity.getStatusCode().value(), ReactiveMessages.headers(entity.getHeaders()),
-                java.util.Objects.requireNonNullElse(entity.getBody(), Flux.<DataBuffer>empty()), mapper, sending.match.map(this::validation).orElse(null))));
+                Objects.requireNonNullElse(entity.getBody(), Flux.<DataBuffer>empty()), mapper, sending.match.map(this::validation).orElse(null))));
     }
 
     /** The validation filter: validates a request as it is sent (its head, for a streamed body), failing on violations. */
     private Mono<ClientResponse> validate(ClientRequest request, ExchangeFunction next) {
         return Mono.defer(() -> {
-            var validator = java.util.Objects.requireNonNull(this.validator);
+            var validator = Objects.requireNonNull(this.validator);
             var sending = (Sending) request.attribute(SENDING).orElseThrow();
             var uri = request.url();
             var message = new HttpRequest(request.method().name(), uri.getRawPath(), Optional.ofNullable(uri.getRawQuery()).orElse(""),
@@ -225,12 +227,12 @@ public final class OpenApiWebClient {
      */
     private Flux<byte[]> validatedItems(Sending sending, ContentType type, Flux<byte[]> body) {
         return Flux.defer(() -> {
-            var validator = sending.match.flatMap(m -> java.util.Objects.requireNonNull(this.validator).requestItems(m, type.toString()));
+            var validator = sending.match.flatMap(m -> Objects.requireNonNull(this.validator).requestItems(m, type.toString()));
             if (validator.isEmpty()) {
                 return body;
             }
             var framer = validator.get().framer();
-            java.util.function.Consumer<ItemFramer.Frame> check = frame -> {
+            Consumer<ItemFramer.Frame> check = frame -> {
                 var report = validator.get().validate(frame).report();
                 if (report.hasErrors()) {
                     throw new ClientValidationException("A request item violates the API description", report);
@@ -242,7 +244,7 @@ public final class OpenApiWebClient {
     }
 
     private ReactiveClientResponse.Validation validation(OperationMatch match) {
-        var validator = java.util.Objects.requireNonNull(this.validator);
+        var validator = Objects.requireNonNull(this.validator);
         return new ReactiveClientResponse.Validation() {
             @Override
             public void whole(int status, Headers headers, byte[] body) {

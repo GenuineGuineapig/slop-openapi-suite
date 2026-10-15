@@ -1,8 +1,8 @@
 package dev.openapifn.generator.api;
 
 import dev.openapifn.generator.java.Names;
-import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.java.TypeRef.ClassName;
+import dev.openapifn.generator.java.TypeRef;
 import dev.openapifn.generator.model.ModelDef.Property;
 import dev.openapifn.generator.model.TypeMapper;
 import dev.openapifn.http.ContentType;
@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -129,7 +130,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
     /** Builds the model of a path operation, grouped by its first tag; types are registered with {@code mapper}. */
     public static OperationModel of(ApiOperation operation, String apiPackage, TypeMapper mapper, Set<String> takenMethods, ClassName stream) {
         return of(operation, operation.displayName(), operation.operation().tags().stream().findFirst().map(Names::pascal).orElse("Default"),
-            operation.method().toLowerCase(java.util.Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods, stream);
+            operation.method().toLowerCase(Locale.ROOT) + " " + operation.path(), apiPackage, mapper, takenMethods, stream);
     }
 
     /**
@@ -211,7 +212,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
                     }
                 }
             }));
-            var headers = new java.util.LinkedHashMap<String, Property>();
+            var headers = new LinkedHashMap<String, Property>();
             var headerNames = new HashSet<String>(List.of("body", "status", "headers", "contentType"));
             response.headers().forEach((header, definition) -> {
                 if (!header.equalsIgnoreCase("Content-Type")) {
@@ -235,7 +236,7 @@ public record OperationModel(ApiOperation operation, String id, String method, S
             return "Default";
         }
         if (!key.matches("[0-9]{3}")) {
-            return "Status" + key.toUpperCase(java.util.Locale.ROOT);
+            return "Status" + key.toUpperCase(Locale.ROOT);
         }
         return REASONS.getOrDefault(Integer.parseInt(key), "Status" + key);
     }

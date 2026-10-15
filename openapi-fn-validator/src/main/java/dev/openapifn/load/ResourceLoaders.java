@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Standard {@link ResourceLoader}s. */
@@ -115,7 +116,7 @@ public final class ResourceLoaders {
     /** Serves fixed content, keyed by absolute URI. */
     public static ResourceLoader inMemory(Map<URI, String> documents) {
         var copy = Map.copyOf(documents);
-        return uri -> Result.fromOptional(java.util.Optional.ofNullable(copy.get(uri)), () -> "No in-memory document " + uri);
+        return uri -> Result.fromOptional(Optional.ofNullable(copy.get(uri)), () -> "No in-memory document " + uri);
     }
 
     /** Fetches {@code http:} and {@code https:} URIs with a GET request. */

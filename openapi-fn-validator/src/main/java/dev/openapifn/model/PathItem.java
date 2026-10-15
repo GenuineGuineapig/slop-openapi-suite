@@ -3,6 +3,7 @@ package dev.openapifn.model;
 import dev.openapifn.fn.Immutable;
 import dev.openapifn.json.JsonValue;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -31,6 +32,6 @@ public record PathItem(Optional<String> summary, Optional<String> description, M
     }
 
     public Optional<Operation> operation(String method) {
-        return Optional.ofNullable(operations.get(method.toUpperCase(java.util.Locale.ROOT)));
+        return Optional.ofNullable(operations.get(method.toUpperCase(Locale.ROOT)));
     }
 }

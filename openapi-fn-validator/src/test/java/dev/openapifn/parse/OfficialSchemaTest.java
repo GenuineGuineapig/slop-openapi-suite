@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -51,7 +52,7 @@ class OfficialSchemaTest {
     private static final Map<String, Oracle> ORACLES = new HashMap<>();
 
     /** Valid descriptions that reference a document on example.com, which does not exist. */
-    private static final java.util.Set<String> UNRESOLVABLE = java.util.Set.of("v3.1/pass/security-scheme-object-examples.yaml",
+    private static final Set<String> UNRESOLVABLE = Set.of("v3.1/pass/security-scheme-object-examples.yaml",
         "v3.2/pass/security-scheme-object-examples.yaml");
 
     /** An official schema, ready to validate descriptions. */

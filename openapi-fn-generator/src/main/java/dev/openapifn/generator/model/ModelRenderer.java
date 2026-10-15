@@ -50,7 +50,7 @@ public final class ModelRenderer {
     private static final ClassName COLLECTIONS = ClassName.of("java.util", "Collections");
     private static final ClassName ARRAY_LIST = ClassName.of("java.util", "ArrayList");
     /** The collection types whose components records copy. */
-    private static final java.util.Set<ClassName> COPIED = java.util.Set.of(TypeRef.LIST, TypeRef.SET, TypeRef.MAP);
+    private static final Set<ClassName> COPIED = Set.of(TypeRef.LIST, TypeRef.SET, TypeRef.MAP);
     private static final ClassName LINKED_HASH_SET = ClassName.of("java.util", "LinkedHashSet");
     private static final ClassName LINKED_HASH_MAP = ClassName.of("java.util", "LinkedHashMap");
     private static final ClassName NULLABLE = TypeMapper.NULLABLE;
@@ -373,7 +373,7 @@ public final class ModelRenderer {
             .isPresent())).toList();
     }
 
-    private void typeInfo(Source out, Imports imports, String property, java.util.Map<ClassName, List<String>> names, Optional<ClassName> defaultImpl) {
+    private void typeInfo(Source out, Imports imports, String property, Map<ClassName, List<String>> names, Optional<ClassName> defaultImpl) {
         var typeInfo = imports.ref(JSON_TYPE_INFO);
         out.line("@" + typeInfo + "(use = " + typeInfo + ".Id.NAME, include = " + typeInfo + ".As.EXISTING_PROPERTY, property = "
             + Names.literal(property) + ", visible = true" + defaultImpl.map(d -> ", defaultImpl = " + imports.ref(d) + ".class").orElse("") + ")");

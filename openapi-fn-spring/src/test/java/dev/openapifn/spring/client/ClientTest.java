@@ -16,16 +16,27 @@ import dev.openapifn.model.ParameterStyle;
 import dev.openapifn.parse.OpenApiLoader;
 import dev.openapifn.spring.FilePart;
 import dev.openapifn.validation.OpenApiValidator;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.http.client.MockClientHttpResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 import tools.jackson.core.type.TypeReference;
@@ -119,7 +130,7 @@ class ClientTest {
         setup.server().expect(requestTo("https://api.example.com/v1/text")).andExpect(content().string("plain")).andRespond(withSuccess());
         setup.server().expect(requestTo("https://api.example.com/v1/multipart")).andExpect(request -> {
             var type = request.getHeaders().getContentType().toString();
-            var body = new String(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes(), StandardCharsets.UTF_8);
+            var body = new String(((MockClientHttpRequest) request).getBodyAsBytes(), StandardCharsets.UTF_8);
             assertThat(type).startsWith("multipart/form-data;boundary=openapi-fn-");
             assertThat(body).contains("name=\"file\"; filename=\"a.png\"", "Content-Type: image/png", "name=\"meta\"", "{\"a\":1}",
                 "name=\"tags\"", "x", "y", "name=\"count\"", "\r\n3\r\n", "name=\"unique\"", "\r\nu\r\n", "[1,2]");
@@ -129,7 +140,7 @@ class ClientTest {
         setup.server().expect(requestTo("https://api.example.com/v1/qs?raw=text")).andRespond(withSuccess());
         var client = setup.client();
         client.exchange(ClientCall.of("POST", "/json").body("application/json", Map.of("a", 1)), r -> null);
-        client.exchange(ClientCall.of("POST", "/form").body("application/x-www-form-urlencoded", new java.util.TreeMap<>(Map.of("a", 1, "b", "x y"))), r -> null);
+        client.exchange(ClientCall.of("POST", "/form").body("application/x-www-form-urlencoded", new TreeMap<>(Map.of("a", 1, "b", "x y"))), r -> null);
         client.exchange(ClientCall.of("PUT", "/file").body("image/png", FilePart.of(new byte[] {7})), r -> null);
         client.exchange(ClientCall.of("PUT", "/raw").body("application/octet-stream", new byte[] {8}), r -> null);
         client.exchange(ClientCall.of("PUT", "/text").body("text/plain", "plain").body("text/plain", "plain"), r -> null);
@@ -138,11 +149,11 @@ class ClientTest {
             ClientCall.Part.of("meta", Map.of("a", 1), "application/json"),
             ClientCall.Part.of("tags", List.of("x", "y")),
             ClientCall.Part.of("count", 3),
-            ClientCall.Part.of("unique", java.util.Set.of("u")),
+            ClientCall.Part.of("unique", Set.of("u")),
             ClientCall.Part.of("matrix", List.of(List.of(1, 2)), "application/json"),
             ClientCall.Part.of("absent", null),
             ClientCall.Part.of("absent2", null, "application/json"))), r -> null);
-        client.exchange(ClientCall.of("GET", "/qs").param(QS, new java.util.TreeMap<>(Map.of("a", 1, "b", 2))), r -> null);
+        client.exchange(ClientCall.of("GET", "/qs").param(QS, new TreeMap<>(Map.of("a", 1, "b", 2))), r -> null);
         client.exchange(ClientCall.of("GET", "/qs").param(QS, "raw=text"), r -> null);
         assertThat(ClientCall.of("GET", "/x").body("text/plain", null).body()).isNull();
         setup.server().verify();
@@ -165,7 +176,7 @@ class ClientTest {
         assertThat(mixed.contentType()).startsWith("multipart/mixed; boundary=openapi-fn-");
         assertThat(new String(mixed.body(), StandardCharsets.UTF_8)).contains("Content-Type: application/json\r\n\r\n{\"a\":1}\r\n",
             "Content-Type: text/plain\r\n\r\n2\r\n", "Content-Type: image/png\r\n\r\nA\r\n");
-        var form = client.encode(new ClientCall.Body("multipart/form-data", new java.util.TreeMap<>(Map.of("a", 1, "b", List.of("x", "y")))));
+        var form = client.encode(new ClientCall.Body("multipart/form-data", new TreeMap<>(Map.of("a", 1, "b", List.of("x", "y")))));
         assertThat(form.contentType()).startsWith("multipart/form-data; boundary=openapi-fn-");
         assertThat(new String(form.body(), StandardCharsets.UTF_8)).contains("name=\"a\"", "\r\n1\r\n", "name=\"b\"", "\r\nx\r\n", "\r\ny\r\n");
         var file = FilePart.of("f.bin", "application/x-thing", new byte[] {1});
@@ -249,18 +260,18 @@ class ClientTest {
         var array = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/json"), "[1,2]".getBytes(StandardCharsets.UTF_8), MAPPER);
         assertThat(array.items(Integer.class)).containsExactly(1, 2);
         assertThat(new ClientResponse(204, dev.openapifn.http.Headers.EMPTY, new byte[0], MAPPER).items(Integer.class)).isEmpty();
-        var closed = new java.util.concurrent.atomic.AtomicInteger();
+        var closed = new AtomicInteger();
         var broken = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"),
-            new java.io.ByteArrayInputStream("{\n".getBytes(StandardCharsets.UTF_8)), closed::incrementAndGet, MAPPER);
+            new ByteArrayInputStream("{\n".getBytes(StandardCharsets.UTF_8)), closed::incrementAndGet, MAPPER);
         assertThatThrownBy(() -> broken.items(Object.class).toList()).isInstanceOf(IllegalStateException.class)
             .hasMessageStartingWith("Cannot decode application/jsonl content: item 0 must be valid JSON");
-        var unreadable = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), new java.io.InputStream() {
+        var unreadable = new ClientResponse(200, dev.openapifn.http.Headers.of("Content-Type", "application/jsonl"), new InputStream() {
             @Override
-            public int read() throws java.io.IOException {
-                throw new java.io.IOException("broken");
+            public int read() throws IOException {
+                throw new IOException("broken");
             }
         }, closed::incrementAndGet, MAPPER);
-        assertThatThrownBy(unreadable::bytes).isInstanceOf(java.io.UncheckedIOException.class);
+        assertThatThrownBy(unreadable::bytes).isInstanceOf(UncheckedIOException.class);
         assertThat(closed).hasValue(1);
 
         var setup = setup(RestClient.builder());
@@ -270,7 +281,7 @@ class ClientTest {
             .andRespond(withSuccess("{\"b\":1}\n{\"b\":2}\n", MediaType.parseMediaType("application/jsonl")));
         setup.server().expect(requestTo("https://api.example.com/v1/parts"))
             .andExpect(request -> assertThat(request.getHeaders().getContentType()).satisfies(type -> assertThat(type.isCompatibleWith(mixed)).isTrue()))
-            .andExpect(request -> assertThat(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsString())
+            .andExpect(request -> assertThat(((MockClientHttpRequest) request).getBodyAsString())
                 .contains("Content-Type: application/json\r\n\r\n{\"a\":1}\r\n", "Content-Type: image/png\r\n\r\nA\r\n"))
             .andRespond(withSuccess("x", MediaType.parseMediaType("application/jsonl")));
         setup.server().expect(requestTo("https://api.example.com/v1/fixed")).andExpect(header("Content-Type", "multipart/mixed; boundary=fixed"))
@@ -313,9 +324,9 @@ class ClientTest {
                       content: {application/jsonl: {itemSchema: {type: object, required: [n]}}}
             """).orElseThrow(d -> new AssertionError(d.toString()));
         var validator = OpenApiValidator.of(api);
-        var request = new org.springframework.mock.http.client.MockClientHttpRequest(HttpMethod.GET, URI.create("https://h/x"));
-        java.util.function.Function<String, org.springframework.mock.http.client.MockClientHttpResponse> response = body -> {
-            var mock = new org.springframework.mock.http.client.MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatus.OK);
+        var request = new MockClientHttpRequest(HttpMethod.GET, URI.create("https://h/x"));
+        Function<String, MockClientHttpResponse> response = body -> {
+            var mock = new MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatus.OK);
             mock.getHeaders().add("Content-Type", "application/jsonl");
             mock.getHeaders().add("X-Required", "yes");
             return mock;
@@ -323,7 +334,7 @@ class ClientTest {
         var valid = new OpenApiClientValidationInterceptor(validator, true).intercept(request, new byte[0], (r, b) -> response.apply("{\"n\":1}\n"));
         var body = valid.getBody();
         assertThat(body.read(new byte[0], 0, 0)).isZero();
-        var read = new java.io.ByteArrayOutputStream();
+        var read = new ByteArrayOutputStream();
         for (int b = body.read(); b >= 0; b = body.read()) {
             read.write(b);
         }
@@ -397,8 +408,8 @@ class ClientTest {
             "openapi: 3.1.0\ninfo: {title: t, version: v}\npaths:\n  /x:\n    get:\n      responses: {'200': {description: ok}}\n")
             .orElseThrow(d -> new AssertionError(d.toString()));
         var interceptor = new OpenApiClientValidationInterceptor(OpenApiValidator.of(api), true);
-        var request = new org.springframework.mock.http.client.MockClientHttpRequest(HttpMethod.GET, URI.create("https://h/x"));
-        var original = new org.springframework.mock.http.client.MockClientHttpResponse(new byte[] {1}, HttpStatus.OK);
+        var request = new MockClientHttpRequest(HttpMethod.GET, URI.create("https://h/x"));
+        var original = new MockClientHttpResponse(new byte[] {1}, HttpStatus.OK);
         original.getHeaders().add("X-A", "1");
         var response = interceptor.intercept(request, new byte[0], (r, b) -> original);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);

@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 class OpenApiParserTest {
@@ -488,7 +489,7 @@ class OpenApiParserTest {
                 post: {responses: {'200': {description: ok}}}
             """));
         var links = doc.operations().getFirst().operation().responses().forStatus(200).orElseThrow().links();
-        java.util.function.Function<String, String> target = name -> doc.target(links.get(name)).map(op -> op.kind() + " " + op.method() + " " + op.path())
+        Function<String, String> target = name -> doc.target(links.get(name)).map(op -> op.kind() + " " + op.method() + " " + op.path())
             .orElse("none");
         assertThat(target.apply("byId")).isEqualTo("PATH GET /a");
         assertThat(target.apply("byRef")).isEqualTo("PATH POST /b");

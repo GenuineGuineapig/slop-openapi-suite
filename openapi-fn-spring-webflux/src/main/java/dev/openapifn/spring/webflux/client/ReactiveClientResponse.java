@@ -13,6 +13,7 @@ import dev.openapifn.spring.client.ClientResponse;
 import dev.openapifn.spring.webflux.ReactiveMessages;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -116,7 +117,7 @@ public final class ReactiveClientResponse {
         return items(mapper.constructType(type), buffered -> buffered.items(type));
     }
 
-    private <T> Flux<T> items(JavaType type, Function<ClientResponse, java.util.stream.Stream<T>> whole) {
+    private <T> Flux<T> items(JavaType type, Function<ClientResponse, Stream<T>> whole) {
         var sequential = contentType().flatMap(ContentType::parse).filter(ItemFramer::isSequential);
         if (sequential.isEmpty()) {
             return buffered().flatMapMany(response -> Flux.fromStream(whole.apply(response)));
