@@ -42,14 +42,14 @@ class PetstoreApplicationTest {
         var client = new PetsClient(clients.http(PetstoreSpec.NAME, "http://localhost:" + port + "/api"));
         var created = client.createPet(new CreatePetRequest(new NewPet("Tom", Kind.CAT, Set.of("lazy"))));
         assertThat(created).isInstanceOfSatisfying(CreatePetResponse.Created.class, response -> {
-            assertThat(response.body()).isEqualTo(new Cat("Tom", Kind.CAT, Set.of("lazy"), 1L, true));
+            assertThat(response.body()).isEqualTo(new Cat("Tom", Cat.Kind.CAT, Set.of("lazy"), 1L, true));
             assertThat(response.location()).isEqualTo(URI.create("/api/pets/1"));
         });
         client.createPet(new CreatePetRequest(new NewPet("Rex", Kind.DOG, null)));
         assertThat(client.createPet(new CreatePetRequest(new NewPet("Rex", Kind.DOG, null)))).isInstanceOf(CreatePetResponse.Conflict.class);
 
         var dogs = client.listPets(new ListPetsRequest(Kind.DOG, null));
-        assertThat(dogs).isEqualTo(ListPetsResponse.ok(java.util.List.of(new Dog("Rex", Kind.DOG, null, 2L, true)), 1));
+        assertThat(dogs).isEqualTo(ListPetsResponse.ok(java.util.List.of(new Dog("Rex", Dog.Kind.DOG, null, 2L, true)), 1));
         assertThat(client.getPet(new GetPetRequest(1L))).isInstanceOf(GetPetResponse.Ok.class);
         assertThat(client.deletePet(new DeletePetRequest(1L))).isEqualTo(DeletePetResponse.noContent());
         assertThat(client.getPet(new GetPetRequest(1L))).isInstanceOfSatisfying(GetPetResponse.NotFound.class,

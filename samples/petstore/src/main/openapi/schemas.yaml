@@ -20,12 +20,15 @@ Pet:
     mapping:
       cat: '#/Cat'
       dog: '#/Dog'
+# The discriminator does not decide validation (OpenAPI: it MUST NOT change the outcome), so each
+# kind of pet only accepts its own kind: a cat is not also a valid dog.
 Cat:
   allOf:
     - $ref: '#/NewPet'
     - type: object
       required: [id]
       properties:
+        kind: {enum: [cat]}
         id: {type: integer, format: int64}
         indoor: {type: boolean, default: true}
 Dog:
@@ -34,6 +37,7 @@ Dog:
     - type: object
       required: [id]
       properties:
+        kind: {enum: [dog]}
         id: {type: integer, format: int64}
         goodBoy: {type: boolean}
 Problem:

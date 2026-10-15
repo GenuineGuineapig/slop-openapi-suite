@@ -58,6 +58,17 @@ class ValidationModelTest {
         assertThat(Router.prefix(new Server("https://example.com", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/");
         assertThat(Router.prefix(new Server("https://example.com/api?x=1", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/api");
         assertThat(Router.prefix(new Server("v1", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/v1");
+        // Variables for the scheme, the host, or the whole origin.
+        var scheme = new dev.openapifn.model.ServerVariable(List.of("https", "http"), "https", Optional.empty(), Map.of());
+        assertThat(Router.prefix(new Server("{scheme}://developer.uspto.gov/ds-api", Optional.empty(), Optional.empty(), Map.of("scheme", scheme), Map.of())))
+            .isEqualTo("/ds-api");
+        assertThat(Router.prefix(new Server("https://{host}/v{major}", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/v{major}");
+        var origin = new dev.openapifn.model.ServerVariable(List.of(), "https://api.example.com", Optional.empty(), Map.of());
+        var segment = new dev.openapifn.model.ServerVariable(List.of(), "v1", Optional.empty(), Map.of());
+        assertThat(Router.prefix(new Server("{base}/pets", Optional.empty(), Optional.empty(), Map.of("base", origin), Map.of()))).isEqualTo("/pets");
+        assertThat(Router.prefix(new Server("{version}/pets", Optional.empty(), Optional.empty(), Map.of("version", segment), Map.of())))
+            .isEqualTo("/{version}/pets");
+        assertThat(Router.prefix(new Server("{undeclared}/pets", Optional.empty(), Optional.empty(), Map.of(), Map.of()))).isEqualTo("/{undeclared}/pets");
         assertThat(new Route.MethodNotAllowed("/a", Set.of("GET")).allowed()).containsExactly("GET");
         var options = OpenApiValidator.Options.DEFAULT.withSchema(SchemaValidator.Options.DEFAULT.withAssertFormats(false));
         assertThat(options.schema().assertFormats()).isFalse();

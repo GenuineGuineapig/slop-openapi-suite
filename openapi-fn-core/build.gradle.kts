@@ -11,4 +11,6 @@ dependencies {
 
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params")
+    // The Atlassian validator, which openapi-fn replaces, as an independent judge of requests and responses.
+    testImplementation(libs.atlassian.validator)
 }

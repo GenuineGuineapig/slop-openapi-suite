@@ -44,8 +44,8 @@ public class PetService implements PetsApi {
         }
         var id = ids.incrementAndGet();
         Pet created = switch (pet.kind()) {
-            case CAT -> new Cat(pet.name(), pet.kind(), pet.tags(), id, null);
-            case DOG -> new Dog(pet.name(), pet.kind(), pet.tags(), id, true);
+            case CAT -> new Cat(pet.name(), Cat.Kind.CAT, pet.tags(), id, null);
+            case DOG -> new Dog(pet.name(), Dog.Kind.DOG, pet.tags(), id, true);
         };
         pets.put(id, created);
         return CreatePetResponse.created(created, URI.create("/api/pets/" + id));
@@ -68,8 +68,8 @@ public class PetService implements PetsApi {
 
     private static Kind kind(Pet pet) {
         return switch (pet) {
-            case Cat cat -> cat.kind();
-            case Dog dog -> dog.kind();
+            case Cat cat -> Kind.CAT;
+            case Dog dog -> Kind.DOG;
         };
     }
 

@@ -29,8 +29,10 @@ import java.util.stream.Collectors;
 /**
  * Validates JSON instances against schemas. Supports JSON Schema draft 4 through 2020-12 and the
  * OpenAPI 3.0 Schema Object, including {@code unevaluatedProperties}/{@code unevaluatedItems},
- * {@code $dynamicRef}, {@code $recursiveRef}, format assertion, OpenAPI {@code nullable},
- * {@code discriminator} and direction-aware {@code readOnly}/{@code writeOnly}. Instances are
+ * {@code $dynamicRef}, {@code $recursiveRef}, format assertion, OpenAPI {@code nullable} and
+ * direction-aware {@code readOnly}/{@code writeOnly}. A {@code discriminator} does not change the
+ * outcome, as the OpenAPI Specification requires; it only explains a failed {@code oneOf} or
+ * {@code anyOf} by the member its value selects. Instances are
  * immutable and thread-safe.
  */
 public final class SchemaValidator {
@@ -222,7 +224,6 @@ public final class SchemaValidator {
                 }
             }
             combinators(schema, instance, path, out);
-            discriminatorDispatch(schema, instance, path, out);
             if (instance instanceof JsonArray array) {
                 unevaluatedItems(schema, array, path, out);
             }
@@ -577,9 +578,8 @@ public final class SchemaValidator {
                 var valid = evaluations.stream().filter(Evaluation::valid).toList();
                 if (valid.isEmpty()) {
                     out.errors.addAll(combinatorFailure(schema, instance, path, "oneOf", "must match exactly one schema in oneOf", evaluations));
-                } else if (valid.size() > 1 && discriminated(schema, instance, oneOf, evaluations).isPresent()) {
-                    out.annotate(discriminated(schema, instance, oneOf, evaluations).orElseThrow());
                 } else if (valid.size() > 1) {
+                    // A discriminator MUST NOT change the validation outcome: an instance valid for several members is invalid.
                     var indices = new ArrayList<Integer>();
                     for (int i = 0; i < evaluations.size(); i++) {
                         if (evaluations.get(i).valid()) {
@@ -605,26 +605,6 @@ public final class SchemaValidator {
                     schema.subschema("else").ifPresent(otherwise -> out.absorb(evaluate(otherwise, instance, path)));
                 }
             });
-        }
-
-        /**
-         * The evaluation of the {@code oneOf} member a discriminator selects, if that member is
-         * valid: a discriminator disambiguates structurally overlapping members.
-         */
-        private Optional<Evaluation> discriminated(Schema schema, JsonValue instance, List<Schema> members, List<Evaluation> evaluations) {
-            if (!(instance instanceof JsonObject object)) {
-                return Optional.empty();
-            }
-            return schema.discriminator().flatMap(d -> object.string(d.propertyName()).flatMap(value -> discriminatedSchema(schema, d, value)))
-                .map(target -> registry.deref(target).location())
-                .flatMap(target -> {
-                    for (int i = 0; i < members.size(); i++) {
-                        if (registry.deref(members.get(i)).location().equals(target) && evaluations.get(i).valid()) {
-                            return Optional.of(evaluations.get(i));
-                        }
-                    }
-                    return Optional.empty();
-                });
         }
 
         /**
@@ -660,20 +640,6 @@ public final class SchemaValidator {
                     .findFirst())
                 .or(() -> registry.resolveMapping(schema, value))
                 .or(() -> discriminator.defaultMapping().flatMap(target -> registry.resolveMapping(schema, target)));
-        }
-
-        /**
-         * A discriminator on a schema without {@code oneOf}/{@code anyOf} (OpenAPI 3.0 style
-         * {@code allOf} inheritance) dispatches to the schema selected by the discriminator value.
-         */
-        private void discriminatorDispatch(Schema schema, JsonValue instance, JsonPointer path, Collector out) {
-            if (schema.has("oneOf") || schema.has("anyOf") || !(instance instanceof JsonObject object)) {
-                return;
-            }
-            schema.discriminator().ifPresent(discriminator -> object.string(discriminator.propertyName())
-                .flatMap(value -> discriminatedSchema(schema, discriminator, value))
-                .filter(target -> !target.location().equals(schema.location()))
-                .ifPresent(target -> out.absorb(evaluate(target, instance, path))));
         }
 
         // -----------------------------------------------------------------------------------------

@@ -24,6 +24,7 @@ checked against material openapi-fn did not write:
 | The OpenAPI Initiative's schema tests: 3.1 and 3.2 `pass` and `fail` descriptions, 3.0 examples (`OpenApiConformanceSuiteTest`) | `pass` descriptions load without errors, `fail` descriptions are rejected |
 | The OpenAPI Initiative's JSON Schemas for 2.0, 3.0, 3.1 and 3.2 as an oracle (`OfficialSchemaTest`) | Every one of those descriptions is judged by the official schema as openapi-fn judges it; the samples' descriptions (Train Travel, Scalar Galaxy, Redocly Museum, a petstore) and the fixtures are valid for both; Swagger 2.0 descriptions are converted to descriptions the official 3.0 schema accepts |
 | The normative examples in the specification texts 3.0.4, 3.1.1, 3.1.2 and 3.2.0 (`SpecificationExamplesTest`, reading `oas-spec/*.md`) | Every cell of each Style Examples table, every Parameter Object example of 3.2.0 (with its `dataValue` and `serializedValue`, for every location, style and media type) and the form request body examples serialize as shown, and a request carrying the serialized form is valid and parses back to the data |
+| Atlassian's swagger-request-validator (openapi-request-validator-core 3.0.0), which openapi-fn replaces (`AtlassianDifferentialTest`) | Over 100 requests and responses, valid and invalid, built from the samples' 3.1 descriptions and the OAI's 3.0 example descriptions, are judged alike by both, except three where Atlassian demonstrably errs (listed in the test with the reason; `allOf` read as closed, a discriminator mapping resolved against the wrong document). Atlassian cannot load the Scalar Galaxy or any 3.2 description |
 | The samples (`samples/`), built on third-party descriptions | Generated controllers, clients and tests work end to end on each, for Spring MVC and WebFlux |
 
 ## Documents and references
@@ -68,7 +69,7 @@ checked against material openapi-fn did not write:
 |---|---|
 | `in`: `path`, `query`, `querystring` (3.2), `header`, `cookie` | Validation, runtime binding, generated clients and tests |
 | `style`: `matrix`, `label`, `simple`, `form`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `cookie` (3.2); `explode` | Parsing and serialization of primitives, arrays and objects (`ParameterParser`, `ParameterSerializer`) |
-| `allowReserved`, `allowEmptyValue`, `required`, `deprecated` | Validation and serialization |
+| `allowReserved`, `allowEmptyValue`, `required`, `deprecated` | Validation and serialization. An empty query value is the empty string (judged by the schema); with `allowEmptyValue` it stands for an unused parameter, as the 3.0.4, 3.1.1 and 3.2 texts say |
 | `content` (single media type, e.g. JSON in a query parameter) | Validation, binding, serialization |
 | Unknown query parameters, the `Accept`, `Content-Type` and `Authorization` header rules | Validation (as configurable issues) |
 | `example` / `examples` (`dataValue`, `serializedValue`, `externalValue`, 3.2) | Generated tests use them (and synthesize valid ones when there are none) |
@@ -95,7 +96,7 @@ checked against material openapi-fn did not write:
 | `$schema` naming a custom metaschema with `$vocabulary` | Only the enabled vocabularies' keywords apply; `format-assertion` makes `format` an assertion; an unknown required vocabulary is an error |
 | `$ref` with siblings, `$id`, `$anchor`, `$dynamicRef` / `$dynamicAnchor`, `$recursiveRef` | Validation. Codegen turns dynamic-anchor templates into generic records. A `#/…` reference missing from an `$id` resource falls back to the document, with a warning |
 | `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentSchemas`, `unevaluatedProperties` / `unevaluatedItems`, `prefixItems`, `contains` | Validation. Codegen: `allOf` merges properties (later members refine earlier ones), `oneOf`/`anyOf` become sealed unions |
-| `discriminator` (`mapping`, `defaultMapping` 3.2, implicit names) | Validation picks the member to report on; codegen generates Jackson subtype information |
+| `discriminator` (`mapping`, `defaultMapping` 3.2, implicit names) | Never changes a validation outcome, as the specification requires (`oneOf` members that overlap make an instance invalid; the `allOf` form does not validate against child schemas); it picks the member a failure is explained by. Codegen generates Jackson subtype information |
 | `readOnly` / `writeOnly` | Validation by direction (webhook and callback requests are provider-written, like responses); codegen relaxes required-ness accordingly |
 | `nullable` (3.0), `type: [.., 'null']` (3.1) | Validation; `@Nullable` in generated code |
 | `format` (dates, times, durations, email, IDN hostnames and emails, IPv4/6, URIs and IRIs, URI templates, JSON pointers, regex, UUID, and the OAS integer/number/byte/binary formats) | Validation (`assert-formats`); Java types in generated code (`LocalDate`, `OffsetDateTime`, `UUID`, `URI`, `byte[]` …) |

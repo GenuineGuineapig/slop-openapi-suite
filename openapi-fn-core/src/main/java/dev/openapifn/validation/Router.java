@@ -19,7 +19,9 @@ import java.util.regex.Pattern;
  */
 public final class Router {
 
-    private static final Pattern ABSOLUTE = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*");
+    /** Scheme and authority of an absolute URL; the scheme may be a variable ({@code {scheme}://host}). */
+    private static final Pattern ABSOLUTE = Pattern.compile("^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\\{[^}/]+})://[^/]*");
+    private static final Pattern LEADING_VARIABLE = Pattern.compile("^\\{([^}/]+)}");
 
     private record Entry(PathTemplate template, List<PathTemplate> prefixes, Map<String, ApiOperation> operations) {
     }
@@ -51,7 +53,14 @@ public final class Router {
 
     /** The path part of a server URL, with variables kept as template expressions. */
     static String prefix(Server server) {
-        var path = ABSOLUTE.matcher(server.url()).replaceFirst("");
+        var url = server.url();
+        // A leading variable whose default is an absolute URL stands for the origin ({base}/v1).
+        var leading = LEADING_VARIABLE.matcher(url);
+        if (leading.lookingAt() && Optional.ofNullable(server.variables().get(leading.group(1)))
+            .filter(variable -> ABSOLUTE.matcher(variable.defaultValue()).lookingAt()).isPresent()) {
+            url = url.substring(leading.end());
+        }
+        var path = ABSOLUTE.matcher(url).replaceFirst("");
         var query = path.indexOf('?');
         path = query >= 0 ? path.substring(0, query) : path;
         return path.startsWith("/") ? path : "/" + path;

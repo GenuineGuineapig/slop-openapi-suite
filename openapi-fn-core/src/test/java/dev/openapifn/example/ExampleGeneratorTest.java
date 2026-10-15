@@ -58,7 +58,7 @@ class ExampleGeneratorTest {
               discriminator: {propertyName: type}
             NoDiscriminator: {oneOf: [{type: integer, minimum: 2}]}
             Circle: {type: object, required: [type, r], properties: {type: {type: string}, r: {type: number}}}
-            Square: {type: object, required: [type], properties: {type: {type: string}}}
+            Square: {type: object, required: [type], properties: {type: {type: string}}, additionalProperties: false}
             Items: {type: array}
             Short: {type: string, maxLength: 3}
             Pair: {type: array, items: {type: boolean}, minItems: 2}
