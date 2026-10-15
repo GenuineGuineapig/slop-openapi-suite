@@ -32,6 +32,7 @@ class FormEncodingTest {
                             pipe: {type: array, items: {type: string}}
                             raw: {type: array, items: {type: integer}}
                             json: {type: object}
+                            points: {type: array, items: {type: object, properties: {x: {type: integer}}}}
                         encoding:
                           tags: {explode: false}
                           meta: {style: deepObject}
@@ -58,5 +59,20 @@ class FormEncodingTest {
         var validator = dev.openapifn.validation.OpenApiValidator.of(API);
         assertThat(validator.validateRequest(HttpRequest.of("POST", "/forms").withBody("application/x-www-form-urlencoded", "meta%5Ba%5D=x"))
             .report().errors()).extracting(issue -> issue.key() + "@" + issue.location()).containsExactly("request.body.schema.type@body/meta/a");
+    }
+
+    @Test
+    void objectsAreJsonByDefault() {
+        var mediaType = API.operations().getFirst().operation().requestBody().orElseThrow().content().get("application/x-www-form-urlencoded");
+        var parser = new BodyParser(new SchemaShapes(API.schemas()));
+        var form = ContentType.parse("application/x-www-form-urlencoded").orElseThrow();
+        // Repeated items, or one JSON array.
+        assertThat(parser.parse("points=%7B%22x%22%3A1%7D&points=%7B%22x%22%3A2%7D".getBytes(StandardCharsets.UTF_8), form, mediaType).toOptional())
+            .contains(json("{\"points\":[{\"x\":1},{\"x\":2}]}"));
+        assertThat(parser.parse("points=%5B%7B%22x%22%3A1%7D%5D".getBytes(StandardCharsets.UTF_8), form, mediaType).toOptional())
+            .contains(json("{\"points\":[{\"x\":1}]}"));
+        assertThat(parser.parse("points=%7B%22x%22%3A1%7D".getBytes(StandardCharsets.UTF_8), form, mediaType).toOptional())
+            .contains(json("{\"points\":[{\"x\":1}]}"));
+        assertThat(BodyWriter.form(json("{\"name\":\"Zoë ~ x*y\"}"))).isEqualTo("name=Zo%C3%AB+%7E+x*y");
     }
 }

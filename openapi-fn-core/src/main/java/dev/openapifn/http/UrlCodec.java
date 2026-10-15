@@ -58,6 +58,27 @@ public final class UrlCodec {
         return out.toString();
     }
 
+    /**
+     * Encodes for {@code application/x-www-form-urlencoded} as the WHATWG URL standard does: ASCII
+     * letters, digits and {@code *-._} stay, a space becomes {@code +}, everything else is
+     * percent-encoded (unlike RFC 3986 query values, where {@code ~} stays and a space is {@code %20}).
+     */
+    public static String encodeForm(String text) {
+        var out = new StringBuilder(text.length());
+        for (byte b : text.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 0xff;
+            if (c == ' ') {
+                out.append('+');
+            } else if (c < 0x80 && (Character.isLetterOrDigit(c) || "*-._".indexOf(c) >= 0)) {
+                out.append((char) c);
+            } else {
+                out.append('%').append(Character.toUpperCase(Character.forDigit(c >> 4, 16)))
+                    .append(Character.toUpperCase(Character.forDigit(c & 0xf, 16)));
+            }
+        }
+        return out.toString();
+    }
+
     /** Splits a query string ({@code a=1&b=2}) into decoded name/value pairs; {@code +} is a space. */
     public static List<Map.Entry<String, String>> parseQuery(String query) {
         var pairs = new ArrayList<Map.Entry<String, String>>();

@@ -112,7 +112,7 @@ class ClientTest {
         var setup = setup(RestClient.builder());
         setup.server().expect(requestTo("https://api.example.com/v1/json")).andExpect(header("Content-Type", "application/json"))
             .andExpect(content().string("{\"a\":1}")).andRespond(withSuccess());
-        setup.server().expect(requestTo("https://api.example.com/v1/form")).andExpect(content().string("a=1&b=x%20y")).andRespond(withSuccess());
+        setup.server().expect(requestTo("https://api.example.com/v1/form")).andExpect(content().string("a=1&b=x+y")).andRespond(withSuccess());
         setup.server().expect(requestTo("https://api.example.com/v1/file")).andExpect(header("Content-Type", "image/png"))
             .andExpect(content().bytes(new byte[] {7})).andRespond(withSuccess());
         setup.server().expect(requestTo("https://api.example.com/v1/raw")).andExpect(content().bytes(new byte[] {8})).andRespond(withSuccess());

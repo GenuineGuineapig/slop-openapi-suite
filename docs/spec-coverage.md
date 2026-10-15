@@ -23,6 +23,7 @@ checked against material openapi-fn did not write:
 | The [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite), drafts 4, 6, 7, 2019-09 and 2020-12 (`JsonSchemaTestSuiteTest`) | All 8888 cases pass, required and optional, none skipped |
 | The OpenAPI Initiative's schema tests: 3.1 and 3.2 `pass` and `fail` descriptions, 3.0 examples (`OpenApiConformanceSuiteTest`) | `pass` descriptions load without errors, `fail` descriptions are rejected |
 | The OpenAPI Initiative's JSON Schemas for 2.0, 3.0, 3.1 and 3.2 as an oracle (`OfficialSchemaTest`) | Every one of those descriptions is judged by the official schema as openapi-fn judges it; the samples' descriptions (Train Travel, Scalar Galaxy, Redocly Museum, a petstore) and the fixtures are valid for both; Swagger 2.0 descriptions are converted to descriptions the official 3.0 schema accepts |
+| The normative examples in the specification texts 3.0.4, 3.1.1, 3.1.2 and 3.2.0 (`SpecificationExamplesTest`, reading `oas-spec/*.md`) | Every cell of each Style Examples table, every Parameter Object example of 3.2.0 (with its `dataValue` and `serializedValue`, for every location, style and media type) and the form request body examples serialize as shown, and a request carrying the serialized form is valid and parses back to the data |
 | The samples (`samples/`), built on third-party descriptions | Generated controllers, clients and tests work end to end on each, for Spring MVC and WebFlux |
 
 ## Documents and references

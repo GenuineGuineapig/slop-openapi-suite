@@ -104,8 +104,8 @@ public final class BodyWriter {
                 return;
             }
             var values = member instanceof JsonArray array ? array.values() : List.of(member);
-            values.forEach(item -> pairs.add(UrlCodec.encode(name, "") + "=" + UrlCodec.encode(
-                item instanceof JsonObject || item instanceof JsonArray ? JsonWriter.compact(item) : ParameterSerializer.text(item), "")));
+            values.forEach(item -> pairs.add(UrlCodec.encodeForm(name) + "=" + UrlCodec.encodeForm(
+                item instanceof JsonObject || item instanceof JsonArray ? JsonWriter.compact(item) : ParameterSerializer.text(item))));
         });
         return String.join("&", pairs);
     }

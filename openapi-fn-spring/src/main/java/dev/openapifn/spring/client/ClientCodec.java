@@ -64,7 +64,7 @@ public final class ClientCodec {
         for (var param : call.parameters()) {
             switch (param.spec().in()) {
                 case QUERY -> query.addAll(ParameterSerializer.query(param.spec(), toJson(param.value())));
-                case QUERYSTRING -> querystring = param.value() instanceof String text ? text : BodyWriter.form(toJson(param.value()));
+                case QUERYSTRING -> querystring = ParameterSerializer.querystring(param.spec(), toJson(param.value()));
                 default -> {
                 }
             }

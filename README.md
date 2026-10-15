@@ -395,9 +395,11 @@ because you implement interfaces rather than edit generated files.
 
 Besides its own tests, openapi-fn is checked against material it did not write: every case of the
 official JSON Schema Test Suite (required and optional, none skipped); the OpenAPI Initiative's
-schema tests for 3.0, 3.1 and 3.2; and the OpenAPI Initiative's JSON Schemas for 2.0 to 3.2, used as
-an oracle that must judge every known description (the OAI's cases, the samples, the fixtures, and
-what Swagger 2.0 descriptions are converted to) as openapi-fn does. See
+schema tests for 3.0, 3.1 and 3.2; the OpenAPI Initiative's JSON Schemas for 2.0 to 3.2, used as an
+oracle that must judge every known description (the OAI's cases, the samples, the fixtures, and
+what Swagger 2.0 descriptions are converted to) as openapi-fn does; and the normative examples of
+the specification texts (parameter styles, parameter and form body examples), read from the texts
+themselves, which must serialize as shown and validate and parse back at runtime. See
 [docs/spec-coverage.md](docs/spec-coverage.md#how-this-is-verified).
 
 ## Modules

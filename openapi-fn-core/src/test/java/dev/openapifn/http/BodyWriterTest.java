@@ -98,7 +98,7 @@ class BodyWriterTest {
             .isEqualTo("42");
         var form = writer.write(json("{\"a\":\"x y\",\"b\":[1,2],\"c\":{\"d\":1}}"), ContentType.parse("application/x-www-form-urlencoded").orElseThrow(),
             Optional.empty());
-        assertThat(new String(form, StandardCharsets.UTF_8)).isEqualTo("a=x%20y&b=1&b=2&c=%7B%22d%22%3A1%7D");
+        assertThat(new String(form, StandardCharsets.UTF_8)).isEqualTo("a=x+y&b=1&b=2&c=%7B%22d%22%3A1%7D");
         assertThat(BodyWriter.form(json("1"))).isEmpty();
         assertThat(BodyWriter.form(json("{\"m\":[[1]]}"))).isEqualTo("m=%5B1%5D");
         var events = writer.write(json("[{\"event\":\"e\",\"data\":\"line1\\nline2\",\"id\":3},\"x\"]"), ContentType.parse("text/event-stream").orElseThrow(),

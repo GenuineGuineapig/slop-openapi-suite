@@ -14,7 +14,7 @@ import java.util.Optional;
  * @param description description
  * @param required whether the parameter is required (always true for path parameters)
  * @param deprecated whether the parameter is deprecated
- * @param allowEmptyValue whether an empty query value is allowed
+ * @param allowEmptyValue whether an empty query value stands for the parameter not being used
  * @param style serialization style
  * @param explode whether arrays and objects are exploded
  * @param allowReserved whether reserved characters are allowed unencoded

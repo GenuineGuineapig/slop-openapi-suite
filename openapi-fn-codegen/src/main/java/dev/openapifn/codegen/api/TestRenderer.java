@@ -362,13 +362,11 @@ public final class TestRenderer {
         for (var entry : values.entrySet()) {
             var parameter = entry.getKey();
             var spec = ParameterSerializer.Spec.of(parameter);
-            var value = parameter.content().isEmpty() ? entry.getValue() : dev.openapifn.json.JsonString.of(entry.getValue().toJson());
+            var value = entry.getValue();
             switch (parameter.in()) {
                 case PATH -> template = template.replace("{" + parameter.name() + "}", ParameterSerializer.path(spec, value));
                 case QUERY -> query.addAll(ParameterSerializer.query(spec, value));
-                case QUERYSTRING -> rawQuery = parameter.content().keySet().stream().findFirst().flatMap(ContentType::parse)
-                    .filter(t -> t.essence().equals("application/x-www-form-urlencoded")).isPresent()
-                    ? BodyWriter.form(entry.getValue()) : dev.openapifn.http.UrlCodec.encode(entry.getValue().toJson(), "");
+                case QUERYSTRING -> rawQuery = ParameterSerializer.querystring(spec, value);
                 case HEADER -> headers.put(parameter.name(), ParameterSerializer.header(spec, value));
                 default -> cookies.addAll(ParameterSerializer.cookie(spec, value)); // COOKIE
             }

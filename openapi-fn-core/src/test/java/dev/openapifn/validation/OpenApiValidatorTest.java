@@ -145,10 +145,31 @@ class OpenApiValidatorTest {
     }
 
     @Test
+    void emptyValuesStandForUnusedParametersWhereAllowed() {
+        var api = new OpenApiLoader(dev.openapifn.load.ResourceLoaders.inMemory(java.util.Map.of())).parse(java.net.URI.create("mem:/a.yaml"), """
+            openapi: 3.2.0
+            info: {title: t, version: v}
+            paths:
+              /x:
+                get:
+                  parameters:
+                    - {name: page, in: query, allowEmptyValue: true, schema: {type: integer}}
+                    - {name: size, in: query, required: true, allowEmptyValue: true, schema: {type: integer}}
+                  responses: {'204': {description: ok}}
+            """).orElseThrow(d -> new AssertionError(d.toString()));
+        var validator = OpenApiValidator.of(api);
+        var unused = validator.validateRequest(HttpRequest.of("GET", "/x?page=&size=3"));
+        assertThat(issues(unused.report())).isEmpty();
+        assertThat(unused.parameters()).doesNotContainKey("query.page").containsKey("query.size");
+        assertThat(issues(validator.validateRequest(HttpRequest.of("GET", "/x?page=2&size=")).report())).containsExactly("request.parameter.query.missing@query.size");
+    }
+
+    @Test
     void parameters() {
         assertThat(request(listPets("?limit=500"))).containsExactly("request.parameter.query.schema.maximum@query.limit");
         assertThat(request(listPets("?limit=abc"))).containsExactly("request.parameter.query.schema.type@query.limit");
-        assertThat(request(listPets("?limit="))).containsExactly("request.parameter.query.emptyValue@query.limit");
+        // An empty value is the empty string, which the schema judges (allowEmptyValue would make it stand for an unused parameter).
+        assertThat(request(listPets("?limit="))).containsExactly("request.parameter.query.schema.type@query.limit");
         assertThat(request(listPets("?q="))).isEmpty();
         assertThat(request(listPets("?tags=a,b"))).isEmpty();
         assertThat(VALIDATOR.validateRequest(listPets("?tags=a,b&filter%5Bkind%5D=cat")).parameters())

@@ -157,13 +157,22 @@ public final class BodyParser {
      */
     private JsonValue form(String text, Optional<Schema> schema, Map<String, Encoding> encodings) {
         var members = new LinkedHashMap<>(parameters.formObject(text, schema).members());
-        for (var pair : UrlCodec.parseQuery(text)) {
-            var json = Optional.ofNullable(encodings.get(pair.getKey())).flatMap(Encoding::contentType).flatMap(ContentType::parse)
-                .filter(ContentType::isJson).isPresent();
+        var values = new LinkedHashMap<String, List<String>>();
+        UrlCodec.parseQuery(text).forEach(pair -> values.computeIfAbsent(pair.getKey(), key -> new ArrayList<>()).add(pair.getValue()));
+        values.forEach((name, texts) -> {
+            var property = schema.flatMap(s -> shapes.property(s, name));
+            var array = property.map(shapes::shape).filter(shape -> shape == Shape.ARRAY).isPresent();
+            // The content type of a property: its encoding's, else application/json for objects (and arrays of them).
+            var declared = Optional.ofNullable(encodings.get(name)).flatMap(Encoding::contentType).flatMap(ContentType::parse);
+            var item = array ? property.flatMap(shapes::items) : property;
+            var json = declared.map(ContentType::isJson).orElseGet(() -> item.map(shapes::shape).filter(shape -> shape == Shape.OBJECT).isPresent());
             if (json) {
-                members.put(pair.getKey(), Json.parse(pair.getValue()).toOptional().orElse(JsonString.of(pair.getValue())));
+                var parsed = texts.stream().map(value -> Json.parse(value).toOptional().orElse(JsonString.of(value))).toList();
+                // An array is its repeated items, or one value: the JSON its encoding asks for, or a JSON array.
+                var whole = parsed.size() == 1 && (declared.isPresent() || parsed.getFirst() instanceof JsonArray);
+                members.put(name, array && !whole ? new JsonArray(parsed) : parsed.getFirst());
             }
-        }
+        });
         var sources = ParameterParser.Sources.ofQuery(text);
         var names = schema.map(shapes::propertyNames).orElse(java.util.Set.of());
         encodings.forEach((name, encoding) -> {

@@ -668,10 +668,15 @@ public final class ApiRenderer {
 
     /** A parameter spec as a constructor call (with the Swagger 2.0 collection format's delimiter, if any). */
     private static String spec(dev.openapifn.model.Parameter parameter, Imports imports) {
+        var delimiter = CollectionFormat.delimiter(parameter.extensions());
+        var contentType = parameter.content().keySet().stream().findFirst();
+        var optional = imports.ref(OPTIONAL);
+        // A parameter described by content is serialized in its media type.
+        var tail = contentType.map(type -> ", " + optional + ".empty(), " + optional + ".of(" + Names.literal(type) + ")")
+            .orElseGet(() -> delimiter.map(d -> ", " + optional + ".of(" + Names.literal(d) + ")").orElse(""));
         return "new " + imports.ref(PARAMETER_SPEC) + "(" + Names.literal(parameter.name()) + ", " + imports.ref(PARAMETER_LOCATION) + "."
             + parameter.in().name() + ", " + imports.ref(PARAMETER_STYLE) + "." + parameter.style().name() + ", " + parameter.explode() + ", "
-            + parameter.allowReserved() + CollectionFormat.delimiter(parameter.extensions())
-                .map(delimiter -> ", " + imports.ref(OPTIONAL) + ".of(" + Names.literal(delimiter) + ")").orElse("") + ")";
+            + parameter.allowReserved() + tail + ")";
     }
 
     /** The record whose components are sent as {@code multipart/form-data} parts, if the body is one; other bodies are encoded from their JSON. */

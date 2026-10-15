@@ -397,7 +397,9 @@ public final class OpenApiValidator {
                 issues.add(prefix + ".invalid", parsed.failure().orElseThrow(), location);
                 continue;
             }
-            var value = parsed.toOptional().orElseThrow();
+            // With allowEmptyValue, an empty query value stands for a parameter that is not used.
+            var value = parsed.toOptional().orElseThrow()
+                .filter(v -> !(parameter.in() == ParameterLocation.QUERY && parameter.allowEmptyValue() && v.equals(JsonString.of(""))));
             if (value.isEmpty()) {
                 if (parameter.required()) {
                     issues.add(prefix + ".missing", "required " + parameter.in().value() + " parameter '" + parameter.name() + "' is missing", location);
@@ -406,10 +408,6 @@ public final class OpenApiValidator {
             }
             values.put(location, value.get());
             claimQuery(parameter, value.get(), claimed);
-            if (parameter.in() == ParameterLocation.QUERY && !parameter.allowEmptyValue() && value.get().equals(JsonString.of(""))) {
-                issues.add(prefix + ".emptyValue", "query parameter '" + parameter.name() + "' must not be empty", location);
-                continue;
-            }
             parameter.effectiveSchema().ifPresent(schema -> issues.schema(prefix + ".schema", location, schemas.validate(schema, value.get())));
         }
         sources.query().stream().map(Map.Entry::getKey).filter(name -> !claimed.contains(name)).distinct()
