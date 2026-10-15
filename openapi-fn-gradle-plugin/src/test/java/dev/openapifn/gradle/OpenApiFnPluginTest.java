@@ -191,16 +191,30 @@ class OpenApiFnPluginTest {
             write("remote.yaml", API.replace("schemas/pet.yaml", remote));
             var project = project(true);
             var task = register(project, "pets", "remote.yaml");
+            var cache = task.getRemoteCache().get().getAsFile().toPath();
+            assertThat(cache).startsWithRaw(project.getGradle().getGradleUserHomeDir().toPath());
+            assertThat(task.getRemoteMaxAge().get()).isEqualTo(java.time.Duration.ofHours(24));
+            assertThat(task.getOffline().get()).isFalse();
+            var day = GenerateOpenApi.loader(cache, java.time.Duration.ofHours(24), false);
             var fingerprint = task.getRemoteFingerprint().get();
-            assertThat(fingerprint).isNotEmpty().isEqualTo(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml")));
+            assertThat(fingerprint).isNotEmpty().isEqualTo(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), day));
             body.set("{type: object, properties: {name: {type: string}, tag: {type: string}}}");
-            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"))).isNotEqualTo(fingerprint);
+            // The cached copy is used for a day; refreshing fetches the change.
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), day)).isEqualTo(fingerprint);
+            var refreshed = GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, java.time.Duration.ZERO, false));
+            assertThat(refreshed).isNotEqualTo(fingerprint);
             task.generate();
             assertThat(task.getResourcesDir().get().getAsFile().toPath().resolve("META-INF/openapi-fn/pets/remote/127.0.0.1_"
                 + server.getAddress().getPort() + "/pet.yaml")).exists();
+            server.stop(0);
+            // Offline builds use the cache, whatever its age.
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("remote.yaml"), GenerateOpenApi.loader(cache, java.time.Duration.ZERO, true)))
+                .isEqualTo(refreshed);
+            project.getGradle().getStartParameter().setRefreshDependencies(true);
+            assertThat(register(project, "refreshed", "remote.yaml").getRemoteMaxAge().get()).isEqualTo(java.time.Duration.ZERO);
             write("local.yaml", API.replace("$ref: 'schemas/pet.yaml'", "type: object"));
-            assertThat(GenerateOpenApi.fingerprint(dir.resolve("local.yaml"))).isEmpty();
-            assertThat(GenerateOpenApi.fingerprint(dir.resolve("missing.yaml"))).isEmpty();
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("local.yaml"), day)).isEmpty();
+            assertThat(GenerateOpenApi.fingerprint(dir.resolve("missing.yaml"), day)).isEmpty();
         } finally {
             server.stop(0);
         }

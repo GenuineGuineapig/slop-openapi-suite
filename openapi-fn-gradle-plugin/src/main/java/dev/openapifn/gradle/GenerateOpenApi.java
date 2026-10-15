@@ -4,6 +4,7 @@ import dev.openapifn.codegen.GeneratedFile;
 import dev.openapifn.codegen.Generator;
 import dev.openapifn.codegen.GeneratorConfig;
 import dev.openapifn.load.Diagnostic;
+import dev.openapifn.load.ResourceLoader;
 import dev.openapifn.load.ResourceLoaders;
 import dev.openapifn.parse.OpenApiLoader;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
@@ -31,9 +33,10 @@ import org.gradle.api.tasks.TaskAction;
 
 /**
  * Generates sources, test sources and resources from one API description. Remote references are
- * fetched and bundled. Their content is an input through {@link #getRemoteFingerprint()}: the
- * remote documents are fetched to check for changes, and the task is up to date (or taken from the
- * build cache) while they are unchanged.
+ * fetched and bundled. They are cached ({@link #getRemoteCache()}) and fetched again once they are
+ * older than {@link #getRemoteMaxAge()}; their content is an input through
+ * {@link #getRemoteFingerprint()}, so the task is up to date (or taken from the build cache) while
+ * they are unchanged.
  */
 @CacheableTask
 public abstract class GenerateOpenApi extends DefaultTask {
@@ -57,6 +60,18 @@ public abstract class GenerateOpenApi extends DefaultTask {
      */
     @Input
     public abstract Property<String> getRemoteFingerprint();
+
+    /** Where remote documents are cached, shared by builds (the Gradle user home's {@code caches/openapi-fn/remote}). */
+    @Internal
+    public abstract DirectoryProperty getRemoteCache();
+
+    /** How long cached remote documents are used before they are fetched again. */
+    @Internal
+    public abstract Property<Duration> getRemoteMaxAge();
+
+    /** Whether only cached remote documents are used (Gradle's {@code --offline}). */
+    @Internal
+    public abstract Property<Boolean> getOffline();
 
     @Input
     public abstract Property<String> getPackageName();
@@ -89,13 +104,18 @@ public abstract class GenerateOpenApi extends DefaultTask {
     @Inject
     protected abstract FileSystemOperations getFileSystemOperations();
 
+    /** Loads descriptions with remote documents cached in {@code cache}. */
+    public static ResourceLoader loader(java.nio.file.Path cache, Duration maxAge, boolean offline) {
+        return ResourceLoaders.withCachedRemote(Duration.ofSeconds(30), cache, maxAge, offline);
+    }
+
     /**
      * A digest of the remote ({@code http} and {@code https}) documents of the description at
-     * {@code spec}, fetched now; empty when it references none, or cannot be loaded (generation then
-     * reports why).
+     * {@code spec}, loaded with {@code loader}; empty when it references none, or cannot be loaded
+     * (generation then reports why).
      */
-    public static String fingerprint(java.nio.file.Path spec) {
-        var loaded = new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(spec);
+    public static String fingerprint(java.nio.file.Path spec, ResourceLoader loader) {
+        var loaded = new OpenApiLoader(loader).load(spec);
         if (loaded.isErr()) {
             return "";
         }
@@ -117,7 +137,7 @@ public abstract class GenerateOpenApi extends DefaultTask {
     @TaskAction
     public void generate() throws IOException {
         var location = getSpec().get().getAsFile().toPath();
-        var loaded = new OpenApiLoader(ResourceLoaders.withRemote(Duration.ofSeconds(30))).load(location);
+        var loaded = new OpenApiLoader(loader(getRemoteCache().get().getAsFile().toPath(), getRemoteMaxAge().get(), getOffline().get())).load(location);
         var api = loaded.toOptional().orElseThrow(() -> new GradleException("Invalid OpenAPI description " + location + ":\n"
             + describe(loaded.failure().orElseThrow())));
         api.warnings().forEach(warning -> getLogger().warn("openapi-fn: {}", warning));

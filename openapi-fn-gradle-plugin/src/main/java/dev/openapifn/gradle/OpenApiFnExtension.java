@@ -1,5 +1,6 @@
 package dev.openapifn.gradle;
 
+import java.time.Duration;
 import javax.inject.Inject;
 import org.gradle.api.Action;
 import org.gradle.api.NamedDomainObjectContainer;
@@ -37,4 +38,11 @@ public abstract class OpenApiFnExtension {
      * dependencies are added.
      */
     public abstract Property<Boolean> getReactive();
+
+    /**
+     * How long remote documents descriptions reference are used from the cache in the Gradle user
+     * home before they are fetched again (default 24 hours). {@code --refresh-dependencies} fetches
+     * them now; {@code --offline} uses the cached copies, whatever their age.
+     */
+    public abstract Property<Duration> getRemoteMaxAge();
 }

@@ -51,7 +51,11 @@ Until the artifacts are published, use this repository as a composite build, as 
 (`pluginManagement { includeBuild("…") }` and `includeBuild("…")` in `settings.gradle.kts`).
 
 The build generates everything into `build/generated/openapi-fn/petstore/` and compiles it with
-your code. The plugin adds the runtime (`openapi-fn-spring`) and the test support
+your code. Remote documents the description references (`$ref: 'https://…'`) are bundled with the
+generated code, so nothing is fetched at runtime. At build time they are cached in the Gradle user
+home and fetched again once a day (`remoteMaxAge = Duration.ofHours(…)` in `openapiFn`), or now with
+`--refresh-dependencies`; `--offline` builds use the cached copies. The task is up to date while
+the documents are unchanged. The plugin adds the runtime (`openapi-fn-spring`) and the test support
 (`openapi-fn-spring-test`, `spring-boot-starter-webmvc-test`). The Gradle daemon needs Java 21;
 add `gradle/gradle-daemon-jvm.properties` with `toolchainVersion=21`.
 
@@ -393,8 +397,6 @@ Every module is built with 100% line, branch, instruction and method coverage, e
 
 ## Limitations
 
-* **Remote references are fetched on every build.** The Gradle task fetches them to see whether
-  they changed; it is up to date (or taken from the build cache) while they did not.
 * **Different callbacks on one URL with the same method cannot be told apart.** The operations of
   one webhook, or of one callback URL, share a receiver path and are told apart by method; two
   callbacks of different names whose URL expressions and methods coincide get a receiver each.

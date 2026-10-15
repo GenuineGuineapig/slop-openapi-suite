@@ -1,6 +1,8 @@
 package dev.openapifn.gradle;
 
 import dev.openapifn.codegen.java.Names;
+import java.io.File;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.ResourceBundle;
@@ -28,6 +30,7 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
         var extension = project.getExtensions().create(EXTENSION, OpenApiFnExtension.class);
         extension.getAddDependencies().convention(true);
         extension.getReactive().convention(false);
+        extension.getRemoteMaxAge().convention(Duration.ofHours(24));
         var all = project.getTasks().register(GENERATE_ALL, task -> {
             task.setGroup(GROUP);
             task.setDescription("Generates code from all OpenAPI descriptions");
@@ -37,7 +40,7 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
             spec.getClient().convention(true);
             spec.getTests().convention(true);
             spec.getReactive().convention(extension.getReactive());
-            var task = project.getTasks().register(taskName(spec), GenerateOpenApi.class, generate -> configure(project, generate, spec));
+            var task = project.getTasks().register(taskName(spec), GenerateOpenApi.class, generate -> configure(project, extension, generate, spec));
             all.configure(generateAll -> generateAll.dependsOn(task));
             project.getPluginManager().withPlugin("java", java -> addToSourceSets(project, task));
         });
@@ -49,13 +52,18 @@ public final class OpenApiFnPlugin implements Plugin<Project> {
         return "generate" + Names.pascal(spec.getName()) + "OpenApi";
     }
 
-    private static void configure(Project project, GenerateOpenApi task, OpenApiSpec spec) {
+    private static void configure(Project project, OpenApiFnExtension extension, GenerateOpenApi task, OpenApiSpec spec) {
         task.setGroup(GROUP);
         task.setDescription("Generates code from the OpenAPI description '" + spec.getName() + "'");
         task.getSpec().set(spec.getSpec());
         task.getReferences().from(spec.getSpec().map(file -> file.getAsFile().getParentFile()));
         task.getApiName().set(spec.getName());
-        task.getRemoteFingerprint().set(spec.getSpec().map(file -> GenerateOpenApi.fingerprint(file.getAsFile().toPath())));
+        var start = project.getGradle().getStartParameter();
+        task.getRemoteCache().set(new File(project.getGradle().getGradleUserHomeDir(), "caches/openapi-fn/remote"));
+        task.getRemoteMaxAge().set(extension.getRemoteMaxAge().map(age -> start.isRefreshDependencies() ? Duration.ZERO : age));
+        task.getOffline().set(start.isOffline());
+        task.getRemoteFingerprint().set(spec.getSpec().zip(task.getRemoteMaxAge(), (file, age) -> GenerateOpenApi.fingerprint(file.getAsFile().toPath(),
+            GenerateOpenApi.loader(task.getRemoteCache().get().getAsFile().toPath(), age, start.isOffline()))));
         task.getPackageName().set(spec.getPackageName());
         task.getBasePath().set(spec.getBasePath());
         task.getServer().set(spec.getServer());

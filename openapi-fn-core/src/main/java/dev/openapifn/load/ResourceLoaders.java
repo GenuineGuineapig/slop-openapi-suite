@@ -9,9 +9,12 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** Standard {@link ResourceLoader}s. */
 public final class ResourceLoaders {
@@ -31,6 +34,52 @@ public final class ResourceLoaders {
     public static ResourceLoader withRemote(Duration timeout) {
         var remote = http(HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(timeout).build(), timeout);
         return withSchemes(defaults(), Map.of("http", remote, "https", remote));
+    }
+
+    /**
+     * {@link #withRemote} whose remote documents are cached in {@code directory} (see {@link #cached}).
+     *
+     * @param maxAge how long a fetched document is used before it is fetched again
+     * @param offline whether to use cached documents only, whatever their age
+     */
+    public static ResourceLoader withCachedRemote(Duration timeout, Path directory, Duration maxAge, boolean offline) {
+        var remote = cached(http(HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(timeout).build(), timeout),
+            directory, maxAge, offline, Clock.systemUTC());
+        return withSchemes(defaults(), Map.of("http", remote, "https", remote));
+    }
+
+    /**
+     * Caches what {@code remote} loads in {@code directory}, which several builds may share: a
+     * document is fetched once and then read from the cache while it is younger than
+     * {@code maxAge}. Offline, cached documents are used whatever their age, and others cannot be
+     * loaded. A document that cannot be fetched again is read from the cache, however old.
+     */
+    public static ResourceLoader cached(ResourceLoader remote, Path directory, Duration maxAge, boolean offline, Clock clock) {
+        return uri -> {
+            var file = directory.resolve(UUID.nameUUIDFromBytes(uri.toString().getBytes(StandardCharsets.UTF_8)) + ".cached");
+            var cached = Result.attempt(() -> Files.readString(file, StandardCharsets.UTF_8), e -> e).toOptional();
+            var fresh = Result.attempt(() -> Files.getLastModifiedTime(file).toInstant(), e -> e).toOptional()
+                .filter(fetched -> fetched.plus(maxAge).isAfter(clock.instant())).isPresent();
+            if (cached.isPresent() && (offline || fresh)) {
+                return Result.ok(cached.get());
+            }
+            if (offline) {
+                return Result.err("Cannot fetch " + uri + " offline: it is not cached in " + directory);
+            }
+            var fetched = remote.load(uri);
+            fetched.toOptional().ifPresent(text -> store(file, text));
+            return fetched.isOk() || cached.isEmpty() ? fetched : Result.ok(cached.get());
+        };
+    }
+
+    /** Writes a cached document atomically, so that concurrent builds read whole documents; caching is best effort. */
+    private static void store(Path file, String text) {
+        Result.attempt(() -> {
+            Files.createDirectories(file.getParent());
+            var temporary = Files.createTempFile(file.getParent(), "document", ".tmp");
+            Files.writeString(temporary, text, StandardCharsets.UTF_8);
+            return Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        }, e -> e);
     }
 
     /**
