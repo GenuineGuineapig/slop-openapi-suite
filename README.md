@@ -24,52 +24,81 @@ required and optional test of the official JSON Schema test suite passes. See
 
 ## Quick start
 
-```kotlin
-// build.gradle.kts
-plugins {
-    java
-    id("org.springframework.boot") version "4.1.1"
-    id("dev.openapifn") version "0.1.0-SNAPSHOT"
-}
+```xml
+<!-- pom.xml of a Spring Boot 4 application -->
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-webmvc</artifactId>
+    </dependency>
+    <!-- The runtime of the generated code (it brings the validator, openapi-fn-validator). -->
+    <dependency>
+        <groupId>dev.openapifn</groupId>
+        <artifactId>openapi-fn-spring</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </dependency>
+    <!-- The generated controller tests. -->
+    <dependency>
+        <groupId>dev.openapifn</groupId>
+        <artifactId>openapi-fn-spring-test</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-webmvc-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
 
-dependencies {
-    implementation(platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES))
-    implementation("org.springframework.boot:spring-boot-starter-webmvc")
-}
-
-openapiFn {
-    specs {
-        register("petstore") {
-            spec = file("src/main/openapi/petstore.yaml")   // documents it references are found relative to it
-            packageName = "com.example.petstore"            // models in .model, API types in .api
-        }
-    }
-}
+<build>
+    <plugins>
+        <plugin>
+            <groupId>dev.openapifn</groupId>
+            <artifactId>openapi-fn-maven-plugin</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+            <executions>
+                <!-- One execution per description; its id names the API. -->
+                <execution>
+                    <id>petstore</id>
+                    <goals>
+                        <goal>generate</goal>
+                    </goals>
+                    <configuration>
+                        <!-- Documents it references are found relative to it. -->
+                        <spec>src/main/openapi/petstore.yaml</spec>
+                        <!-- Models in .model, API types in .api. -->
+                        <packageName>com.example.petstore</packageName>
+                    </configuration>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
 ```
 
-Until the artifacts are on Maven Central, publish them to your local Maven repository with
-`./gradlew publishToMavenLocal` and add `mavenLocal()` to the plugin repositories
-(`pluginManagement { repositories { … } }` in `settings.gradle.kts`) and to the project's
-repositories; `tools/consumer.sh <sample>` builds a sample that way. Or use this repository as a
-composite build, as the samples do (`pluginManagement { includeBuild("…") }` and `includeBuild("…")`
-in `settings.gradle.kts`).
+Until the artifacts are on Maven Central, install them to your local Maven repository with
+`./mvnw install -DskipTests` in this repository; `tools/consumer.sh <sample>` builds a sample that
+way, as a project outside the repository.
 
-The build generates everything into `build/generated/openapi-fn/petstore/` and compiles it with
-your code. Remote documents the description references (`$ref: 'https://…'`) are bundled with the
-generated code, so nothing is fetched at runtime. At build time they are cached in the Gradle user
-home and fetched again once a day (`remoteMaxAge = Duration.ofHours(…)` in `openapiFn`), or now with
-`--refresh-dependencies`; `--offline` builds use the cached copies. The task is up to date while
-the documents are unchanged. The plugin adds the runtime (`openapi-fn-spring`, which brings the
-validator, `openapi-fn-validator`) and the test support (`openapi-fn-spring-test`,
-`spring-boot-starter-webmvc-test`). The generator (`openapi-fn-generator`) runs in the build only:
-it is on the plugin's classpath, never on the application's. The Gradle daemon needs Java 21;
-add `gradle/gradle-daemon-jvm.properties` with `toolchainVersion=21`.
+The `generate` goal runs in the `generate-sources` phase. It generates sources into
+`target/generated-sources/openapi-fn/petstore/`, controller tests into
+`target/generated-test-sources/openapi-fn/petstore/` and the bundled description into
+`target/generated-resources/openapi-fn/petstore/`, and adds them to the build. Remote documents the
+description references (`$ref: 'https://…'`) are bundled with the generated code, so nothing is
+fetched at runtime. At build time they are cached in the local Maven repository (under
+`.cache/openapi-fn`) and fetched again once a day (`<remoteMaxAge>PT24H</remoteMaxAge>`, an ISO-8601
+duration), or now with `-Dopenapi-fn.refresh`; offline builds (`-o`) use the cached copies.
+Generation is skipped while its inputs are unchanged: the documents the description loads, the
+options and the plugin version. The generator (`openapi-fn-generator`) runs in the build only: it
+is the plugin's dependency, never the application's. The plugin needs Maven 3.9 and Java 21.
 
 For a **Spring WebFlux** application, depend on `spring-boot-starter-webflux` (and
-`spring-boot-starter-webclient` for clients) and set `reactive = true` in `openapiFn` (or per
-spec). The interfaces then return `Mono`s, sequential bodies are `Flux`es, clients use `WebClient`,
-the generated tests are `@WebFluxTest`s with `WebTestClient`, and the plugin adds
-`openapi-fn-spring-webflux` and `spring-boot-starter-webflux-test` instead:
+`spring-boot-starter-webclient` for clients), `openapi-fn-spring-webflux` instead of
+`openapi-fn-spring` and `spring-boot-starter-webflux-test` instead of
+`spring-boot-starter-webmvc-test`, and set `<reactive>true</reactive>` in the execution's
+configuration. The interfaces then return `Mono`s, sequential bodies are `Flux`es, clients use
+`WebClient` and the generated tests are `@WebFluxTest`s with `WebTestClient`:
 
 ```java
 @Component
@@ -356,16 +385,16 @@ descriptions from strings. Other entry points:
 * `ExampleGenerator` (in `openapi-fn-generator`): valid example values
 * `BodyParser` / `BodyWriter`: every supported media type
 
-## Code generation without Gradle
+## Code generation without Maven
 
 ```bash
-java -jar openapi-fn-generator-0.1.0-SNAPSHOT-cli.jar --spec api.yaml --name petstore --package com.example.petstore --output build/generated/sources
+java -jar openapi-fn-generator-0.1.0-SNAPSHOT-cli.jar --spec api.yaml --name petstore --package com.example.petstore --output generated/sources
 ```
 
-The self-contained jar comes from `./gradlew :openapi-fn-generator:cliJar`. Options:
-`--test-output`, `--resources-output`, `--base-path`, `--no-server`, `--no-client`, `--no-tests`,
-`--reactive`. The Gradle task takes the same settings: `basePath`, `server`, `client`, `tests` and
-`reactive` on each spec.
+The self-contained jar is attached to the generator's build (`openapi-fn-generator/target/`,
+classifier `cli`). Options: `--test-output`, `--resources-output`, `--base-path`, `--no-server`,
+`--no-client`, `--no-tests`, `--reactive`. The Maven plugin takes the same settings: `basePath`,
+`server`, `client`, `tests` and `reactive` in each execution's configuration.
 
 ## Migrating from openapi-generator (spring generator)
 
@@ -437,7 +466,9 @@ check the requests of the tests it generates), during the build only.
 | `openapi-fn-spring-webflux` | at runtime | Spring WebFlux: the reactive runtime of generated controllers, the validation `WebFilter`, `WebClient` client support, auto-configuration |
 | `openapi-fn-spring-test` | in tests | MockMvc matchers and `WebTestClient` assertions |
 | `openapi-fn-generator` | in the build | The code generator, the example values of generated tests, and the CLI |
-| `openapi-fn-gradle-plugin` | in the build | The `dev.openapifn` Gradle plugin |
+| `openapi-fn-maven-plugin` | in the build | The Maven plugin (goal `openapi-fn:generate`) |
 
 Every module is built with 100% line, branch, instruction and method coverage, enforced by
-`./gradlew check`.
+`./mvnw verify` (on Java 21 or later; the wrapper brings Maven). The build also runs
+`openapi-fn-conformance`, which compares validation with other validators, and the samples, built
+with the plugin of the same build.

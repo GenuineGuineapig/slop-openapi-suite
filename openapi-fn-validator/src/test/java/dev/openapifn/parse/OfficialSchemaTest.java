@@ -42,7 +42,9 @@ import org.junit.jupiter.api.TestFactory;
 class OfficialSchemaTest {
 
     private static final Path RESOURCES = resources();
-    private static final Path PROJECT = RESOURCES.resolve("../../../..").normalize();
+    /** The repository: the directory with the build's {@code .mvn}. */
+    private static final Path PROJECT = Stream.iterate(RESOURCES.toAbsolutePath(), dir -> dir != null, Path::getParent)
+        .filter(dir -> Files.isDirectory(dir.resolve(".mvn"))).findFirst().orElseThrow();
     private static final Map<URI, String> SCHEMAS = schemas();
     private static final Map<String, URI> ROOTS = Map.of(
         "2.0", URI.create("http://swagger.io/v2/schema.json"),

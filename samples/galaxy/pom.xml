@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>dev.openapifn.samples</groupId>
+    <artifactId>galaxy</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <name>galaxy</name>
+    <description>openapi-fn sample: Scalar Galaxy</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <openapi-fn.version>0.1.0-SNAPSHOT</openapi-fn.version>
+        <!-- A sample: not installed or deployed. -->
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
+        </dependency>
+        <!-- The runtime of the generated code: request binding, validation, clients. -->
+        <dependency>
+            <groupId>dev.openapifn</groupId>
+            <artifactId>openapi-fn-spring</artifactId>
+            <version>${openapi-fn.version}</version>
+        </dependency>
+
+        <!-- The generated controller tests check exchanges against the description. -->
+        <dependency>
+            <groupId>dev.openapifn</groupId>
+            <artifactId>openapi-fn-spring-test</artifactId>
+            <version>${openapi-fn.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>dev.openapifn</groupId>
+                <artifactId>openapi-fn-maven-plugin</artifactId>
+                <version>${openapi-fn.version}</version>
+                <executions>
+                    <execution>
+                        <id>galaxy</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <spec>src/main/openapi/openapi.yaml</spec>
+                            <packageName>com.example.galaxy</packageName>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-Xlint:all,-processing</arg>
+                        <arg>-Werror</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

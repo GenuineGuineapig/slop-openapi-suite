@@ -1,7 +1,8 @@
 # openapi-fn samples
 
-Each sample is a standalone Spring Boot 4 application built from one OpenAPI description by the
-`dev.openapifn` Gradle plugin. It uses this repository through a composite build. You write no
+Each sample is a standalone Spring Boot 4 application built from one OpenAPI description by
+`openapi-fn-maven-plugin`. The repository's build builds them with its own plugin and libraries
+(`samples/pom.xml` puts them in it); each is a plain Maven project otherwise. You write no
 controllers, request mapping or validation: the build generates them. You implement the generated
 `*Api` interfaces (here with mock data, in each sample's `mock` package).
 
@@ -23,11 +24,13 @@ Every sample has two kinds of tests:
   validates requests and responses in `FAIL` mode, so a mock that breaks the contract fails the
   test.
 
-Run a sample with the repository's wrapper; the Gradle daemon needs Java 21, which
-`gradle/gradle-daemon-jvm.properties` asks for:
+Build all of them with the repository (`./mvnw verify` at its root), or one after installing
+openapi-fn to the local Maven repository; the build needs Java 21, and the repository's wrapper
+brings Maven:
 
 ```bash
-cd samples/galaxy && ./gradlew build
+./mvnw install -DskipTests && ./mvnw -f samples/galaxy/pom.xml verify
 ```
 
-Generated sources are under `build/generated/openapi-fn/<name>/` (`java`, `test-java`, `resources`).
+Generated code is under `target/generated-sources/openapi-fn/<name>/`,
+`target/generated-test-sources/openapi-fn/<name>/` and `target/generated-resources/openapi-fn/<name>/`.

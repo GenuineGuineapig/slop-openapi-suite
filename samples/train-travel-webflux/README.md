@@ -2,7 +2,7 @@
 
 The [Train Travel sample](../train-travel) as a reactive application: the same OpenAPI 3.2
 description (licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/),
-as stated in its `info.license`), generated with `reactive = true` in the `openapiFn` extension.
+as stated in its `info.license`), generated with `<reactive>true</reactive>` in the plugin's configuration.
 
 * The generated `*Api` interfaces return `Mono`s, and bodies of sequential media types are `Flux`es.
   `mock/` implements them without blocking: `MockTrips` emits live trip updates with

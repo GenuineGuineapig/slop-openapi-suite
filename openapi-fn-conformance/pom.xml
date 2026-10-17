@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.openapifn</groupId>
+        <artifactId>openapi-fn-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>openapi-fn-conformance</artifactId>
+    <name>openapi-fn-conformance</name>
+    <description>Tests only, not published: request, response and body validation compared with independent validators (Atlassian's and networknt's)</description>
+
+    <properties>
+        <maven.source.skip>true</maven.source.skip>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.openapifn</groupId>
+            <artifactId>openapi-fn-validator</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The example generator makes the messages to compare. -->
+        <dependency>
+            <groupId>dev.openapifn</groupId>
+            <artifactId>openapi-fn-generator</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The Atlassian validator, which openapi-fn replaces, as an independent judge of requests and responses. -->
+        <dependency>
+            <groupId>com.atlassian.oai</groupId>
+            <artifactId>openapi-request-validator-core</artifactId>
+            <version>3.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- The JSON Schema validator Atlassian builds on, as an independent judge of bodies in the descriptions Atlassian cannot load. -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>2.0.1</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

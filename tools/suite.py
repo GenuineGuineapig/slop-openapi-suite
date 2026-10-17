@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarize JSON-Schema-Test-Suite failures by file (usage: tools/suite.py [filter] [-v])."""
 import sys, collections, xml.etree.ElementTree as ET
-root = ET.parse('openapi-fn-validator/build/test-results/test/TEST-dev.openapifn.schema.JsonSchemaTestSuiteTest.xml').getroot()
+root = ET.parse('openapi-fn-validator/target/surefire-reports/TEST-dev.openapifn.schema.JsonSchemaTestSuiteTest.xml').getroot()
 flt = next((a for a in sys.argv[1:] if not a.startswith('-')), '')
 verbose = '-v' in sys.argv
 counter = collections.Counter()

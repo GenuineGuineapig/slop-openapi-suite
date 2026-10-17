@@ -4,7 +4,7 @@ import glob, sys, xml.etree.ElementTree as ET
 
 modules = sys.argv[1:] or ['*']
 for module in modules:
-    for path in glob.glob(f'{module}/build/reports/jacoco/test/jacocoTestReport.xml'):
+    for path in glob.glob(f'{module}/target/site/jacoco/jacoco.xml'):
         root = ET.parse(path).getroot()
         totals = {c.get('type'): (int(c.get('missed')), int(c.get('covered'))) for c in root.findall('counter')}
         print(path.split('/')[0], {k: f"{v[1]}/{v[0]+v[1]}" for k, v in totals.items()})

@@ -1,49 +1,34 @@
 #!/usr/bin/env bash
-# Builds a sample as a project outside this repository would: openapi-fn is published to the local
-# Maven repository, the sample is copied elsewhere, and its build takes the Gradle plugin and the
-# libraries by version from there, rather than from this repository's projects.
+# Builds a sample as a project outside this repository would: openapi-fn is installed to the local
+# Maven repository, the sample is copied elsewhere, and its build takes the Maven plugin and the
+# libraries by version from there, rather than from this repository's build.
 #
 #   tools/consumer.sh [sample] (default: petstore)
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 sample=${1:-petstore}
-version=$(sed -n 's/^ *version = "\(.*\)"/\1/p' "$root/build.gradle.kts" | head -1)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+mvnw() { "$root/mvnw" -B -ntp "$@"; }
 
-"$root/gradlew" -p "$root" publishToMavenLocal -q
+# The libraries and the plugin (their tests run in the repository's own build).
+mvnw -q -f "$root/pom.xml" install -pl openapi-fn-maven-plugin,openapi-fn-spring-webflux,openapi-fn-spring-test -am -DskipTests -Djacoco.skip
+version=$(mvnw -q -f "$root/pom.xml" help:evaluate -Dexpression=project.version -DforceStdout)
 
-(cd "$root/samples/$sample" && tar --exclude ./build --exclude ./.gradle -cf - .) | (cd "$work" && tar -xf -)
-cat > "$work/settings.gradle.kts" <<EOF
-pluginManagement {
-    repositories {
-        mavenLocal()
-        gradlePluginPortal()
-    }
-}
+(cd "$root/samples/$sample" && tar --exclude ./target -cf - .) | (cd "$work" && tar -xf -)
+grep -q "<openapi-fn.version>$version</openapi-fn.version>" "$work/pom.xml"
 
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-}
-
-rootProject.name = "$sample"
-EOF
-perl -0pi -e "s/id\\(\"dev.openapifn\"\\)/id(\"dev.openapifn\") version \"$version\"/; s/repositories \\{\\n    mavenCentral\\(\\)/repositories {\\n    mavenLocal()\\n    mavenCentral()/" "$work/build.gradle.kts"
-grep -q "version \"$version\"" "$work/build.gradle.kts"
-grep -q "mavenLocal()" "$work/build.gradle.kts"
-
-cd "$work"
 # The generator is needed during the build only: the application's classpaths have the validator, not it.
-for classpath in runtimeClasspath testRuntimeClasspath; do
-    ./gradlew dependencies --configuration "$classpath" -q > "$work/$classpath.txt"
-    grep -q "dev.openapifn:openapi-fn-validator" "$work/$classpath.txt"
-    if grep -q "openapi-fn-generator" "$work/$classpath.txt"; then
-        echo "openapi-fn-generator is on the $classpath of $sample" >&2
+for scope in runtime test; do
+    mvnw -q -f "$work/pom.xml" org.apache.maven.plugins:maven-dependency-plugin:3.11.0:list -DincludeScope="$scope" -DoutputFile="$work/$scope.txt"
+    grep -q "dev.openapifn:openapi-fn-validator" "$work/$scope.txt"
+    if grep -q "openapi-fn-generator" "$work/$scope.txt"; then
+        echo "openapi-fn-generator is on the $scope class path of $sample" >&2
         exit 1
     fi
 done
-./gradlew check --console=plain
-tests=$(cat build/test-results/test/*.xml | grep -c "<testcase " || true)
+mvnw -f "$work/pom.xml" verify
+tests=$(cat "$work"/target/surefire-reports/TEST-*.xml | grep -c "<testcase " || true)
 [ "$tests" -gt 0 ]
-echo "$sample builds and passes its $tests tests with openapi-fn $version from the local Maven repository, without the generator on its classpaths"
+echo "$sample builds and passes its $tests tests with openapi-fn $version from the local Maven repository, without the generator on its class paths"

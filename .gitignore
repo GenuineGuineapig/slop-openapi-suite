@@ -1,6 +1,5 @@
-# Gradle and IDE
-.gradle/
-build/
+# Maven and IDE
+target/
 .idea/
 *.iml
 .kotlin/
@@ -12,9 +11,8 @@ out/
 # Log files
 *.log
 
-# Package files (the Gradle wrappers are kept)
+# Package files
 *.jar
-!**/gradle/wrapper/gradle-wrapper.jar
 *.war
 *.nar
 *.ear
